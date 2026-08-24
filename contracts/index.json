@@ -108,7 +108,7 @@
       "contractId": "PV-ENHANCE-VIDEO-TRIM-001",
       "path": "contracts/enhancement-video-trim-v1.json",
       "scope": "Reader-first non-AI exact-frame Video Trim and export protocol",
-      "sha256": "ed9f00f0a96e69e45fef1f3263b6f72773957ab03dd237992ea3ac39d2eeff25"
+      "sha256": "11686813d4b18791d7895f08e272c41ac9567790ad4cc7c41eed17e1d18591c5"
     },
     {
       "contractId": "PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001",
@@ -172,7 +172,7 @@
       "fixtureId": "PV-ENHANCE-VIDEO-TRIM-001-READER-FIXTURES",
       "forContractId": "PV-ENHANCE-VIDEO-TRIM-001",
       "path": "contracts/fixtures/enhancement-video-trim-v1-reader-v1.json",
-      "sha256": "2a69aa73f6abdd809e554a79c9166e2e319badc64a118b3e0a7f0d5d945bcc4a"
+      "sha256": "26fe5dff0ce823656d07db43bf610f8c76e5e0cb5beb9d270b3b893ef9808996"
     }
   ],
   "verificationBundles": [

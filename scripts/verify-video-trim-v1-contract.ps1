@@ -66,6 +66,69 @@ function Get-SequentialPtsSha256 {
     }
 }
 
+function Get-StridedPtsSha256 {
+    param(
+        [Parameter(Mandatory = $true)][int64]$Count,
+        [Parameter(Mandatory = $true)][int64]$Start,
+        [Parameter(Mandatory = $true)][int64]$Step
+    )
+
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [byte[]]::new(8)
+        for ($index = 0L; $index -lt $Count; $index++) {
+            [int64]$pts = $Start + ($index * $Step)
+            [Buffers.Binary.BinaryPrimitives]::WriteInt64BigEndian($bytes, $pts)
+            $null = $sha256.TransformBlock($bytes, 0, 8, $null, 0)
+        }
+        $null = $sha256.TransformFinalBlock([byte[]]::new(0), 0, 0)
+        return ([BitConverter]::ToString($sha256.Hash)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}
+
+function ConvertTo-StableJsonValue {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [pscustomobject]) {
+        [string[]]$names = @($Value.PSObject.Properties.Name)
+        [Array]::Sort($names, [StringComparer]::Ordinal)
+        $ordered = [ordered]@{}
+        foreach ($name in $names) {
+            $ordered[$name] = ConvertTo-StableJsonValue $Value.$name
+        }
+        return [pscustomobject]$ordered
+    }
+    if ($Value -is [Array]) {
+        [object[]]$items = @($Value | ForEach-Object {
+            ConvertTo-StableJsonValue $_
+        })
+        return ,$items
+    }
+    return $Value
+}
+
+function Get-StableJsonSha256 {
+    param([Parameter(Mandatory = $true)][object]$Value)
+
+    $stable = ConvertTo-StableJsonValue $Value
+    $json = $stable | ConvertTo-Json -Depth 100 -Compress
+    $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString(
+            $sha256.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}
+
 $index = Read-ExactJson $indexPath
 $contract = Read-ExactJson $contractPath
 $fixture = Read-ExactJson $fixturePath
@@ -129,6 +192,129 @@ Assert-ExactSet @($contract.request.selection.exactFields) @(
 Assert-ExactSet @($contract.request.audioPolicy.exactValues) @(
     'preserve', 'mute'
 ) 'audio policy values'
+
+$inspection = $contract.sourceInspection
+if ($inspection.revision -cne 'aibos-video-trim-source-inspection-v1' -or
+    $inspection.transport.route -cne
+        '/api/enhance/video-trim/v1/source-inspection' -or
+    $inspection.transport.method -cne 'POST' -or
+    $inspection.transport.maximumRequestBytes -ne 131072 -or
+    $inspection.transport.maximumResponseBytesByAction.probe -ne 131072 -or
+    $inspection.transport.maximumResponseBytesByAction.preview -ne 2113536 -or
+    $inspection.transport.routing -notmatch 'authenticated encrypted' -or
+    $inspection.transport.unknownFields -cne 'reject' -or
+    $inspection.aiSeparation -notmatch 'never accepts') {
+    throw 'Video Trim v1 explicit authenticated inspection transport is incomplete.'
+}
+Assert-ExactSet @($inspection.transport.exactActions) @(
+    'probe', 'preview'
+) 'inspection actions'
+Assert-ExactSet @($inspection.transport.error.exactFields) @(
+    'code', 'message', 'retryable'
+) 'inspection error response fields'
+$expectedInspectionErrors = @{
+    400 = @('VIDEO_TRIM_V1_INSPECTION_INVALID_REQUEST', $false)
+    409 = @('VIDEO_TRIM_V1_INSPECTION_SOURCE_STALE', $false)
+    413 = @('VIDEO_TRIM_V1_INSPECTION_REQUEST_TOO_LARGE', $false)
+    415 = @('VIDEO_TRIM_V1_INSPECTION_SOURCE_UNSUPPORTED', $false)
+    422 = @('VIDEO_TRIM_V1_INSPECTION_SELECTION_INVALID', $false)
+    429 = @('VIDEO_TRIM_V1_INSPECTION_BUSY', $true)
+    500 = @('VIDEO_TRIM_V1_INSPECTION_FAILED', $true)
+    503 = @('VIDEO_TRIM_V1_SOURCE_INSPECTION_NOT_READY', $false)
+    504 = @('VIDEO_TRIM_V1_INSPECTION_TIMEOUT', $true)
+}
+$inspectionErrorMappings = @($inspection.transport.error.exactMappings)
+if ($inspection.transport.error.maximumMessageCharacters -ne 512 -or
+    $inspectionErrorMappings.Count -ne $expectedInspectionErrors.Count) {
+    throw 'Video Trim inspection error bounds or exact mapping count changed.'
+}
+foreach ($mapping in $inspectionErrorMappings) {
+    Assert-ExactPropertySet $mapping @('status', 'code', 'retryable') `
+        "inspection error mapping $($mapping.status)"
+    if (-not $expectedInspectionErrors.Contains([int]$mapping.status)) {
+        throw "Unexpected Video Trim inspection error status: $($mapping.status)"
+    }
+    $expectedError = $expectedInspectionErrors[[int]$mapping.status]
+    if ($mapping.code -cne $expectedError[0] -or
+        $mapping.retryable -ne $expectedError[1]) {
+        throw "Video Trim inspection error mapping $($mapping.status) drifted."
+    }
+}
+Assert-ExactSet @($inspection.probe.exactRequestFields) @(
+    'action', 'source'
+) 'inspection probe request fields'
+Assert-ExactSet @($inspection.probe.exactResponseFields) @(
+    'action', 'protocol', 'inspectionRevision', 'source'
+) 'inspection probe response fields'
+Assert-ExactSet @($inspection.sourceSummary.exactFields) @(
+    'container', 'videoCodec', 'pixelFormat', 'bitDepth', 'dynamicRange',
+    'width', 'height', 'frameCount', 'fpsNumerator', 'fpsDenominator',
+    'durationMs', 'durationNumerator', 'durationDenominator',
+    'videoStreamCount', 'audioStreamCount', 'extraStreamCount',
+    'videoTimeBaseNumerator', 'videoTimeBaseDenominator',
+    'videoStartTimestamp', 'videoPtsSha256', 'probeDigest',
+    'sourceIdentityDigest'
+) 'inspection source summary fields'
+Assert-ExactSet @($inspection.preview.exactRequestFields) @(
+    'action', 'source', 'sourceIdentityDigest', 'selection', 'frames'
+) 'inspection preview request fields'
+Assert-ExactSet @($inspection.preview.exactResponseFields) @(
+    'action', 'protocol', 'inspectionRevision', 'sourceIdentityDigest',
+    'selection', 'previews'
+) 'inspection preview response fields'
+Assert-ExactSet @($inspection.preview.selectionFields) @(
+    'startFrame', 'endFrameExclusive'
+) 'inspection preview selection fields'
+Assert-ExactSet @($inspection.preview.frames.orderedMeaning) @(
+    'startFrame', 'middleFrame', 'endFrame'
+) 'inspection ordered frame meanings'
+Assert-ExactSet @($inspection.preview.exactPreviewFields) @(
+    'role', 'sourceFrame', 'sourcePts', 'decodedPixelSha256',
+    'decoderRevision', 'mime', 'width', 'height', 'encodedBytes',
+    'encodedSha256', 'base64'
+) 'inspection preview payload fields'
+Assert-ExactSet @($inspection.preview.thumbnail.orderedRoles) @(
+    'start', 'middle', 'end'
+) 'inspection preview roles'
+if ($inspection.preview.frames.exactCount -ne 3 -or
+    $inspection.preview.frames.rule -notmatch 'strictly increasing' -or
+    $inspection.preview.frames.rule -notmatch 'at least three' -or
+    $inspection.preview.thumbnail.exactCount -ne 3 -or
+    $inspection.preview.thumbnail.mime -cne 'image/png' -or
+    $inspection.preview.thumbnail.maximumEdge -ne 384 -or
+    $inspection.preview.thumbnail.maximumPixels -ne 147456 -or
+    $inspection.preview.thumbnail.maximumEncodedBytesEach -ne 524288 -or
+    $inspection.preview.thumbnail.maximumEncodedBytesTotal -ne 1572864 -or
+    $inspection.preview.thumbnail.authority -notmatch 'never replace') {
+    throw 'Video Trim v1 selected start/middle/end preview bounds changed.'
+}
+
+$inspectionEffectNames = @(
+    'createsJobs', 'publishesDurableInbox', 'mutatesInbox', 'stagesSource',
+    'mutatesJobs', 'wakesQueue', 'claimsJobs', 'startsWorker',
+    'acquiresCpuJobLane', 'acquiresGpuLease', 'mountsModels',
+    'createsOutput', 'persistsPreviews'
+)
+Assert-ExactPropertySet $inspection.effects $inspectionEffectNames `
+    'inspection effect fields'
+foreach ($property in $inspection.effects.PSObject.Properties) {
+    if ($property.Value -ne $false) {
+        throw "Video Trim inspection durable effect became enabled: $($property.Name)"
+    }
+}
+if ($inspection.process.maximumConcurrentInspections -ne 1 -or
+    $inspection.process.maximumArgvEntries -ne 64 -or
+    $inspection.process.maximumArgvEntryBytes -ne 4096 -or
+    $inspection.process.maximumArgvBytes -ne 24576 -or
+    $inspection.process.maximumCapturedStdoutBytes -ne 8388608 -or
+    $inspection.process.maximumCapturedStderrBytes -ne 1048576 -or
+    $inspection.process.processTimeoutMs -ne 30000 -or
+    $inspection.availability.currentProductionEnabled -ne $false -or
+    $inspection.availability.currentResult.status -ne 503 -or
+    $inspection.availability.currentResult.code -cne
+        'VIDEO_TRIM_V1_SOURCE_INSPECTION_NOT_READY') {
+    throw 'Video Trim inspection resource or current disabled gate changed.'
+}
 Assert-ExactSet @($contract.request.clientForbiddenFields) @(
     'prompt',
     'instructionJa',
@@ -246,6 +432,7 @@ if ($current.readerReady -ne $true -or
     $current.ready -ne $false -or
     $current.state -cne 'disabled' -or
     $contract.productionGate.productionWriterEnabled -ne $false -or
+    $contract.productionGate.sourceInspectionEnabled -ne $false -or
     $contract.productionGate.readyVariantAdvertised -ne $false -or
     $contract.productionGate.liveReceiptsPresent -ne $false -or
     $contract.productionGate.qualityAsserted -ne $false) {
@@ -322,6 +509,166 @@ if ($fixture.futureReadyShape.receiptResolutionSucceeded -ne $false -or
     throw 'Synthetic future ready shape must not assert production activation.'
 }
 
+$inspectionFixture = $fixture.sourceInspectionVectors
+if ($inspectionFixture.currentProduction.enabled -ne $false -or
+    $inspectionFixture.currentProduction.status -ne 503 -or
+    $inspectionFixture.currentProduction.code -cne
+        'VIDEO_TRIM_V1_SOURCE_INSPECTION_NOT_READY' -or
+    $inspectionFixture.currentProduction.expectedMutationRequests -ne 0) {
+    throw 'The current source-inspection fixture opened production behavior.'
+}
+$probe = $inspectionFixture.probe
+Assert-ExactPropertySet $probe.request @('action', 'source') `
+    'inspection probe fixture request'
+Assert-ExactPropertySet $probe.response @(
+    'action', 'protocol', 'inspectionRevision', 'source'
+) 'inspection probe fixture response'
+Assert-ExactPropertySet $probe.response.source `
+    @($inspection.sourceSummary.exactFields) `
+    'inspection probe fixture source summary'
+if ($probe.route -cne $inspection.transport.route -or
+    $probe.method -cne 'POST' -or
+    $probe.maximumRequestBytes -ne 131072 -or
+    $probe.maximumResponseBytes -ne 131072 -or
+    $probe.request.action -cne 'probe' -or
+    $probe.response.action -cne 'probe' -or
+    $probe.response.protocol -cne $contract.protocol -or
+    $probe.response.inspectionRevision -cne $inspection.revision) {
+    throw 'The exact source-inspection probe vector drifted from transport.'
+}
+$probeSource = $probe.response.source
+$expectedSourcePtsSha256 = Get-StridedPtsSha256 240 0 1000
+if ($probeSource.frameCount -ne 240 -or
+    $probeSource.fpsNumerator -ne 24 -or
+    $probeSource.fpsDenominator -ne 1 -or
+    $probeSource.durationNumerator -ne 10 -or
+    $probeSource.durationDenominator -ne 1 -or
+    $probeSource.durationMs -ne 10000 -or
+    $probeSource.width -ne 1280 -or
+    $probeSource.height -ne 720 -or
+    $probeSource.videoTimeBaseNumerator -ne 1 -or
+    $probeSource.videoTimeBaseDenominator -ne 24000 -or
+    $probeSource.videoStartTimestamp -ne 0 -or
+    $probeSource.videoPtsSha256 -cne $expectedSourcePtsSha256 -or
+    ([int64]$probeSource.durationNumerator *
+        [int64]$probeSource.fpsNumerator) -ne
+        ([int64]$probeSource.frameCount *
+            [int64]$probeSource.fpsDenominator *
+            [int64]$probeSource.durationDenominator)) {
+    throw 'The probe fixture no longer proves exact frames, rational timeline, dimensions, or PTS digest.'
+}
+Assert-ExactPropertySet $probe.expectedEffects $inspectionEffectNames `
+    'inspection probe effect fixture'
+if (($probe.expectedEffects | ConvertTo-Json -Compress) -cne
+    ($inspection.effects | ConvertTo-Json -Compress)) {
+    throw 'Inspection probe effects drifted from the zero-durable-effect contract.'
+}
+
+$preview = $inspectionFixture.preview
+Assert-ExactPropertySet $preview.request @(
+    'action', 'source', 'sourceIdentityDigest', 'selection', 'frames'
+) 'inspection preview fixture request'
+Assert-ExactPropertySet $preview.response @(
+    'action', 'protocol', 'inspectionRevision', 'sourceIdentityDigest',
+    'selection', 'previews'
+) 'inspection preview fixture response'
+if ($preview.route -cne $inspection.transport.route -or
+    $preview.method -cne 'POST' -or
+    $preview.maximumRequestBytes -ne 131072 -or
+    $preview.maximumResponseBytes -ne 2113536 -or
+    $preview.request.action -cne 'preview' -or
+    $preview.response.action -cne 'preview' -or
+    $preview.response.protocol -cne $contract.protocol -or
+    $preview.response.inspectionRevision -cne $inspection.revision -or
+    $preview.request.sourceIdentityDigest -cne
+        $probeSource.sourceIdentityDigest -or
+    $preview.response.sourceIdentityDigest -cne
+        $probeSource.sourceIdentityDigest) {
+    throw 'The exact selected-frame preview transport or source binding drifted.'
+}
+$previewStart = [int64]$preview.request.selection.startFrame
+$previewEndExclusive = [int64]$preview.request.selection.endFrameExclusive
+$previewMiddle = [Math]::Floor(
+    ($previewStart + $previewEndExclusive - 1) / 2)
+[int64[]]$expectedPreviewFrames = @(
+    $previewStart,
+    [int64]$previewMiddle,
+    ($previewEndExclusive - 1)
+)
+[int64[]]$actualPreviewFrames = @($preview.request.frames)
+if ($previewEndExclusive - $previewStart -lt 3 -or
+    ($actualPreviewFrames -join ',') -cne
+        ($expectedPreviewFrames -join ',') -or
+    $actualPreviewFrames[0] -ge $actualPreviewFrames[1] -or
+    $actualPreviewFrames[1] -ge $actualPreviewFrames[2] -or
+    ($preview.response.selection | ConvertTo-Json -Compress) -cne
+        ($preview.request.selection | ConvertTo-Json -Compress)) {
+    throw 'Preview frames are not three distinct selection-derived in-range frames.'
+}
+$previewPayloads = @($preview.response.previews)
+if ($previewPayloads.Count -ne 3) {
+    throw 'The inspection preview response must contain exactly three payloads.'
+}
+for ($index = 0; $index -lt 3; $index++) {
+    $payload = $previewPayloads[$index]
+    Assert-ExactPropertySet $payload @($inspection.preview.exactPreviewFields) `
+        "inspection preview payload $index"
+    [byte[]]$pngBytes = [Convert]::FromBase64String($payload.base64)
+    $pngSha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $encodedSha256 = ([BitConverter]::ToString(
+            $pngSha256.ComputeHash($pngBytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $pngSha256.Dispose()
+    }
+    if ($payload.role -cne @('start', 'middle', 'end')[$index] -or
+        $payload.sourceFrame -ne $expectedPreviewFrames[$index] -or
+        $payload.mime -cne 'image/png' -or
+        $payload.width -lt 1 -or $payload.width -gt 384 -or
+        $payload.height -lt 1 -or $payload.height -gt 384 -or
+        ([int64]$payload.width * [int64]$payload.height) -gt 147456 -or
+        $payload.encodedBytes -ne $pngBytes.Length -or
+        $payload.encodedBytes -gt 524288 -or
+        $payload.encodedSha256 -cne $encodedSha256) {
+        throw "Inspection preview payload $index is malformed or over-bound."
+    }
+}
+Assert-ExactPropertySet $preview.expectedEffects $inspectionEffectNames `
+    'inspection preview effect fixture'
+if (($preview.expectedEffects | ConvertTo-Json -Compress) -cne
+    ($inspection.effects | ConvertTo-Json -Compress) -or
+    $preview.expectedThumbnailAuthority -ne $false -or
+    $inspectionFixture.shortSelection.expectedPreviewAccepted -ne $false -or
+    $inspectionFixture.shortSelection.expectedTrimSelectionAccepted -ne $true -or
+    $inspectionFixture.shortSelection.expectedMutationRequests -ne 0) {
+    throw 'Preview effects, thumbnail authority, or short-selection separation changed.'
+}
+$inspectionErrorVectors = @($inspectionFixture.errorVectors)
+if ($inspectionErrorVectors.Count -ne $expectedInspectionErrors.Count) {
+    throw 'The source-inspection error fixture count changed.'
+}
+foreach ($vector in $inspectionErrorVectors) {
+    Assert-ExactPropertySet $vector @('status', 'response') `
+        "inspection error vector $($vector.status)"
+    Assert-ExactPropertySet $vector.response `
+        @($inspection.transport.error.exactFields) `
+        "inspection error response $($vector.status)"
+    if (-not $expectedInspectionErrors.Contains([int]$vector.status)) {
+        throw "Unexpected source-inspection error fixture: $($vector.status)"
+    }
+    $expectedError = $expectedInspectionErrors[[int]$vector.status]
+    if ($vector.response.code -cne $expectedError[0] -or
+        $vector.response.retryable -ne $expectedError[1] -or
+        [string]::IsNullOrWhiteSpace([string]$vector.response.message) -or
+        ([string]$vector.response.message).Length -gt 512 -or
+        ([string]$vector.response.message).Contains('${') -or
+        ([string]$vector.response.message).Contains('\') -or
+        ([string]$vector.response.message).Contains('/')) {
+        throw "Source-inspection error response $($vector.status) is unbounded or leaks a path."
+    }
+}
+
 $long = $fixture.longSelectionVector
 Assert-ExactPropertySet $long.request @('operation', 'mediaKind', 'videoTrim') 'long vector envelope fields'
 Assert-ExactPropertySet $long.request.videoTrim @(
@@ -353,11 +700,258 @@ if ($long.sourceProbe.frameCount -ne 18000 -or
     throw 'The synthetic long-selection vector no longer proves a bounded >15 second exact-frame trim.'
 }
 
+$durableReader = $contract.durableReader
+Assert-ExactSet @($durableReader.jobEnvelope.commonRequiredFields) @(
+    'id', 'operation', 'mediaKind', 'sourceId',
+    'presetId', 'adapterId', 'presetHash', 'status', 'progress',
+    'cancelRequested', 'createdAt', 'updatedAt', 'videoTrim'
+) 'durable trim common Job required fields'
+Assert-ExactSet @($durableReader.jobEnvelope.managedAdditionalFields) @(
+    'sourceVideoJobId'
+) 'durable trim managed Job additional fields'
+Assert-ExactSet @($durableReader.jobEnvelope.statusValues) @(
+    'queued', 'running', 'succeeded', 'failed', 'canceled'
+) 'durable trim Job statuses'
+Assert-ExactSet @($durableReader.snapshot.exactFields) @(
+    'schemaVersion', 'protocol', 'presetId', 'adapterId',
+    'receiptSetSha256', 'source', 'requested', 'plan', 'delivery'
+) 'durable trim snapshot fields'
+Assert-ExactSet @($durableReader.snapshot.managedSourceExactFields) @(
+    'kind', 'producerJobId', 'canonicalPath', 'signature', 'sha256',
+    'probe', 'probeDigest', 'sourceIdentityDigest', 'dependencyDigest'
+) 'durable trim managed source fields'
+Assert-ExactSet @($durableReader.snapshot.stagedSourceExactFields) @(
+    'kind', 'originalCanonicalPath', 'originalSignature', 'originalSha256',
+    'stagingCanonicalPath', 'stagingSignature', 'stagingSha256', 'probe',
+    'probeDigest', 'sourceIdentityDigest', 'stagingOwnershipDigest'
+) 'durable trim staged source fields'
+Assert-ExactSet @($durableReader.snapshot.probeExactFields) @(
+    'container', 'videoCodec', 'pixelFormat', 'bitDepth', 'dynamicRange',
+    'width', 'height', 'frameCount', 'fpsNumerator', 'fpsDenominator',
+    'durationMs', 'durationNumerator', 'durationDenominator',
+    'videoStreamCount', 'audioStreamCount', 'extraStreamCount',
+    'videoTimeBaseNumerator', 'videoTimeBaseDenominator',
+    'videoStartTimestamp', 'videoPtsSha256'
+) 'durable trim source probe fields'
+Assert-ExactSet @($durableReader.snapshot.requestedExactFields) @(
+    'schemaVersion', 'source', 'selection', 'audioPolicy'
+) 'durable trim requested fields'
+if ($durableReader.snapshot.requestNormalization.'displayed-file' -notmatch
+        'do not retain the raw untrusted request path' -or
+    $durableReader.snapshot.requestNormalization.authority -notmatch
+        'server-owned canonical') {
+    throw 'Durable displayed-file request normalization or source authority changed.'
+}
+Assert-ExactSet @($durableReader.snapshot.planExactFields) @(
+    'revision', 'selection', 'startPts', 'endPtsExclusive',
+    'selectedFrameCount', 'durationNumerator', 'durationDenominator',
+    'audioPlan'
+) 'durable trim plan fields'
+Assert-ExactSet @($durableReader.delivery.exactFields) @(
+    'revision', 'container', 'videoCodec', 'pixelFormat', 'bitDepth',
+    'dynamicRange', 'width', 'height', 'frameCount', 'fpsNumerator',
+    'fpsDenominator', 'timeBaseNumerator', 'timeBaseDenominator',
+    'durationNumerator', 'durationDenominator', 'firstRelativePts',
+    'lastRelativePts', 'videoPtsSha256', 'audio'
+) 'durable trim delivery fields'
+
+$durableFixture = $fixture.durableJobVectors
+$durableJobs = @($durableFixture.jobs)
+if ($durableJobs.Count -ne 5 -or
+    $durableFixture.expectedCurrentWriterEnabled -ne $false -or
+    $durableFixture.expectedReady -ne $false -or
+    $durableFixture.expectedMutationRequestsDuringRead -ne 0) {
+    throw 'Durable Video Trim Job fixtures must cover five states without activation.'
+}
+Assert-ExactSet @($durableJobs.status) @(
+    'queued', 'running', 'succeeded', 'failed', 'canceled'
+) 'durable trim fixture statuses'
+
+$baselineSnapshotJson = $null
+$expectedOutputPtsSha256 = Get-SequentialPtsSha256 48
+foreach ($job in $durableJobs) {
+    $status = [string]$job.status
+    $expectedJobFields = @($durableReader.jobEnvelope.commonRequiredFields) +
+        @($durableReader.jobEnvelope.managedAdditionalFields) +
+        @($durableReader.jobEnvelope.stateFields.$status)
+    Assert-ExactPropertySet $job $expectedJobFields `
+        "durable trim $status Job fields"
+    $createdAt = [DateTimeOffset]::MinValue
+    $updatedAt = [DateTimeOffset]::MinValue
+    if ($job.operation -cne 'video' -or
+        $job.mediaKind -cne 'video' -or
+        $job.presetId -cne 'aibos-video-trim-v1' -or
+        $job.adapterId -cne 'ffmpeg-video-trim-v1' -or
+        $job.sourceVideoJobId -cne
+            '11111111-2222-4333-8444-555555555555' -or
+        $job.progress -lt 0 -or $job.progress -gt 100 -or
+        -not [DateTimeOffset]::TryParse(
+            [string]$job.createdAt,
+            [ref]$createdAt) -or
+        -not [DateTimeOffset]::TryParse(
+            [string]$job.updatedAt,
+            [ref]$updatedAt) -or
+        $updatedAt -lt $createdAt) {
+        throw "Durable trim $status Job envelope is malformed."
+    }
+
+    $snapshot = $job.videoTrim
+    Assert-ExactPropertySet $snapshot @($durableReader.snapshot.exactFields) `
+        "durable trim $status snapshot fields"
+    Assert-ExactPropertySet $snapshot.source `
+        @($durableReader.snapshot.managedSourceExactFields) `
+        "durable trim $status source fields"
+    Assert-ExactPropertySet $snapshot.source.signature `
+        @($durableReader.snapshot.signatureExactFields) `
+        "durable trim $status source signature"
+    Assert-ExactPropertySet $snapshot.source.probe `
+        @($durableReader.snapshot.probeExactFields) `
+        "durable trim $status source probe"
+    Assert-ExactPropertySet $snapshot.requested `
+        @($durableReader.snapshot.requestedExactFields) `
+        "durable trim $status requested fields"
+    Assert-ExactPropertySet $snapshot.requested.selection @(
+        'startFrame', 'endFrameExclusive'
+    ) "durable trim $status requested selection"
+    Assert-ExactPropertySet $snapshot.plan `
+        @($durableReader.snapshot.planExactFields) `
+        "durable trim $status plan fields"
+    Assert-ExactPropertySet $snapshot.plan.selection @(
+        'startFrame', 'endFrameExclusive'
+    ) "durable trim $status plan selection"
+    Assert-ExactPropertySet $snapshot.delivery `
+        @($durableReader.delivery.exactFields) `
+        "durable trim $status delivery fields"
+    Assert-ExactPropertySet $snapshot.plan.audioPlan `
+        @($durableReader.snapshot.planAudioVariants.preserve.exactFields) `
+        "durable trim $status audio plan"
+    Assert-ExactPropertySet $snapshot.delivery.audio `
+        @($durableReader.delivery.audioVariants.preserve.exactFields) `
+        "durable trim $status audio delivery"
+
+    $stableSnapshotSha256 = Get-StableJsonSha256 $snapshot
+    if ($job.presetHash -cne $stableSnapshotSha256.Substring(0, 12)) {
+        throw "Durable trim $status presetHash does not bind the exact snapshot."
+    }
+    $snapshotJson = $snapshot | ConvertTo-Json -Depth 100 -Compress
+    if ($null -eq $baselineSnapshotJson) {
+        $baselineSnapshotJson = $snapshotJson
+    }
+    elseif ($snapshotJson -cne $baselineSnapshotJson) {
+        throw 'The immutable durable trim snapshot changed across Job states.'
+    }
+
+    $jobProbe = $snapshot.source.probe
+    $requestSelection = $snapshot.requested.selection
+    $plan = $snapshot.plan
+    $delivery = $snapshot.delivery
+    if ($snapshot.schemaVersion -ne 1 -or
+        $snapshot.protocol -cne $contract.protocol -or
+        $snapshot.presetId -cne $job.presetId -or
+        $snapshot.adapterId -cne $job.adapterId -or
+        $snapshot.source.kind -cne 'managed-video-job' -or
+        $snapshot.source.producerJobId -cne $job.sourceVideoJobId -or
+        $jobProbe.videoPtsSha256 -cne $expectedSourcePtsSha256 -or
+        $snapshot.requested.schemaVersion -ne 1 -or
+        $snapshot.requested.source.sourceVideoJobId -cne
+            $job.sourceVideoJobId -or
+        $snapshot.requested.audioPolicy -cne 'preserve' -or
+        $requestSelection.startFrame -ne 24 -or
+        $requestSelection.endFrameExclusive -ne 72 -or
+        ($plan.selection | ConvertTo-Json -Compress) -cne
+            ($requestSelection | ConvertTo-Json -Compress) -or
+        $plan.revision -cne 'aibos-video-trim-plan-v1' -or
+        $plan.startPts -ne 24000 -or
+        $plan.endPtsExclusive -ne 72000 -or
+        $plan.selectedFrameCount -ne 48 -or
+        $plan.durationNumerator -ne 2 -or
+        $plan.durationDenominator -ne 1 -or
+        $delivery.revision -cne 'aibos-video-trim-delivery-v1' -or
+        $delivery.frameCount -ne $plan.selectedFrameCount -or
+        $delivery.fpsNumerator -ne 24 -or
+        $delivery.fpsDenominator -ne 1 -or
+        $delivery.timeBaseNumerator -ne 1 -or
+        $delivery.timeBaseDenominator -ne 24 -or
+        $delivery.firstRelativePts -ne 0 -or
+        $delivery.lastRelativePts -ne 47 -or
+        $delivery.videoPtsSha256 -cne $expectedOutputPtsSha256 -or
+        $delivery.audio.kind -cne 'aac-selected-interval' -or
+        $delivery.audio.policy -cne 'preserve' -or
+        $delivery.audio.audioStreamCount -ne 1 -or
+        $delivery.audio.codec -cne 'aac' -or
+        $delivery.audio.packetBitIdentityClaimed -ne $false -or
+        $delivery.audio.sampleExactClaimed -ne $false) {
+        throw "Durable trim $status snapshot, plan, or delivery drifted."
+    }
+
+    switch ($status) {
+        'queued' {
+            if ($job.progress -ne 0 -or $job.cancelRequested -ne $false -or
+                $job.queueOrder -ne 0) {
+                throw 'Queued trim Job state fields are not exact.'
+            }
+        }
+        'running' {
+            if ($job.progress -lt 1 -or $job.progress -gt 99 -or
+                $job.cancelRequested -ne $false) {
+                throw 'Running trim Job state fields are not exact.'
+            }
+        }
+        'succeeded' {
+            if ($job.progress -ne 100 -or $job.cancelRequested -ne $false -or
+                -not ([string]$job.outputPath).EndsWith('.mp4', [StringComparison]::OrdinalIgnoreCase) -or
+                $job.outputSha256 -notmatch '^[0-9a-f]{64}$' -or
+                $job.outputBytes -lt 1 -or $job.outputBytes -gt 536870912) {
+                throw 'Succeeded trim Job output identity is not exact.'
+            }
+        }
+        'failed' {
+            if ($job.cancelRequested -ne $false -or
+                [string]::IsNullOrWhiteSpace([string]$job.errorCode) -or
+                [string]::IsNullOrWhiteSpace([string]$job.errorMessage)) {
+                throw 'Failed trim Job error identity is not exact.'
+            }
+        }
+        'canceled' {
+            if ($job.cancelRequested -ne $true) {
+                throw 'Canceled trim Job must retain cancelRequested.'
+            }
+        }
+    }
+}
+
+$audioVectors = $durableFixture.audioPolicyVectors
+Assert-ExactPropertySet $audioVectors.preserve.plan `
+    @($durableReader.snapshot.planAudioVariants.preserve.exactFields) `
+    'preserve audio plan vector'
+Assert-ExactPropertySet $audioVectors.preserve.delivery `
+    @($durableReader.delivery.audioVariants.preserve.exactFields) `
+    'preserve audio delivery vector'
+Assert-ExactPropertySet $audioVectors.mute.plan `
+    @($durableReader.snapshot.planAudioVariants.mute.exactFields) `
+    'mute audio plan vector'
+Assert-ExactPropertySet $audioVectors.mute.delivery `
+    @($durableReader.delivery.audioVariants.mute.exactFields) `
+    'mute audio delivery vector'
+if ($audioVectors.preserve.requestedValue -cne 'preserve' -or
+    $audioVectors.preserve.delivery.packetBitIdentityClaimed -ne $false -or
+    $audioVectors.preserve.delivery.sampleExactClaimed -ne $false -or
+    $audioVectors.mute.requestedValue -cne 'mute' -or
+    $audioVectors.mute.delivery.audioStreamCount -ne 0) {
+    throw 'Preserve or mute durable audio fixtures drifted.'
+}
+
 if ($fixture.negativeVectors.videoToolsV2KindTrim.expectedAccepted -ne $false -or
     $fixture.negativeVectors.videoToolsV2KindTrim.expectedWriterAction -cne 'reject' -or
     $fixture.negativeVectors.malformedSelection.expectedWriterAction -cne 'reject' -or
     $fixture.negativeVectors.futureSchema.expectedMode -cne 'reader-only' -or
-    $fixture.negativeVectors.forbiddenAiFields.expectedWriterAction -cne 'reject') {
+    $fixture.negativeVectors.forbiddenAiFields.expectedWriterAction -cne 'reject' -or
+    $fixture.negativeVectors.malformedDurableJob.expectedMode -cne 'reader-only' -or
+    $fixture.negativeVectors.malformedDurableJob.expectedPreserveUnknownFields -ne $true -or
+    $fixture.negativeVectors.malformedDurableJob.expectedMutationRequests -ne 0 -or
+    $fixture.negativeVectors.futureDurableJob.expectedMode -cne 'reader-only' -or
+    $fixture.negativeVectors.futureDurableJob.expectedPreserveUnknownFields -ne $true -or
+    $fixture.negativeVectors.futureDurableJob.expectedMutationRequests -ne 0) {
     throw 'Video Trim v1 negative reader/writer vectors changed.'
 }
 
@@ -370,5 +964,9 @@ if ($fixture.negativeVectors.videoToolsV2KindTrim.expectedAccepted -ne $false -o
     selectedDurationMs = $long.expectedDelivery.selectedDurationMs
     currentWriterEnabled = $current.writerEnabled
     currentReady = $current.ready
+    sourceInspectionEnabled =
+        $contract.productionGate.sourceInspectionEnabled
+    inspectionActions = @($inspection.transport.exactActions).Count
+    durableJobStates = $durableJobs.Count
     passiveMutationRequests = $fixture.currentHealth.expectedPassiveMutationRequests
 } | ConvertTo-Json -Depth 5

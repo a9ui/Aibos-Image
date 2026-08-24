@@ -86,6 +86,229 @@
     ],
     "forbiddenRule": "Any AI instruction, prompt compiler, style, sampling, seed, backend, model, GPU, enhancement-strength, or diffusion field makes a version 1 request invalid. Unknown request fields are never ignored by a writer."
   },
+  "sourceInspection": {
+    "revision": "aibos-video-trim-source-inspection-v1",
+    "action": "One explicit authenticated transient Video Trim source action. Opening the trim board, selecting a file, seeking, changing a selection, reading health or Jobs, and hydration never dispatch it.",
+    "transport": {
+      "route": "/api/enhance/video-trim/v1/source-inspection",
+      "method": "POST",
+      "exactActions": [
+        "probe",
+        "preview"
+      ],
+      "maximumRequestBytes": 131072,
+      "maximumResponseBytesByAction": {
+        "probe": 131072,
+        "preview": 2113536
+      },
+      "routing": "The exact inner POST route is accepted only through the authenticated encrypted Companion tunnel. Unknown paths fail 404, unsupported methods fail 405 with Allow: POST, direct unauthenticated API access is rejected, and every request and response remains bound to the proven Companion epoch.",
+      "unknownFields": "reject",
+      "error": {
+        "exactFields": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "maximumMessageCharacters": 512,
+        "exactMappings": [
+          {
+            "status": 400,
+            "code": "VIDEO_TRIM_V1_INSPECTION_INVALID_REQUEST",
+            "retryable": false
+          },
+          {
+            "status": 409,
+            "code": "VIDEO_TRIM_V1_INSPECTION_SOURCE_STALE",
+            "retryable": false
+          },
+          {
+            "status": 413,
+            "code": "VIDEO_TRIM_V1_INSPECTION_REQUEST_TOO_LARGE",
+            "retryable": false
+          },
+          {
+            "status": 415,
+            "code": "VIDEO_TRIM_V1_INSPECTION_SOURCE_UNSUPPORTED",
+            "retryable": false
+          },
+          {
+            "status": 422,
+            "code": "VIDEO_TRIM_V1_INSPECTION_SELECTION_INVALID",
+            "retryable": false
+          },
+          {
+            "status": 429,
+            "code": "VIDEO_TRIM_V1_INSPECTION_BUSY",
+            "retryable": true
+          },
+          {
+            "status": 500,
+            "code": "VIDEO_TRIM_V1_INSPECTION_FAILED",
+            "retryable": true
+          },
+          {
+            "status": 503,
+            "code": "VIDEO_TRIM_V1_SOURCE_INSPECTION_NOT_READY",
+            "retryable": false
+          },
+          {
+            "status": 504,
+            "code": "VIDEO_TRIM_V1_INSPECTION_TIMEOUT",
+            "retryable": true
+          }
+        ],
+        "rule": "Errors contain one bounded generic message and never echo a path, selector, hash, process argument, stderr, preview bytes, receipt, or durable state. Unsupported actions, unknown fields, and malformed values use INVALID_REQUEST. SOURCE_STALE requires a new explicit probe rather than blind retry."
+      }
+    },
+    "probe": {
+      "exactRequestFields": [
+        "action",
+        "source"
+      ],
+      "exactResponseFields": [
+        "action",
+        "protocol",
+        "inspectionRevision",
+        "source"
+      ],
+      "request": "action is probe and source is one exact request.sourceSelector variant. The server reopens and revalidates that selector under one bounded no-delete/read lease; a client path or prior probe is never authority.",
+      "response": "One transient exact source summary. It is not a Job snapshot, inbox item, stage, retry authority, delivery receipt, or readiness receipt."
+    },
+    "sourceSummary": {
+      "exactFields": [
+        "container",
+        "videoCodec",
+        "pixelFormat",
+        "bitDepth",
+        "dynamicRange",
+        "width",
+        "height",
+        "frameCount",
+        "fpsNumerator",
+        "fpsDenominator",
+        "durationMs",
+        "durationNumerator",
+        "durationDenominator",
+        "videoStreamCount",
+        "audioStreamCount",
+        "extraStreamCount",
+        "videoTimeBaseNumerator",
+        "videoTimeBaseDenominator",
+        "videoStartTimestamp",
+        "videoPtsSha256",
+        "probeDigest",
+        "sourceIdentityDigest"
+      ],
+      "rationalRule": "fps, duration, and video time base are finite checked reduced positive rationals. Exact duration is durationNumerator/durationDenominator seconds and equals frameCount * fpsDenominator / fpsNumerator; durationMs is a bounded rounded display value only and never frame-selection or execution authority.",
+      "timestampRule": "videoStartTimestamp is the exact finite signed-64-bit first video presentation timestamp in the persisted rational video time base. It is not assumed to be zero.",
+      "ptsDigestAlgorithm": "SHA-256 over the complete ordered source decoded-frame signed int64 big-endian PTS sequence",
+      "binding": "probeDigest binds the exact normalized bounded probe. sourceIdentityDigest binds the canonical source identity, opened-byte SHA-256, and probeDigest. Both are 64 lowercase hexadecimal characters and a later preview or Start must revalidate the same source identity."
+    },
+    "preview": {
+      "exactRequestFields": [
+        "action",
+        "source",
+        "sourceIdentityDigest",
+        "selection",
+        "frames"
+      ],
+      "exactResponseFields": [
+        "action",
+        "protocol",
+        "inspectionRevision",
+        "sourceIdentityDigest",
+        "selection",
+        "previews"
+      ],
+      "selectionFields": [
+        "startFrame",
+        "endFrameExclusive"
+      ],
+      "frames": {
+        "exactCount": 3,
+        "orderedMeaning": [
+          "startFrame",
+          "middleFrame",
+          "endFrame"
+        ],
+        "formulas": {
+          "startFrame": "selection.startFrame",
+          "middleFrame": "floor((selection.startFrame + selection.endFrameExclusive - 1) / 2)",
+          "endFrame": "selection.endFrameExclusive - 1"
+        },
+        "rule": "The three JSON integers must exactly equal the server-derived formulas, be strictly increasing, and lie inside both the half-open selection and the probed source. Preview therefore requires at least three selected frames; one- or two-frame trims remain valid durable selections but do not dispatch this three-frame preview action."
+      },
+      "exactPreviewFields": [
+        "role",
+        "sourceFrame",
+        "sourcePts",
+        "decodedPixelSha256",
+        "decoderRevision",
+        "mime",
+        "width",
+        "height",
+        "encodedBytes",
+        "encodedSha256",
+        "base64"
+      ],
+      "thumbnail": {
+        "mime": "image/png",
+        "exactCount": 3,
+        "orderedRoles": [
+          "start",
+          "middle",
+          "end"
+        ],
+        "maximumEdge": 384,
+        "maximumPixels": 147456,
+        "maximumEncodedBytesEach": 524288,
+        "maximumEncodedBytesTotal": 1572864,
+        "base64": "canonical RFC 4648 base64 only, with no data-URL prefix",
+        "identity": "sourceFrame equals the corresponding requested and server-derived frame. sourcePts is its exact signed-64-bit presentation timestamp encoded as a canonical decimal string. decodedPixelSha256 identifies the full-resolution source RGB24 bytes before thumbnail scaling; encodedSha256 identifies the exact returned PNG bytes.",
+        "authority": "Preview pixels and thumbnails are transient presentation evidence only. They never replace the exact source identity, persisted half-open frame selection, source PTS digest, Job snapshot, or delivery validator."
+      },
+      "staleRule": "A source selector, sourceIdentityDigest, probe revision, selection, requested frame, or decoder revision change clears the prior preview. A stale response is discarded and never authorizes Start."
+    },
+    "process": {
+      "sealedExecutables": [
+        "ffprobe",
+        "ffmpeg"
+      ],
+      "maximumConcurrentInspections": 1,
+      "maximumArgvEntries": 64,
+      "maximumArgvEntryBytes": 4096,
+      "maximumArgvBytes": 24576,
+      "maximumCapturedStdoutBytes": 8388608,
+      "maximumCapturedStderrBytes": 1048576,
+      "processTimeoutMs": 30000,
+      "rule": "Resolve only the separately sealed Video Trim inspection runtime and use direct bounded argument arrays with shell=false. Hold one transient inspection lease, cancel on timeout or disconnect, prove source identity before and after probe/decode, and remove only proven request-owned TEMP scratch. There is no PATH fallback, AI runtime, queue worker, or durable recovery."
+    },
+    "effects": {
+      "createsJobs": false,
+      "publishesDurableInbox": false,
+      "mutatesInbox": false,
+      "stagesSource": false,
+      "mutatesJobs": false,
+      "wakesQueue": false,
+      "claimsJobs": false,
+      "startsWorker": false,
+      "acquiresCpuJobLane": false,
+      "acquiresGpuLease": false,
+      "mountsModels": false,
+      "createsOutput": false,
+      "persistsPreviews": false
+    },
+    "availability": {
+      "currentProductionEnabled": false,
+      "currentResult": {
+        "status": 503,
+        "code": "VIDEO_TRIM_V1_SOURCE_INSPECTION_NOT_READY"
+      },
+      "syntheticTestReady": "An injected sealed synthetic FFmpeg/FFprobe fixture may exercise the exact route only against isolated synthetic TEMP media. It is test evidence, never a live receipt or production activation.",
+      "activation": "A future paired activation must advertise the exact inspection revision and separately resolve sealed probe, decode, resource, timeout, cancellation, source-lease, and thumbnail receipts. Durable writer readiness is still required independently for Start."
+    },
+    "aiSeparation": "This route never accepts instructionJa, prompt, compiled text, style, model, backend, seed, steps, strength, denoise, or compiler actions. It does not dispatch, reuse, or authorize the Video Tools v2 Edit transient compiler route."
+  },
   "validation": {
     "source": {
       "pathKind": "bounded regular file below an exact managed owner or an explicitly captured displayed-file stage",
@@ -345,6 +568,265 @@
       "recoversJobs": false
     }
   },
+  "durableReader": {
+    "claim": "A Job is a Video Trim v1 claim only when operation and mediaKind are video and its single videoTrim object has schemaVersion 1 and protocol aibos-enhancement-video-trim-v1. The request top-level videoTrim claim and the persisted Job videoTrim snapshot are related but are not interchangeable.",
+    "jobEnvelope": {
+      "commonRequiredFields": [
+        "id",
+        "operation",
+        "mediaKind",
+        "sourceId",
+        "presetId",
+        "adapterId",
+        "presetHash",
+        "status",
+        "progress",
+        "cancelRequested",
+        "createdAt",
+        "updatedAt",
+        "videoTrim"
+      ],
+      "managedAdditionalFields": [
+        "sourceVideoJobId"
+      ],
+      "constants": {
+        "operation": "video",
+        "mediaKind": "video",
+        "presetId": "aibos-video-trim-v1",
+        "adapterId": "ffmpeg-video-trim-v1"
+      },
+      "statusValues": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "canceled"
+      ],
+      "stateFields": {
+        "queued": [
+          "queueOrder"
+        ],
+        "running": [
+          "startedAt"
+        ],
+        "succeeded": [
+          "startedAt",
+          "finishedAt",
+          "outputPath",
+          "outputSha256",
+          "outputBytes"
+        ],
+        "failed": [
+          "startedAt",
+          "finishedAt",
+          "errorCode",
+          "errorMessage"
+        ],
+        "canceled": [
+          "startedAt",
+          "finishedAt"
+        ]
+      },
+      "stateRule": "Fixture Jobs contain the exact required fields plus only their exact stateFields. queued has progress 0 and cancelRequested false; running is 1 through 99 and false; succeeded is 100 and false with one validated managed output; failed has bounded non-path error fields and no output; canceled has cancelRequested true and no output. Timestamps are bounded RFC 3339 UTC and monotonic.",
+      "sourceRule": "For the managed fixture sourceVideoJobId exactly equals videoTrim.source.producerJobId. A staged displayed-file Job omits sourceVideoJobId and uses only its server-owned staged source snapshot. Raw client path fields are absent from the Job envelope.",
+      "unknownFields": "Compatible unknown Job fields are preserved by readers. A writer may mutate only an exact supported snapshot and must never normalize, strip, or repair an unknown field by rewriting the row."
+    },
+    "snapshot": {
+      "revision": "aibos-video-trim-job-snapshot-v1",
+      "exactFields": [
+        "schemaVersion",
+        "protocol",
+        "presetId",
+        "adapterId",
+        "receiptSetSha256",
+        "source",
+        "requested",
+        "plan",
+        "delivery"
+      ],
+      "constants": {
+        "schemaVersion": 1,
+        "protocol": "aibos-enhancement-video-trim-v1",
+        "presetId": "aibos-video-trim-v1",
+        "adapterId": "ffmpeg-video-trim-v1"
+      },
+      "presetHash": "Recursively sort object keys with ordinal string comparison, serialize compact JSON, compute SHA-256 over the UTF-8 bytes, and take the first 12 lowercase hexadecimal characters.",
+      "managedSourceExactFields": [
+        "kind",
+        "producerJobId",
+        "canonicalPath",
+        "signature",
+        "sha256",
+        "probe",
+        "probeDigest",
+        "sourceIdentityDigest",
+        "dependencyDigest"
+      ],
+      "stagedSourceExactFields": [
+        "kind",
+        "originalCanonicalPath",
+        "originalSignature",
+        "originalSha256",
+        "stagingCanonicalPath",
+        "stagingSignature",
+        "stagingSha256",
+        "probe",
+        "probeDigest",
+        "sourceIdentityDigest",
+        "stagingOwnershipDigest"
+      ],
+      "signatureExactFields": [
+        "size",
+        "mtimeMs"
+      ],
+      "probeExactFields": [
+        "container",
+        "videoCodec",
+        "pixelFormat",
+        "bitDepth",
+        "dynamicRange",
+        "width",
+        "height",
+        "frameCount",
+        "fpsNumerator",
+        "fpsDenominator",
+        "durationMs",
+        "durationNumerator",
+        "durationDenominator",
+        "videoStreamCount",
+        "audioStreamCount",
+        "extraStreamCount",
+        "videoTimeBaseNumerator",
+        "videoTimeBaseDenominator",
+        "videoStartTimestamp",
+        "videoPtsSha256"
+      ],
+      "requestedExactFields": [
+        "schemaVersion",
+        "source",
+        "selection",
+        "audioPolicy"
+      ],
+      "requestNormalization": {
+        "managed-video-job": "Persist requested.source as the exact kind plus sourceVideoJobId selector.",
+        "displayed-file": "Persist requested.source as kind only after staging. Consume but do not retain the raw untrusted request path, size, mtimeMs, or SHA-256 as retry or execution authority.",
+        "authority": "videoTrim.source is the server-owned canonical managed or staged source snapshot used by retry and execution."
+      },
+      "planExactFields": [
+        "revision",
+        "selection",
+        "startPts",
+        "endPtsExclusive",
+        "selectedFrameCount",
+        "durationNumerator",
+        "durationDenominator",
+        "audioPlan"
+      ],
+      "planAudioVariants": {
+        "preserve": {
+          "exactFields": [
+            "kind",
+            "policy",
+            "codec"
+          ],
+          "constants": {
+            "kind": "reencode-selected-interval",
+            "policy": "preserve",
+            "codec": "aac"
+          }
+        },
+        "mute": {
+          "exactFields": [
+            "kind",
+            "policy"
+          ],
+          "constants": {
+            "kind": "mute",
+            "policy": "mute"
+          }
+        }
+      },
+      "rule": "The complete immutable videoTrim snapshot and exact canonical digest are committed atomically with the Job. Every state transition retains the byte-equivalent snapshot."
+    },
+    "delivery": {
+      "revision": "aibos-video-trim-delivery-v1",
+      "exactFields": [
+        "revision",
+        "container",
+        "videoCodec",
+        "pixelFormat",
+        "bitDepth",
+        "dynamicRange",
+        "width",
+        "height",
+        "frameCount",
+        "fpsNumerator",
+        "fpsDenominator",
+        "timeBaseNumerator",
+        "timeBaseDenominator",
+        "durationNumerator",
+        "durationDenominator",
+        "firstRelativePts",
+        "lastRelativePts",
+        "videoPtsSha256",
+        "audio"
+      ],
+      "audioVariants": {
+        "preserve": {
+          "exactFields": [
+            "kind",
+            "policy",
+            "audioStreamCount",
+            "codec",
+            "packetBitIdentityClaimed",
+            "sampleExactClaimed"
+          ],
+          "constants": {
+            "kind": "aac-selected-interval",
+            "policy": "preserve",
+            "audioStreamCount": 1,
+            "codec": "aac",
+            "packetBitIdentityClaimed": false,
+            "sampleExactClaimed": false
+          }
+        },
+        "preserveNoAudio": {
+          "exactFields": [
+            "kind",
+            "policy",
+            "audioStreamCount",
+            "packetBitIdentityClaimed",
+            "sampleExactClaimed"
+          ],
+          "constants": {
+            "kind": "no-source-audio",
+            "policy": "preserve",
+            "audioStreamCount": 0,
+            "packetBitIdentityClaimed": false,
+            "sampleExactClaimed": false
+          }
+        },
+        "mute": {
+          "exactFields": [
+            "kind",
+            "policy",
+            "audioStreamCount"
+          ],
+          "constants": {
+            "kind": "muted",
+            "policy": "mute",
+            "audioStreamCount": 0
+          }
+        }
+      },
+      "rule": "delivery is an immutable expected-output snapshot in every Job state. Only succeeded plus the top-level validated output identity makes it an available managed child. Failed or canceled delivery is not an output claim."
+    },
+    "readerProtection": {
+      "malformed": "A claimed v1 Job with a missing, duplicate, wrong-type, contradictory, out-of-bound, hash-drifted, status-inconsistent, or otherwise malformed envelope, snapshot, source, plan, or delivery remains visible reader-only and has zero mutation actions.",
+      "future": "A Job claiming videoTrim.schemaVersion greater than 1 or an unsupported future protocol preserves all compatible fields and remains visible reader-only with zero retry, cancel, delete, recovery, enqueue, wake, stage, process, or output actions.",
+      "aiEditSeparation": "A video.videoTools v2 Edit or Finish snapshot and a videoTrim snapshot never authorize, repair, reinterpret, retry, filter, or deliver each other."
+    }
+  },
   "durableLifecycle": {
     "inbox": "Use the authenticated bounded durable enqueue inbox. Commit idempotency ownership, managed producer dependency reservation or displayed staging intent, and the exact request before queue wake; incomplete or conflicting claims remain unavailable to the worker.",
     "idempotency": "Replay the exact committed request and result for one idempotency key. A conflicting request never reuses, overwrites, stages, or republishes the prior Job.",
@@ -430,6 +912,7 @@
   },
   "productionGate": {
     "productionWriterEnabled": false,
+    "sourceInspectionEnabled": false,
     "readyVariantAdvertised": false,
     "liveReceiptsPresent": false,
     "qualityAsserted": false,
