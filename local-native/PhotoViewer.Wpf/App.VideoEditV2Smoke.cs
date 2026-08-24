@@ -295,7 +295,7 @@ public partial class App
                         && !window.VideoEditV2ExactFrameControlsEnabledForSmoke
                         && window.VideoEditV2CompilerDisabledForSmoke
                         && window.VideoEditV2StartDisabledForSmoke
-                        && window.VideoEditV2TrimDisabledForSmoke
+                        && window.VideoEditV2TrimEntryEnabledForSmoke
                         && window.VideoEditV2PreviewFramesForSmoke
                             .All(static value => value == "f --");
                     string storesAfterOpen =

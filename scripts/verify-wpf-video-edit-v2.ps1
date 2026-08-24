@@ -106,8 +106,9 @@ if ($surface -notmatch 'LoadModalVideoEditV2FramesAsync' `
     -or $surface -notmatch 'MaximumActionResponseBytes' `
     -or $surface -notmatch 'HasFreshModalVideoEditV2PreviewsForPlan' `
     -or $surface -notmatch 'ModalVideoEditV2StartButton\.IsEnabled\s*=\s*false' `
-    -or $surface -notmatch 'ModalVideoEditV2TrimButton\.IsEnabled\s*=\s*false') {
-    throw 'Explicit probe/preview/compile transport, fresh-preview gating, or disabled writer/trim boundaries are missing.'
+    -or $surface -notmatch 'ModalVideoEditV2TrimButton\.IsEnabled\s*=\s*ModalVideoEditV2BoardVisible' `
+    -or $xaml -notmatch 'ModalVideoEditV2TrimButton[\s\S]*?Click="OpenModalVideoTrimV1_Click"') {
+    throw 'Explicit Edit transport, fresh-preview gating, disabled AI writer, or the separate Video Trim entry is missing.'
 }
 if ($transientContract -notmatch 'MaximumBackendPromptLength\s*=\s*8_000' `
     -or $transientContract -notmatch 'MaximumSummaryLength\s*=\s*2_000' `
