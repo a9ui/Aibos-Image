@@ -81,6 +81,7 @@ public partial class App
             File.WriteAllText(statePath, """
                 {
                   "Version": 2,
+                  "UiLanguage": "ja",
                   "futureAiMinimizeState": { "keep": true }
                 }
                 """);
