@@ -98,6 +98,17 @@ public partial class App
                 bool ok = false;
                 try
                 {
+                    int ordinaryProbeCount =
+                        window.EnhancementStoreProbeCountForSmoke;
+                    await Task.Delay(3_500);
+                    bool ordinaryIdleExact =
+                        !window.ActiveEnhancementRevisionWatcherRunningForSmoke
+                        && window.EnhancementStoreProbeCountForSmoke
+                            == ordinaryProbeCount
+                        && starterCalls == 0
+                        && identityProbes == 0
+                        && jobApiTransportCalls == 0;
+
                     await window.OpenEnhancementJobsForSmokeAsync();
                     EnhancementJobsWorkspaceSmokeSnapshot initial =
                         window.EnhancementJobsWorkspaceForSmoke();
@@ -159,6 +170,22 @@ public partial class App
 
                     MutateOfflineJobsFixture(
                         jobsPath,
+                        "UPDATE enhancement_store_metadata SET catalog_revision = 2 WHERE singleton = 1;");
+                    byte[] revisionBeforeRead = File.ReadAllBytes(jobsPath);
+                    int probesBeforeRevision =
+                        window.EnhancementStoreProbeCountForSmoke;
+                    bool revisionApplied =
+                        window.RefreshEnhancedStateIfChangedForSmoke();
+                    bool revisionChangeExact =
+                        revisionApplied
+                        && window.EnhancementStoreProbeCountForSmoke
+                            == probesBeforeRevision + 1
+                        && !window.ActiveEnhancementRevisionWatcherRunningForSmoke
+                        && revisionBeforeRead.AsSpan().SequenceEqual(
+                            File.ReadAllBytes(jobsPath));
+
+                    MutateOfflineJobsFixture(
+                        jobsPath,
                         "UPDATE enhancement_store_metadata SET store_version = 2 WHERE singleton = 1;");
                     byte[] futureBeforeRead = File.ReadAllBytes(jobsPath);
                     await window.RefreshEnhancementJobsForSmokeAsync();
@@ -206,29 +233,44 @@ public partial class App
                         && !malformed.Polling
                         && malformedStoreUnchanged;
 
+                    bool explicitDurableWatcherExact =
+                        window.ActivateEnhancementDurableRevisionWatcherForSmoke()
+                        && window.ActiveEnhancementRevisionWatcherRunningForSmoke
+                        && starterCalls == 0
+                        && jobApiTransportCalls == 0;
+
                     bool noMutationOrStart =
                         starterCalls == 0
                         && jobApiTransportCalls == 0;
                     ok = passiveOfflineExact
+                        && ordinaryIdleExact
                         && idleStable
                         && manualRefreshExact
+                        && revisionChangeExact
                         && futureRejected
                         && malformedRejected
+                        && explicitDurableWatcherExact
                         && noMutationOrStart;
                     result = new
                     {
                         ok,
+                        ordinaryIdleExact,
                         passiveOfflineExact,
                         idleStable,
                         manualRefreshExact,
+                        revisionChangeExact,
                         futureRejected,
                         malformedRejected,
+                        explicitDurableWatcherExact,
                         noMutationOrStart,
                         starterCalls,
                         identityProbes,
                         jobApiTransportCalls,
                         initialInventoryReads,
                         finalInventoryReads = malformed.GetRequests,
+                        ordinaryProbeCount,
+                        finalProbeCount =
+                            window.EnhancementStoreProbeCountForSmoke,
                         initial = new
                         {
                             initial.Total,

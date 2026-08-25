@@ -54,6 +54,10 @@ try {
     Assert-True (
         $contract.wpfRules.mutatesQueue -eq $false) (
         'The WPF direct reader may mutate the queue.')
+    Assert-True (
+        $contract.wpfRules.backgroundCatalogRefresh.Contains(
+            'only after this WPF session explicitly activates')) (
+        'Ordinary-startup catalog refresh gating is missing.')
 
     $buildArguments = @(
         'build',
@@ -98,10 +102,13 @@ try {
         "Offline Jobs smoke failed with exit code $exitCode`: $resultSummary")
     foreach ($field in @(
         'passiveOfflineExact',
+        'ordinaryIdleExact',
         'idleStable',
         'manualRefreshExact',
+        'revisionChangeExact',
         'futureRejected',
         'malformedRejected',
+        'explicitDurableWatcherExact',
         'noMutationOrStart')) {
         Assert-True ($result.$field -eq $true) "Offline Jobs gate failed: $field"
     }
@@ -112,11 +119,14 @@ try {
 
     [pscustomobject]@{
         allPassed = $true
+        ordinaryIdleExact = $true
         passiveOfflineExact = $true
         idleStable = $true
         manualRefreshExact = $true
+        revisionChangeExact = $true
         futureRejected = $true
         malformedRejected = $true
+        explicitDurableWatcherExact = $true
         noMutationOrStart = $true
         identityProbes = [int]$result.identityProbes
         actualCompanionStarted = $false

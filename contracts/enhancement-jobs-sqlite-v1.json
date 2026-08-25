@@ -127,6 +127,7 @@
     "migratesStore": false,
     "mutatesQueue": false,
     "startsWorker": false,
+    "backgroundCatalogRefresh": "queued or running records loaded during ordinary WPF startup do not by themselves enable the three-second catalog-revision timer; the timer is enabled only after this WPF session explicitly activates authenticated durable Enhancement work, remains single-flight, and stops again when the validated snapshot has no active work",
     "unsupportedOrMalformed": "fail the direct Enhancement projection closed without rewriting either store",
     "explicitOverride": "an explicit jobs-path override is authoritative and is never silently replaced by its SQLite sibling"
   },
