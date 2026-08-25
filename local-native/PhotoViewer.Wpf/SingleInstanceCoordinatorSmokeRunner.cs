@@ -13,30 +13,65 @@ internal static class SingleInstanceCoordinatorSmokeRunner
         {
             string identity = Guid.NewGuid().ToString("N");
             using var activated = new ManualResetEventSlim(false);
+            using var secondaryReady = new ManualResetEventSlim(false);
+            using var releaseSecondary = new ManualResetEventSlim(false);
             int activationCount = 0;
-            bool secondaryWasPrimary;
-            bool signalAccepted;
+            bool secondaryWasPrimary = false;
+            bool signalAccepted = false;
             bool reacquired;
+            Exception? secondaryError = null;
+            Thread? secondaryThread = null;
 
-            using (var primary = SingleInstanceCoordinator.CreateForSmoke(identity))
+            try
             {
-                primary.StartListening(() =>
+                using (var primary = SingleInstanceCoordinator.CreateForSmoke(identity))
                 {
-                    Interlocked.Increment(ref activationCount);
-                    activated.Set();
-                });
-                using (var secondary = SingleInstanceCoordinator.CreateForSmoke(identity))
-                {
-                    secondaryWasPrimary = secondary.IsPrimary;
-                    signalAccepted = secondary.SignalPrimary();
+                    primary.StartListening(() =>
+                    {
+                        Interlocked.Increment(ref activationCount);
+                        activated.Set();
+                    });
+                    secondaryThread = new Thread(() =>
+                    {
+                        try
+                        {
+                            using var secondary = SingleInstanceCoordinator.CreateForSmoke(identity);
+                            secondaryWasPrimary = secondary.IsPrimary;
+                            signalAccepted = secondary.SignalPrimary();
+                            secondaryReady.Set();
+                            releaseSecondary.Wait(TimeSpan.FromSeconds(5));
+                        }
+                        catch (Exception ex)
+                        {
+                            secondaryError = ex;
+                            secondaryReady.Set();
+                        }
+                    })
+                    {
+                        IsBackground = true,
+                        Name = "Aibos single-instance secondary smoke",
+                    };
+                    secondaryThread.Start();
+                    if (!secondaryReady.Wait(TimeSpan.FromSeconds(2)))
+                        throw new TimeoutException(
+                            "The secondary instance did not initialize.");
+                    if (secondaryError is not null)
+                        throw new InvalidOperationException(
+                            "The secondary instance failed.",
+                            secondaryError);
+                    if (!activated.Wait(TimeSpan.FromSeconds(2)))
+                        throw new TimeoutException(
+                            "The primary instance did not receive activation.");
                 }
-                if (!activated.Wait(TimeSpan.FromSeconds(2)))
-                    throw new TimeoutException(
-                        "The primary instance did not receive activation.");
-            }
 
-            using (var replacement = SingleInstanceCoordinator.CreateForSmoke(identity))
-                reacquired = replacement.IsPrimary;
+                using (var replacement = SingleInstanceCoordinator.CreateForSmoke(identity))
+                    reacquired = replacement.IsPrimary;
+            }
+            finally
+            {
+                releaseSecondary.Set();
+                secondaryThread?.Join(TimeSpan.FromSeconds(2));
+            }
 
             bool primaryExclusive = !secondaryWasPrimary;
             bool exactlyOneActivation = activationCount == 1;
@@ -51,6 +86,7 @@ internal static class SingleInstanceCoordinatorSmokeRunner
                 signalAccepted,
                 exactlyOneActivation,
                 reacquired,
+                unownedExistingHandleRecovered = reacquired,
             };
             exitCode = ok ? 0 : 1;
         }
