@@ -1936,19 +1936,36 @@ public partial class MainWindow
                 : !_enhancementWorkspaceQueueRecoveryRequired;
             await SetEnhancementQueuePausedAsync(requestedPaused);
         }
+        else if (_usingDefaultModalEnhancementSender)
+        {
+            await SetEnhancementQueuePausedAsync(paused: false);
+        }
     }
 
     private async Task<bool> SetEnhancementQueuePausedAsync(bool paused)
     {
-        if (_enhancementWorkspaceQueuePaused is not bool current
-            || _enhancementWorkspaceMutationPending
+        if (_enhancementWorkspaceMutationPending
             || _enhancementWorkspaceRefreshPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
         {
             return false;
         }
-        if (current == paused && !_enhancementWorkspaceQueueRecoveryRequired)
+        bool unknownExplicitResume =
+            _enhancementWorkspaceQueuePaused is null
+            && !paused
+            && _usingDefaultModalEnhancementSender;
+        bool hasCurrentState = _enhancementWorkspaceQueuePaused is bool;
+        bool current = _enhancementWorkspaceQueuePaused ?? false;
+        if (!hasCurrentState && !unknownExplicitResume)
+        {
+            return false;
+        }
+        if (!unknownExplicitResume
+            && current == paused
+            && !_enhancementWorkspaceQueueRecoveryRequired)
+        {
             return true;
+        }
 
         var operationWatch = Stopwatch.StartNew();
         _enhancementWorkspaceMutationPending = true;
@@ -1957,6 +1974,44 @@ public partial class MainWindow
         long generation = _enhancementWorkspaceGeneration;
         try
         {
+            if (unknownExplicitResume)
+            {
+                EnhancementJobsStatusText.Text =
+                    "ローカルAIサービスへ接続し、キュー状態を確認しています…";
+                EnhancementApiResponse readiness =
+                    await EnsureEnhancementCompanionReadyForExplicitActionAsync();
+                if (generation != _enhancementWorkspaceGeneration
+                    || EnhancementJobsDialog.Visibility != Visibility.Visible)
+                {
+                    return false;
+                }
+                if (!readiness.Ok)
+                {
+                    EnhancementJobsStatusText.Text = readiness.Error;
+                    return false;
+                }
+
+                EnhancementQueueHealthView? refreshedHealth =
+                    await RefreshEnhancementQueueHealthAsync(
+                        generation,
+                        isPoll: false);
+                if (refreshedHealth is not EnhancementQueueHealthView health
+                    || health.Paused is not bool observedPaused)
+                {
+                    EnhancementJobsStatusText.Text =
+                        "キュー状態を確認できませんでした。ローカルAIサービスの詳細を確認してください。";
+                    return false;
+                }
+                current = observedPaused;
+                if (current == paused
+                    && !health.QueueRecoveryRequired)
+                {
+                    EnhancementJobsStatusText.Text =
+                        "ローカルAIサービスへ接続しました。キューはすでに動作中です。";
+                    return true;
+                }
+            }
+
             EnhancementApiResponse response =
                 await SendTrackedEnhancementWorkspaceMutationAsync(
                     () => SendEnhancementApiAsync(
@@ -2985,21 +3040,34 @@ public partial class MainWindow
 
         bool paused = _enhancementWorkspaceQueuePaused == true;
         bool resume = paused || _enhancementWorkspaceQueueRecoveryRequired;
-        EnhancementJobsPauseResumeButton.Content = resume ? "再開" : "一時停止";
+        bool connectToResume =
+            _enhancementWorkspaceQueuePaused is null
+            && _usingDefaultModalEnhancementSender;
+        EnhancementJobsPauseResumeButton.Content = connectToResume
+            ? "接続して再開"
+            : resume
+                ? "再開"
+                : "一時停止";
         EnhancementJobsPauseResumeButton.IsEnabled =
-            _enhancementWorkspaceQueuePaused.HasValue
+            (_enhancementWorkspaceQueuePaused.HasValue || connectToResume)
             && !_enhancementWorkspaceMutationPending
             && !_enhancementWorkspaceRefreshPending;
         AutomationProperties.SetName(
             EnhancementJobsPauseResumeButton,
-            resume ? "Resume enhancement queue" : "Pause enhancement queue");
+            connectToResume
+                ? "Connect local AI service and resume enhancement queue"
+                : resume
+                    ? "Resume enhancement queue"
+                    : "Pause enhancement queue");
         EnhancementJobsPauseResumeButton.ToolTip = _enhancementWorkspaceQueuePaused.HasValue
             ? resume
                 ? _enhancementWorkspaceQueueRecoveryRequired
                     ? "停止したqueue pumpを復旧し、待機順を保ったまま処理を再開します"
                     : "待機順を保ったままキュー処理を再開します"
                 : "処理中の1件は完了させ、次の待機ジョブから止めます"
-            : "キュー停止に対応したローカルcompanionが必要です";
+            : connectToResume
+                ? "明示操作としてローカルAIサービスを開始し、状態を確認して必要ならキューを再開します"
+                : "キュー停止に対応したローカルcompanionが必要です";
     }
 
     private void ApplyEnhancementWorkspaceHighlights(IReadOnlyList<EnhancementWorkspaceJobView> jobs)
@@ -9779,6 +9847,16 @@ public partial class MainWindow
         bool changed = await SetEnhancementQueuePausedAsync(paused);
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
         return changed;
+    }
+
+    public void PrepareUnknownEnhancementQueueResumeForSmoke()
+    {
+        EnhancementJobsDialog.Visibility = Visibility.Visible;
+        _enhancementWorkspaceQueuePaused = null;
+        _enhancementWorkspaceQueueRecoveryRequired = false;
+        _enhancementWorkspaceMutationPending = false;
+        _enhancementWorkspaceRefreshPending = false;
+        RefreshEnhancementQueuePauseControl();
     }
 
     public async Task<bool> CancelEnhancementJobForSmokeAsync(string id)

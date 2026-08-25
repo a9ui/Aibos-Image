@@ -31,6 +31,7 @@ Assert-True $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCa
 $artifacts = Join-Path $runRoot 'artifacts'
 $resultPath = Join-Path $runRoot 'result.json'
 $automationResultPath = Join-Path $runRoot 'automation-isolation.json'
+$lazyResumeResultPath = Join-Path $runRoot 'queue-lazy-resume.json'
 $previousNugetScratch = $env:NUGET_SCRATCH
 $env:NUGET_SCRATCH = Join-Path $runRoot 'nuget-scratch'
 
@@ -80,6 +81,15 @@ try {
     $automationResult = Get-Content -LiteralPath $automationResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-True ($automationExitCode -eq 0 -and $automationResult.ok -eq $true) 'Automation isolation smoke failed.'
 
+    & $DotnetPath $wpfDll --enhancement-queue-lazy-resume-smoke $lazyResumeResultPath
+    $lazyResumeExitCode = $LASTEXITCODE
+    Assert-True (Test-Path -LiteralPath $lazyResumeResultPath -PathType Leaf) 'Queue lazy Resume result is missing.'
+    $lazyResumeResult = Get-Content -LiteralPath $lazyResumeResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-True ($lazyResumeExitCode -eq 0 -and $lazyResumeResult.ok -eq $true) 'Queue lazy Resume smoke failed.'
+    Assert-True ($lazyResumeResult.passiveDidNotStart -eq $true) 'Passive queue UI started the Companion.'
+    Assert-True ($lazyResumeResult.explicitResumeExact -eq $true) 'Explicit queue Resume was not exact.'
+    Assert-True ($lazyResumeResult.duplicateGuarded -eq $true) 'Duplicate queue Resume was not guarded.'
+
     [pscustomobject]@{
         allPassed = $true
         passiveOwnedStopped = [bool]$result.PassiveOwnedStopped
@@ -92,6 +102,7 @@ try {
         passiveReadProbeOnly = $passiveReadProbeOnly
         explicitActionAutoStartPreserved = $explicitActionAutoStartPreserved
         automationIsolationPreserved = $true
+        lazyResumeExact = $true
         actualCompanionStarted = $false
     } | ConvertTo-Json -Compress
 }
