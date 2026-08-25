@@ -31,10 +31,26 @@ function Get-SourceFiles([string]$ProjectRoot) {
         Sort-Object FullName)
 }
 
+function Get-Sha256Hex([string]$LiteralPath) {
+    $stream = [System.IO.File]::Open(
+        $LiteralPath,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::Read)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+    }
+    finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Get-SourceFingerprint([string]$ProjectRoot, [object[]]$SourceFiles) {
     $lines = foreach ($file in $SourceFiles) {
         $relative = $file.FullName.Substring($ProjectRoot.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
-        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        $hash = Get-Sha256Hex $file.FullName
         '{0}|{1}|{2}' -f $relative, $file.Length, $hash
     }
     $manifest = $lines -join "`n"
@@ -107,7 +123,7 @@ try {
         exit 10
     }
 
-    $targetHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+    $targetHash = Get-Sha256Hex $target
 
     if ($Record) {
         $stamp = [ordered]@{
