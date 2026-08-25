@@ -3843,24 +3843,9 @@ public partial class App : Application
         ]);
         bool knownSmokeIsIsolated = IsAutomationInvocation(["PhotoViewer.Wpf.exe", "--p1a-smoke", "result.json"]);
         bool screenshotIsIsolated = IsAutomationInvocation(["PhotoViewer.Wpf.exe", "--shot", "shot.png"]);
-        bool screenshotCompanionStartupSuppressed =
-            PhotoViewer.Wpf.MainWindow
-                .EnhancementCompanionStartupSuppressedForSmoke([
-                "PhotoViewer.Wpf.exe",
-                "--shot",
-                "shot.png",
-            ]);
-        bool interactiveCompanionStartupAllowed =
-            !PhotoViewer.Wpf.MainWindow
-                .EnhancementCompanionStartupSuppressedForSmoke([
-                "PhotoViewer.Wpf.exe",
-                syntheticPositionalFolder,
-            ]);
         bool ok = positionalFolderRemainsInteractive
             && knownSmokeIsIsolated
-            && screenshotIsIsolated
-            && screenshotCompanionStartupSuppressed
-            && interactiveCompanionStartupAllowed;
+            && screenshotIsIsolated;
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(resultPath))!);
         File.WriteAllText(resultPath, JsonSerializer.Serialize(new
         {
@@ -3868,8 +3853,6 @@ public partial class App : Application
             positionalFolderRemainsInteractive,
             knownSmokeIsIsolated,
             screenshotIsIsolated,
-            screenshotCompanionStartupSuppressed,
-            interactiveCompanionStartupAllowed,
         }));
         Shutdown(ok ? 0 : 1);
     }

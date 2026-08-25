@@ -797,7 +797,7 @@ public partial class MainWindow : Window
         RowsList.AddHandler(Button.ClickEvent, new RoutedEventHandler(CardFavoriteButton_Click));
         ApplyFilters(selectFirst: false);
 
-        Loaded += async (_, _) =>
+        Loaded += (_, _) =>
         {
             ApplyAdaptiveWorkbenchLayout(ActualWidth);
             AttachGalleryVirtualizationPanel();
@@ -805,7 +805,6 @@ public partial class MainWindow : Window
                 CardsList.SelectedIndex = 0;
             ScheduleRememberCurrentGridViewportAnchor();
             UpdateWindowMaximizePresentation();
-            await StartEnhancementCompanionApiForApplicationLaunchAsync();
         };
         Closing += MainWindow_Closing;
         Closed += (_, _) =>

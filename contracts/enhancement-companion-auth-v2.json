@@ -73,7 +73,7 @@
   },
   "startup": {
     "launcherArgument": "--defer-queue-recovery",
-    "applicationLaunch": "start authenticated API for persisted Jobs history",
+    "applicationLaunch": "ordinary WPF launch and passive viewing do not start Node.js or the Companion; passive readers may use an already-running authenticated Companion but do not launch a replacement; only an explicit Enhancement action may start the exact authenticated API child",
     "deferredSideEffects": [
       "interrupted-job recovery",
       "durable-inbox drain",
