@@ -678,6 +678,17 @@ public partial class App : Application
             return;
         }
 
+        int enhancementJobsOfflineSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--enhancement-jobs-offline-smoke");
+        if (enhancementJobsOfflineSmokeIdx >= 0
+            && enhancementJobsOfflineSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureEnhancementJobsOfflineSmoke(
+                e.Args[enhancementJobsOfflineSmokeIdx + 1]);
+            return;
+        }
+
         int settingsUnseenDotsSmokeIdx = Array.IndexOf(e.Args, "--settings-unseen-dots-smoke");
         if (settingsUnseenDotsSmokeIdx >= 0 && settingsUnseenDotsSmokeIdx + 1 < e.Args.Length)
         {
