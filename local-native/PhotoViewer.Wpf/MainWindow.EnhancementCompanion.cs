@@ -391,48 +391,6 @@ public partial class MainWindow
         }
     }
 
-    private async Task StartEnhancementCompanionApiForApplicationLaunchAsync()
-    {
-        if (ShouldSuppressEnhancementCompanionStartup(
-                Environment.GetCommandLineArgs()))
-        {
-            return;
-        }
-
-        long startedAt = Stopwatch.GetTimestamp();
-        AibosOperationLog.Write("companion.startup", "started");
-        EnhancementApiResponse response =
-            await EnsureEnhancementCompanionApiReadyAsync(
-                token: _enhancementCompanionLifetimeCts.Token);
-        long elapsedMilliseconds = (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
-        if (response.Ok)
-        {
-            AibosOperationLog.Write(
-                "companion.startup",
-                "ready",
-                elapsedMilliseconds,
-                response.StatusCode);
-        }
-        else
-        {
-            _enhancementCompanionLaunchError = response.Error;
-            AibosOperationLog.Write(
-                "companion.startup",
-                "failed",
-                elapsedMilliseconds,
-                response.StatusCode,
-                ClassifyEnhancementCompanionStartupError(response.Error));
-        }
-    }
-
-    private static bool ShouldSuppressEnhancementCompanionStartup(
-        IReadOnlyList<string> args)
-        => App.IsAutomationInvocation(args);
-
-    internal static bool EnhancementCompanionStartupSuppressedForSmoke(
-        IReadOnlyList<string> args)
-        => ShouldSuppressEnhancementCompanionStartup(args);
-
     private async Task<EnhancementApiResponse> SendPassiveEnhancementReadAsync(
         string relativePath,
         CancellationToken token = default,
@@ -603,28 +561,6 @@ public partial class MainWindow
         {
             _enhancementCompanionOwnershipVerified = false;
         }
-    }
-
-    private static string ClassifyEnhancementCompanionStartupError(string? error)
-    {
-        if (string.IsNullOrWhiteSpace(error))
-            return "request_failed";
-        if (error.Contains("busy", StringComparison.OrdinalIgnoreCase))
-            return "identity_busy";
-        if (error.Contains("untrusted process", StringComparison.OrdinalIgnoreCase)
-            || error.Contains("proved ownership", StringComparison.OrdinalIgnoreCase))
-            return "ownership_rejected";
-        if (error.Contains("could not find", StringComparison.OrdinalIgnoreCase))
-            return "root_not_found";
-        if (error.Contains("authentication", StringComparison.OrdinalIgnoreCase))
-            return "authentication_failed";
-        if (error.Contains("stopped before", StringComparison.OrdinalIgnoreCase))
-            return "process_stopped";
-        if (error.Contains("within two minutes", StringComparison.OrdinalIgnoreCase))
-            return "startup_timeout";
-        if (error.Contains("canceled", StringComparison.OrdinalIgnoreCase))
-            return "canceled";
-        return "request_failed";
     }
 
     private async Task<EnhancementApiResponse> EnsurePhotorealCompanionReadyForExplicitActionAsync(
