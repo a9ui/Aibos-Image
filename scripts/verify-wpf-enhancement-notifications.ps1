@@ -17,6 +17,12 @@ $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-notification-
 $buildRoot = Join-Path $runRoot 'build'
 $fullOutputPath = [IO.Path]::GetFullPath($OutputPath)
 $process = $null
+$smokeRootPattern = 'aibos-enhancement-notification-*'
+$smokeRootsBefore = @(
+    Get-ChildItem -LiteralPath $tempRoot -Directory -Filter $smokeRootPattern `
+        -ErrorAction SilentlyContinue |
+        ForEach-Object { [IO.Path]::GetFullPath($_.FullName) }
+)
 
 if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Verifier root must stay under TEMP."
@@ -84,6 +90,15 @@ try {
     $result = Get-Content -LiteralPath $fullOutputPath -Raw | ConvertFrom-Json
     if ($result.success -ne $true) {
         throw "WPF notification smoke reported failure: $($result | ConvertTo-Json -Depth 8 -Compress)"
+    }
+    $newSmokeRoots = @(
+        Get-ChildItem -LiteralPath $tempRoot -Directory -Filter $smokeRootPattern `
+            -ErrorAction SilentlyContinue |
+            ForEach-Object { [IO.Path]::GetFullPath($_.FullName) } |
+            Where-Object { $_ -notin $smokeRootsBefore }
+    )
+    if ($newSmokeRoots.Count -ne 0) {
+        throw "WPF notification smoke left TEMP fixture roots: $($newSmokeRoots -join ', ')"
     }
     $result
 }

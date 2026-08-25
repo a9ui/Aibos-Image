@@ -135,6 +135,7 @@ public partial class App
                 {
                     DataSource = notificationSqlitePath,
                     Mode = SqliteOpenMode.ReadWriteCreate,
+                    Pooling = false,
                 }.ToString()))
             {
                 connection.Open();
