@@ -237,6 +237,12 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   current health before sending `paused=false` only when still required. An
   already-running queue gets no duplicate mutation; untrusted, malformed,
   unsupported, ambiguous, or concurrent state fails closed.
+- With the Companion unavailable, Jobs may perform one bounded identity-only
+  ownership probe and then render the selected local SQLite snapshot read-only.
+  Queued or running records without a current valid health signature do not
+  arm the one-second poll: manual Refresh and explicit authenticated actions
+  remain available, but passive display starts no process and sends no Jobs API
+  or queue mutation request.
 - Managed outputs stay below the selected output root and operation folder.
   Lexical and canonical ownership checks apply before open, Favorite, retry,
   deletion, or producer reuse.

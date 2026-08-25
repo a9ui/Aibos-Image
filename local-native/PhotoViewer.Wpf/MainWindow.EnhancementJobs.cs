@@ -1800,7 +1800,9 @@ public partial class MainWindow
                 && _enhancementWorkspaceHealthEndpointSupported != false;
             EnhancementJobsStatusText.Text = canReuseCachedInventory
                 ? "Checking the cached jobs inventory..."
-                : "Loading jobs from the local companion...";
+                : UsesDirectEnhancementJobsSqliteReader()
+                    ? "ローカルJob履歴を読み込んでいます…"
+                    : "Loading jobs from the local companion...";
             if (!canReuseCachedInventory)
             {
                 _enhancementWorkspaceHealthEndpointSupported = null;
@@ -1832,11 +1834,25 @@ public partial class MainWindow
                 {
                     int activeCount = _enhancementWorkspaceJobs.Count(
                         static job => job.IsActive);
-                    if (!_aiProcessingMinimizedMode && activeCount > 0)
+                    bool liveQueueHealth =
+                        _enhancementWorkspaceHealthInventorySignature is not null;
+                    bool automaticPollingAvailable =
+                        liveQueueHealth
+                        || !UsesDirectEnhancementJobsSqliteReader();
+                    if (!_aiProcessingMinimizedMode
+                        && activeCount > 0
+                        && automaticPollingAvailable)
                         _enhancementWorkspacePollTimer.Start();
-                    EnhancementJobsStatusText.Text = activeCount > 0
-                        ? $"共有GPUキューを実行順で表示中です。実行中 {_enhancementWorkspaceJobs.Count(static job => job.Status == "running"):N0}、待ち {_enhancementWorkspaceJobs.Count(static job => job.Status == "queued"):N0}。履歴は最新 {_enhancementJobsHistoryLimit:N0}件まで読みます。"
-                        : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
+                    else
+                        _enhancementWorkspacePollTimer.Stop();
+                    EnhancementJobsStatusText.Text =
+                        FormatEnhancementJobsInventoryStatus(
+                            activeCount,
+                            _enhancementWorkspaceJobs.Count(
+                                static job => job.Status == "running"),
+                            _enhancementWorkspaceJobs.Count(
+                                static job => job.Status == "queued"),
+                            automaticPollingAvailable);
                 }
             }
             else
@@ -2118,6 +2134,8 @@ public partial class MainWindow
         EnhancementJobsStatusText.Text = message;
         if (!_aiProcessingMinimizedMode
             && EnhancementJobsDialog.Visibility == Visibility.Visible
+            && (_enhancementWorkspaceHealthInventorySignature is not null
+                || !UsesDirectEnhancementJobsSqliteReader())
             && _enhancementWorkspaceJobs.Any(static job => job.IsActive))
         {
             _enhancementWorkspacePollTimer.Start();
@@ -2363,6 +2381,12 @@ public partial class MainWindow
             int canceledCount = counts.Canceled;
             int loadedHistoryCount = jobs.Count(static job => !job.IsActive);
             int totalHistoryCount = counts.Total - counts.Active;
+            bool liveQueueHealth =
+                observedHealthInventorySignature is not null
+                || _enhancementWorkspaceHealthInventorySignature is not null;
+            bool automaticPollingAvailable =
+                liveQueueHealth
+                || !UsesDirectEnhancementJobsSqliteReader();
             RefreshEnhancementQueueBulkControls();
             EnhancementJobsHeaderSummary.Text =
                 $"{counts.Total:N0} total  ·  {activeCount:N0} active  ·  {completedCount:N0} completed"
@@ -2370,13 +2394,15 @@ public partial class MainWindow
                 + (loadedHistoryCount < totalHistoryCount
                     ? $"  ·  latest {loadedHistoryCount:N0}/{totalHistoryCount:N0} history loaded"
                     : "");
-            EnhancementJobsStatusText.Text = activeCount > 0
-                ? $"共有GPUキューを実行順で表示中です。実行中 {runningCount:N0}、待ち {queuedCount:N0}。履歴は最新 {_enhancementJobsHistoryLimit:N0}件まで読みます。"
-                : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
+            EnhancementJobsStatusText.Text = FormatEnhancementJobsInventoryStatus(
+                activeCount,
+                runningCount,
+                queuedCount,
+                automaticPollingAvailable);
             if (highlightedBatchAlreadyTerminal)
                 EnhancementJobsStatusText.Text += " The new batch already finished, so all highlighted jobs are shown.";
             if (!_aiProcessingMinimizedMode
-                && (activeCount > 0
+                && (activeCount > 0 && automaticPollingAvailable
                     || forceHealthPollAfterInventory
                     || HasEnhancementWorkspaceMutationDebt))
                 _enhancementWorkspacePollTimer.Start();
@@ -3001,6 +3027,9 @@ public partial class MainWindow
 
     private void ApplyEnhancementQueueHealthUnavailable(string detail)
     {
+        _enhancementWorkspaceHealthInventorySignature = null;
+        _enhancementWorkspaceHealthInventoryRevisionSupported = false;
+        _enhancementWorkspaceLastHealthInventoryRevision = null;
         _enhancementWorkspaceQueuePaused = null;
         _enhancementWorkspaceQueueRecoveryRequired = false;
         ApplyQueuedPhotorealPromptUpdateCapability(false);
@@ -3016,6 +3045,40 @@ public partial class MainWindow
         EnhancementJobsHealthDetailText.Text = detail;
         EnhancementJobsHealthRevisionText.Text = "";
         RefreshEnhancementQueuePauseControl();
+    }
+
+    private bool UsesDirectEnhancementJobsSqliteReader()
+    {
+        if (!_usingDefaultModalEnhancementSender)
+            return false;
+        try
+        {
+            return IsEnhancementSqliteStore(ResolvedEnhancementJobsPath);
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private string FormatEnhancementJobsInventoryStatus(
+        int activeCount,
+        int runningCount,
+        int queuedCount,
+        bool automaticPollingAvailable)
+    {
+        if (activeCount > 0 && automaticPollingAvailable)
+        {
+            return $"共有GPUキューを実行順で表示中です。実行中 {runningCount:N0}、待ち {queuedCount:N0}。履歴は最新 {_enhancementJobsHistoryLimit:N0}件まで読みます。";
+        }
+        if (!automaticPollingAvailable
+            && UsesDirectEnhancementJobsSqliteReader())
+        {
+            return $"ローカルJob履歴を読み取り専用で表示中です。実行中記録 {runningCount:N0}、待ち記録 {queuedCount:N0}。ローカルAIサービスに未接続のため自動更新は停止しています。";
+        }
+        return $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
     }
 
     private void ApplyQueuedPhotorealPromptUpdateCapability(bool supported)
