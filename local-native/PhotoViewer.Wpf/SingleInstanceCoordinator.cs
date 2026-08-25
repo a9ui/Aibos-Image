@@ -18,10 +18,16 @@ internal sealed class SingleInstanceCoordinator : IDisposable
     {
         string suffix = HashIdentity(identity);
         _mutex = new Mutex(
-            initiallyOwned: true,
-            $"{NamePrefix}.Mutex.{suffix}",
-            out bool createdNew);
-        _ownsMutex = createdNew;
+            initiallyOwned: false,
+            $"{NamePrefix}.Mutex.{suffix}");
+        try
+        {
+            _ownsMutex = _mutex.WaitOne(0);
+        }
+        catch (AbandonedMutexException)
+        {
+            _ownsMutex = true;
+        }
         _activationEvent = new EventWaitHandle(
             initialState: false,
             EventResetMode.AutoReset,

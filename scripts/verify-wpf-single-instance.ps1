@@ -47,7 +47,8 @@ try {
         'primaryExclusive',
         'signalAccepted',
         'exactlyOneActivation',
-        'reacquired'
+        'reacquired',
+        'unownedExistingHandleRecovered'
     )) {
         if ($result.PSObject.Properties[$property].Value -ne $true) {
             throw "Single-instance invariant failed: $property"
@@ -61,6 +62,7 @@ try {
         processIsolation = $true
         activationSignal = $true
         cleanReacquire = $true
+        unownedExistingHandleRecovered = $true
     } | ConvertTo-Json -Compress
 }
 finally {
