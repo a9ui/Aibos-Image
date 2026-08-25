@@ -83,6 +83,7 @@ public partial class MainWindow
         _ownedEnhancementCompanionObservation;
     private string? _enhancementCompanionLaunchError;
     private int _enhancementCompanionLaunchAttemptCount;
+    private int _enhancementCompanionDurableWorkActivated;
     private Func<Uri, (bool Started, string Error)>? _startEnhancementCompanionForSmoke;
     private string? _enhancementCompanionAuthToken;
     private string? _ownedEnhancementCompanionInstanceId;
@@ -1836,6 +1837,9 @@ public partial class MainWindow
             return;
         }
 
+        Interlocked.Exchange(
+            ref _enhancementCompanionDurableWorkActivated,
+            1);
         lock (_enhancementCompanionDurableRecoverySync)
         {
             _enhancementCompanionDurableRecoveryRequested = true;
@@ -3159,8 +3163,10 @@ public partial class MainWindow
         startInfo.Environment["PVU_COMFY_AUTOSTART"] = "0";
         startInfo.Environment["AIBOS_COMPANION_AUTH_TOKEN"] = authToken;
         startInfo.Environment["AIBOS_COMPANION_INSTANCE_ID"] = instanceId;
-        // Do not set PVU_OWNER_PID. The companion owns the durable FIFO worker
-        // after an explicit AI action and must outlive the WPF viewer process.
+        // Do not delegate lifetime authority through a PID-only environment
+        // value. WPF stops its exact Process handle on a passive-only close,
+        // but releases that handle after an authenticated mutation can activate
+        // durable queued or running work.
         startInfo.Environment.Remove("PVU_OWNER_PID");
         return startInfo;
     }
@@ -3380,31 +3386,29 @@ public partial class MainWindow
             Interlocked.Exchange(
                 ref _ownedEnhancementCompanionObservation,
                 null);
-        Process? process = Interlocked.Exchange(ref _ownedEnhancementCompanion, null);
-        if (process is null)
-            return;
-
         try
         {
-            if (!process.HasExited)
-            {
-                observation?.MarkStopRequested();
-                AibosOperationLog.Write(
-                    "companion.process",
-                    "stop_requested",
-                    errorCode: "wpf_requested",
-                    mode: "owned",
-                    relatedProcessId: observation?.ProcessId ?? process.Id);
-                process.Kill(entireProcessTree: true);
-            }
+            _ = CompleteOwnedEnhancementCompanionCore(
+                ref _ownedEnhancementCompanion,
+                durableWorkActivated: false,
+                hasExited: static process => process.HasExited,
+                stop: process =>
+                {
+                    observation?.MarkStopRequested();
+                    AibosOperationLog.Write(
+                        "companion.process",
+                        "stop_requested",
+                        errorCode: "wpf_requested",
+                        mode: "owned",
+                        relatedProcessId: observation?.ProcessId ?? process.Id);
+                    process.Kill(entireProcessTree: true);
+                },
+                release: static _ => { },
+                dispose: static process => process.Dispose());
         }
         catch
         {
             // Only the exact process tree created by this WPF instance is owned.
-        }
-        finally
-        {
-            process.Dispose();
         }
     }
 
@@ -3417,22 +3421,86 @@ public partial class MainWindow
             Interlocked.Exchange(
                 ref _ownedEnhancementCompanionObservation,
                 null);
-        Process? process = Interlocked.Exchange(
-            ref _ownedEnhancementCompanion,
-            null);
-        if (observation is not null)
+        try
         {
-            observation.MarkOwnershipReleased();
-            AibosOperationLog.Write(
-                "companion.process",
-                "ownership_released",
-                elapsedMilliseconds: (long)Stopwatch.GetElapsedTime(
-                    observation.StartedTimestamp).TotalMilliseconds,
-                errorCode: "wpf_closed",
-                mode: "released",
-                relatedProcessId: observation.ProcessId);
+            _ = CompleteOwnedEnhancementCompanionCore(
+                ref _ownedEnhancementCompanion,
+                durableWorkActivated: true,
+                hasExited: static process => process.HasExited,
+                stop: static _ => { },
+                release: _ =>
+                {
+                    if (observation is null)
+                        return;
+                    observation.MarkOwnershipReleased();
+                    AibosOperationLog.Write(
+                        "companion.process",
+                        "ownership_released",
+                        elapsedMilliseconds: (long)Stopwatch.GetElapsedTime(
+                            observation.StartedTimestamp).TotalMilliseconds,
+                        errorCode: "wpf_closed",
+                        mode: "released",
+                        relatedProcessId: observation.ProcessId);
+                },
+                dispose: static process => process.Dispose());
         }
-        process?.Dispose();
+        catch
+        {
+            // Releasing the exact wrapper is best-effort and never authorizes
+            // signalling any process that this WPF instance did not create.
+        }
+    }
+
+    private void CompleteOwnedEnhancementCompanionForApplicationClose()
+    {
+        if (Volatile.Read(ref _enhancementCompanionDurableWorkActivated) == 0)
+        {
+            StopOwnedEnhancementCompanion();
+            return;
+        }
+
+        ReleaseOwnedEnhancementCompanion();
+    }
+
+    private static bool IsDurableWorkActivatingCompanionRequest(
+        HttpMethod method)
+        => !string.Equals(
+            method.Method,
+            HttpMethod.Get.Method,
+            StringComparison.OrdinalIgnoreCase);
+
+    private static EnhancementCompanionCloseDisposition
+        CompleteOwnedEnhancementCompanionCore<TProcess>(
+            ref TProcess? ownedProcess,
+            bool durableWorkActivated,
+            Func<TProcess, bool> hasExited,
+            Action<TProcess> stop,
+            Action<TProcess> release,
+            Action<TProcess> dispose)
+        where TProcess : class
+    {
+        TProcess? exactOwnedProcess = Interlocked.Exchange(
+            ref ownedProcess,
+            null);
+        if (exactOwnedProcess is null)
+            return EnhancementCompanionCloseDisposition.NoOwnedProcess;
+
+        try
+        {
+            if (durableWorkActivated)
+            {
+                release(exactOwnedProcess);
+                return EnhancementCompanionCloseDisposition.ReleasedForDurableWork;
+            }
+
+            if (!hasExited(exactOwnedProcess))
+                stop(exactOwnedProcess);
+            return EnhancementCompanionCloseDisposition.StoppedPassiveOwnedProcess;
+        }
+        finally
+        {
+            dispose(exactOwnedProcess);
+        }
     }
 
     private static void LogEnhancementCompanionProcessExit(
@@ -3520,6 +3588,115 @@ public partial class MainWindow
         bool expectedStop,
         int? exitCode)
         => ClassifyEnhancementCompanionExit(expectedStop, exitCode);
+    public static EnhancementCompanionCloseLifecycleSmokeSnapshot
+        EnhancementCompanionCloseLifecycleForSmoke()
+    {
+        var passiveOwned = new SyntheticEnhancementCompanionProcess();
+        SyntheticEnhancementCompanionProcess? passiveSlot = passiveOwned;
+        EnhancementCompanionCloseDisposition passiveDisposition =
+            CompleteOwnedEnhancementCompanionCore(
+                ref passiveSlot,
+                durableWorkActivated: false,
+                static process => process.HasExited,
+                static process => process.Stop(),
+                static process => process.Release(),
+                static process => process.Dispose());
+        EnhancementCompanionCloseDisposition repeatedDisposition =
+            CompleteOwnedEnhancementCompanionCore(
+                ref passiveSlot,
+                durableWorkActivated: false,
+                static process => process.HasExited,
+                static process => process.Stop(),
+                static process => process.Release(),
+                static process => process.Dispose());
+
+        var durableOwned = new SyntheticEnhancementCompanionProcess();
+        SyntheticEnhancementCompanionProcess? durableSlot = durableOwned;
+        EnhancementCompanionCloseDisposition durableDisposition =
+            CompleteOwnedEnhancementCompanionCore(
+                ref durableSlot,
+                durableWorkActivated: true,
+                static process => process.HasExited,
+                static process => process.Stop(),
+                static process => process.Release(),
+                static process => process.Dispose());
+
+        var alreadyExited = new SyntheticEnhancementCompanionProcess
+        {
+            HasExited = true,
+        };
+        SyntheticEnhancementCompanionProcess? exitedSlot = alreadyExited;
+        EnhancementCompanionCloseDisposition exitedDisposition =
+            CompleteOwnedEnhancementCompanionCore(
+                ref exitedSlot,
+                durableWorkActivated: false,
+                static process => process.HasExited,
+                static process => process.Stop(),
+                static process => process.Release(),
+                static process => process.Dispose());
+
+        var unowned = new SyntheticEnhancementCompanionProcess();
+        SyntheticEnhancementCompanionProcess? emptySlot = null;
+        EnhancementCompanionCloseDisposition unownedDisposition =
+            CompleteOwnedEnhancementCompanionCore(
+                ref emptySlot,
+                durableWorkActivated: false,
+                static process => process.HasExited,
+                static process => process.Stop(),
+                static process => process.Release(),
+                static process => process.Dispose());
+
+        bool passiveOwnedStopped =
+            passiveDisposition == EnhancementCompanionCloseDisposition
+                .StoppedPassiveOwnedProcess
+            && passiveSlot is null
+            && passiveOwned.StopCount == 1
+            && passiveOwned.ReleaseCount == 0
+            && passiveOwned.DisposeCount == 1;
+        bool repeatedCloseIdempotent =
+            repeatedDisposition == EnhancementCompanionCloseDisposition
+                .NoOwnedProcess
+            && passiveOwned.StopCount == 1
+            && passiveOwned.DisposeCount == 1;
+        bool durableOwnedReleased =
+            durableDisposition == EnhancementCompanionCloseDisposition
+                .ReleasedForDurableWork
+            && durableSlot is null
+            && durableOwned.StopCount == 0
+            && durableOwned.ReleaseCount == 1
+            && durableOwned.DisposeCount == 1;
+        bool exitedOwnedNotSignalled =
+            exitedDisposition == EnhancementCompanionCloseDisposition
+                .StoppedPassiveOwnedProcess
+            && exitedSlot is null
+            && alreadyExited.StopCount == 0
+            && alreadyExited.DisposeCount == 1;
+        bool unownedPreserved =
+            unownedDisposition == EnhancementCompanionCloseDisposition
+                .NoOwnedProcess
+            && unowned.StopCount == 0
+            && unowned.ReleaseCount == 0
+            && unowned.DisposeCount == 0;
+        bool requestClassificationExact =
+            !IsDurableWorkActivatingCompanionRequest(HttpMethod.Get)
+            && IsDurableWorkActivatingCompanionRequest(HttpMethod.Post)
+            && IsDurableWorkActivatingCompanionRequest(HttpMethod.Delete);
+        bool allPassed = passiveOwnedStopped
+            && repeatedCloseIdempotent
+            && durableOwnedReleased
+            && exitedOwnedNotSignalled
+            && unownedPreserved
+            && requestClassificationExact;
+
+        return new(
+            allPassed,
+            passiveOwnedStopped,
+            repeatedCloseIdempotent,
+            durableOwnedReleased,
+            exitedOwnedNotSignalled,
+            unownedPreserved,
+            requestClassificationExact);
+    }
     public static string? ResolveEnhancementCompanionRootForSmoke()
         => ResolveEnhancementCompanionRoot()?.RootPath;
     public static string? SelectEnhancementCompanionRootSettingForSmoke(
@@ -3587,6 +3764,30 @@ public partial class MainWindow
         _startEnhancementCompanionForSmoke = starter;
         _enhancementCompanionAuthToken = EnhancementCompanionSmokeAuthToken;
         _enhancementCompanionOwnershipVerified = false;
+    }
+
+    private enum EnhancementCompanionCloseDisposition
+    {
+        NoOwnedProcess,
+        StoppedPassiveOwnedProcess,
+        ReleasedForDurableWork,
+    }
+
+    private sealed class SyntheticEnhancementCompanionProcess : IDisposable
+    {
+        internal bool HasExited { get; set; }
+        internal int StopCount { get; private set; }
+        internal int ReleaseCount { get; private set; }
+        internal int DisposeCount { get; private set; }
+
+        internal void Stop()
+        {
+            StopCount++;
+            HasExited = true;
+        }
+
+        internal void Release() => ReleaseCount++;
+        public void Dispose() => DisposeCount++;
     }
 
     public void EnableEnhancementCompanionAutoStartProbeForSmoke(
@@ -4504,6 +4705,15 @@ internal sealed record ValidatedEnhancementCompanionRoot(
     string LauncherPath);
 
 internal sealed record ValidatedNodeExecutable(string Path);
+
+public sealed record EnhancementCompanionCloseLifecycleSmokeSnapshot(
+    bool AllPassed,
+    bool PassiveOwnedStopped,
+    bool RepeatedCloseIdempotent,
+    bool DurableOwnedReleased,
+    bool ExitedOwnedNotSignalled,
+    bool UnownedPreserved,
+    bool RequestClassificationExact);
 
 public sealed record EnhancementCompanionLaunchContractSmokeSnapshot(
     bool UseShellExecute,

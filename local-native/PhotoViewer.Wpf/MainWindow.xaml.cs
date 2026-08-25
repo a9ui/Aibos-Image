@@ -847,7 +847,7 @@ public partial class MainWindow : Window
             _enhancementWorkspaceGeneration++;
             Interlocked.Exchange(ref _enhancementWorkspaceThumbnailCts, null)?.Cancel();
             CancelOwnedEnhancementCompanionLifetime();
-            ReleaseOwnedEnhancementCompanion();
+            CompleteOwnedEnhancementCompanionForApplicationClose();
         };
         CardsList.MouseDoubleClick += (_, _) => OpenModal();
         RowsList.MouseDoubleClick += (_, _) => OpenModal();
@@ -19269,6 +19269,16 @@ public partial class MainWindow : Window
                     403,
                     null,
                     "The local AI companion has not proved ownership. No request was sent.");
+            }
+            if (_usingDefaultModalEnhancementSender
+                && IsDurableWorkActivatingCompanionRequest(method))
+            {
+                // Once an explicit mutation/recovery request can reach the
+                // authenticated Companion, it may own durable queued or running
+                // work and must retain the accepted close-independent lifetime.
+                Interlocked.Exchange(
+                    ref _enhancementCompanionDurableWorkActivated,
+                    1);
             }
             if (_usingDefaultModalEnhancementSender)
             {

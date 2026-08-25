@@ -103,6 +103,7 @@
   },
   "wpf": {
     "ownership": "verify HMAC, instance id, live process id, and process start time before explicit enqueue, and bind every encrypted request and authenticated response to that exact server epoch",
+    "closeLifetime": "if this WPF instance started the exact Companion process and no authenticated non-GET request was constructed, closing WPF stops only that exact owned process tree; after an authenticated mutation or recovery request can activate durable work, WPF releases its process wrapper so accepted queued or running work may continue; a listener or process not started by this WPF instance is never signalled",
     "listenerHandoff": "a replacement listener receives only an epoch-bound encrypted envelope and its response is rejected without the response proof",
     "unknownListener": "fail closed before source identity, prompt, settings, credential, job body, or durable reservation",
     "bearerToUnknownListener": false
