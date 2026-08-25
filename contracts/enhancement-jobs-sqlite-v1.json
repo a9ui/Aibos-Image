@@ -110,7 +110,8 @@
       "retainSourceFor": "validation rejection, conflict, pending delivery, ambiguous transport, malformed receipt, or writer failure",
       "mediaMutation": false
     },
-    "mutations": "enqueue, retry, cancel, reorder, dismiss, output deletion, pause, resume, wake, claim, and recovery remain authenticated companion API operations"
+    "mutations": "enqueue, retry, cancel, reorder, dismiss, output deletion, pause, resume, wake, claim, and recovery remain authenticated companion API operations",
+    "lazyResume": "when passive health is unavailable only because the default authenticated Companion is not running, the explicit Connect and Resume action may start the exact WPF-owned Companion, prove identity, run authenticated recovery, and reread current health before deciding whether paused=false is needed; an already-running queue produces no duplicate mutation, while an untrusted listener, unsupported or malformed health, ambiguous response, or concurrent UI mutation fails closed"
   },
   "catalogRevision": {
     "incrementsFor": "changes to the WPF-visible managed-media projection, including add, remove, source identity, status, and managed-output identity",

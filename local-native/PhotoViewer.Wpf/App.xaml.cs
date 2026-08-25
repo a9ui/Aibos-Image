@@ -667,6 +667,17 @@ public partial class App : Application
             return;
         }
 
+        int enhancementQueueLazyResumeSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--enhancement-queue-lazy-resume-smoke");
+        if (enhancementQueueLazyResumeSmokeIdx >= 0
+            && enhancementQueueLazyResumeSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureEnhancementQueueLazyResumeSmoke(
+                e.Args[enhancementQueueLazyResumeSmokeIdx + 1]);
+            return;
+        }
+
         int settingsUnseenDotsSmokeIdx = Array.IndexOf(e.Args, "--settings-unseen-dots-smoke");
         if (settingsUnseenDotsSmokeIdx >= 0 && settingsUnseenDotsSmokeIdx + 1 < e.Args.Length)
         {

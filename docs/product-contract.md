@@ -231,6 +231,12 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   a partial reorder or worker wake.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
   ComfyUI, or GPU side effect.
+- If passive health is unavailable because the default authenticated Companion
+  is not running, the explicit Connect and Resume control may start the exact
+  WPF-owned child, prove identity, perform authenticated recovery, and reread
+  current health before sending `paused=false` only when still required. An
+  already-running queue gets no duplicate mutation; untrusted, malformed,
+  unsupported, ambiguous, or concurrent state fails closed.
 - Managed outputs stay below the selected output root and operation folder.
   Lexical and canonical ownership checks apply before open, Favorite, retry,
   deletion, or producer reuse.
