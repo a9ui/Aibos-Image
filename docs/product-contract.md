@@ -195,6 +195,11 @@ The executable cases for these meanings are routed by
   normal boundary.
 - Passive reads and startup history access do not recover the queue or start GPU
   work, and do not mount the optional Enhancement runtime.
+- If WPF started the Companion and used it only for startup or passive reads,
+  closing WPF stops that exact owned process tree. Once an authenticated
+  mutation or recovery request can activate durable work, WPF releases its
+  process wrapper so accepted queued or running work can continue. WPF never
+  signals a listener or process it did not start.
 
 The exact capability storage, identity proof, tunnel, request, response, and
 startup rules are in `contracts/enhancement-companion-auth-v2.json`.

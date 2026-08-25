@@ -654,6 +654,19 @@ public partial class App : Application
             return;
         }
 
+        int enhancementCompanionLifetimeSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--enhancement-companion-lifetime-smoke");
+        if (enhancementCompanionLifetimeSmokeIdx >= 0
+            && enhancementCompanionLifetimeSmokeIdx + 1 < e.Args.Length)
+        {
+            int exitCode = EnhancementCompanionLifetimeSmokeRunner.Run(
+                e.Args[enhancementCompanionLifetimeSmokeIdx + 1]);
+            Environment.ExitCode = exitCode;
+            Shutdown(exitCode);
+            return;
+        }
+
         int settingsUnseenDotsSmokeIdx = Array.IndexOf(e.Args, "--settings-unseen-dots-smoke");
         if (settingsUnseenDotsSmokeIdx >= 0 && settingsUnseenDotsSmokeIdx + 1 < e.Args.Length)
         {
