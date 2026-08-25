@@ -325,6 +325,7 @@ public partial class MainWindow : Window
     private DateTime _enhancementJobsLastWriteTimeUtc;
     private long _enhancementJobsLength = -1;
     private long _enhancementCatalogRevision = -1;
+    private int _enhancementStoreProbeCount;
     private CancellationTokenSource? _enhancedStateRefreshCts;
     private Task _enhancedStateRefreshTask = Task.CompletedTask;
     private long _enhancedStateRefreshGeneration;
@@ -5917,7 +5918,7 @@ public partial class MainWindow : Window
         try
         {
             string path = ResolvedEnhancementJobsPath;
-            EnhancementStoreProbe probe = ProbeEnhancementStore(path);
+            EnhancementStoreProbe probe = ProbeEnhancementStoreTracked(path);
             bool changed = probe.Length >= 0
                 ? probe.CatalogRevision >= 0
                     ? probe.CatalogRevision != _enhancementCatalogRevision
@@ -5952,7 +5953,7 @@ public partial class MainWindow : Window
                 return;
 
             string path = ResolvedEnhancementJobsPath;
-            EnhancementStoreProbe probe = ProbeEnhancementStore(path);
+            EnhancementStoreProbe probe = ProbeEnhancementStoreTracked(path);
             DateTime writeTimeUtc = probe.LastWriteTimeUtc;
             long length = probe.Length;
             bool changed = probe.CatalogRevision >= 0
@@ -6005,10 +6006,18 @@ public partial class MainWindow : Window
                 || activity.PhotorealActive
                 || activity.I2iActive
                 || activity.VideoActive);
-        if (hasActive)
+        bool currentSessionActivatedDurableWork =
+            Volatile.Read(ref _enhancementCompanionDurableWorkActivated) != 0;
+        if (hasActive && currentSessionActivatedDurableWork)
             _activeEnhancementStateRefreshTimer.Start();
         else
             _activeEnhancementStateRefreshTimer.Stop();
+    }
+
+    private EnhancementStoreProbe ProbeEnhancementStoreTracked(string path)
+    {
+        Interlocked.Increment(ref _enhancementStoreProbeCount);
+        return ProbeEnhancementStore(path);
     }
 
     private async Task RefreshEnhancedStateInBackgroundAsync(
@@ -19275,9 +19284,7 @@ public partial class MainWindow : Window
                 // Once an explicit mutation/recovery request can reach the
                 // authenticated Companion, it may own durable queued or running
                 // work and must retain the accepted close-independent lifetime.
-                Interlocked.Exchange(
-                    ref _enhancementCompanionDurableWorkActivated,
-                    1);
+                MarkEnhancementCompanionDurableWorkActivated();
             }
             if (_usingDefaultModalEnhancementSender)
             {
@@ -27189,6 +27196,13 @@ public partial class MainWindow : Window
     public int EnhancedStoreCountForSmoke => _enhancedOutputs.Count;
     public bool RefreshEnhancedStateIfChangedForSmoke()
         => RefreshEnhancedStateIfChanged();
+    public int EnhancementStoreProbeCountForSmoke
+        => Volatile.Read(ref _enhancementStoreProbeCount);
+    public bool ActivateEnhancementDurableRevisionWatcherForSmoke()
+    {
+        MarkEnhancementCompanionDurableWorkActivated();
+        return _activeEnhancementStateRefreshTimer.IsEnabled;
+    }
     public async Task<bool> WaitForEnhancedStateRefreshForSmokeAsync(int timeoutMilliseconds = 10_000)
     {
         Task refresh = _enhancedStateRefreshTask;

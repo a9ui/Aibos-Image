@@ -1773,9 +1773,7 @@ public partial class MainWindow
             return;
         }
 
-        Interlocked.Exchange(
-            ref _enhancementCompanionDurableWorkActivated,
-            1);
+        MarkEnhancementCompanionDurableWorkActivated();
         lock (_enhancementCompanionDurableRecoverySync)
         {
             _enhancementCompanionDurableRecoveryRequested = true;
@@ -1830,6 +1828,29 @@ public partial class MainWindow
                 }
             }
         });
+    }
+
+    private void MarkEnhancementCompanionDurableWorkActivated()
+    {
+        if (Interlocked.Exchange(
+                ref _enhancementCompanionDurableWorkActivated,
+                1) != 0)
+        {
+            return;
+        }
+
+        if (Dispatcher.CheckAccess())
+        {
+            UpdateActiveEnhancementStateRefreshTimer();
+            return;
+        }
+        if (!Dispatcher.HasShutdownStarted
+            && !Dispatcher.HasShutdownFinished)
+        {
+            _ = Dispatcher.BeginInvoke(
+                new Action(UpdateActiveEnhancementStateRefreshTimer),
+                System.Windows.Threading.DispatcherPriority.Background);
+        }
     }
 
     private async Task RecoverAndWakeDurableEnqueueInboxAsync(

@@ -243,6 +243,11 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   arm the one-second poll: manual Refresh and explicit authenticated actions
   remain available, but passive display starts no process and sends no Jobs API
   or queue mutation request.
+- Queued or running records discovered during ordinary WPF startup do not by
+  themselves enable the three-second catalog-revision timer. That timer starts
+  only after this WPF session explicitly activates authenticated durable
+  Enhancement work, remains single-flight, and stops when no active work
+  remains.
 - Managed outputs stay below the selected output root and operation folder.
   Lexical and canonical ownership checks apply before open, Favorite, retry,
   deletion, or producer reuse.
