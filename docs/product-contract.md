@@ -232,12 +232,14 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
   ComfyUI, or GPU side effect.
 - The durable `progress` field is the companion-owned percentage of completed
-  adapter execution stages. Queued rows present `0`, running rows present a
-  determinate value from `1` through `99`, and only a succeeded row presents
-  `100`. A running value of `99` means final publication or verification is in
-  progress; it is not an ETA or a remaining-time estimate. WPF clamps the
-  presentation to these lifecycle bounds without writing queue state. Terminal
-  status remains the completion authority.
+  adapter execution stages. A queued row retains lifecycle value `0` but shows
+  only its waiting order and no progress bar. A running row alone shows a
+  determinate value from `1` through `99`; `99` means final publication or
+  verification is in progress, not an ETA or a remaining-time estimate.
+  Succeeded and deleted rows retain lifecycle value `100` but show their
+  terminal label without a decorative full bar. WPF clamps presentation to
+  these lifecycle bounds without writing queue state, and terminal status
+  remains the completion authority.
 - If passive health is unavailable because the default authenticated Companion
   is not running, the explicit Connect and Resume control may start the exact
   WPF-owned child, prove identity, perform authenticated recovery, and reread

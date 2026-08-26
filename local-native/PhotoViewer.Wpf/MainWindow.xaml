@@ -1668,34 +1668,34 @@
                       Stretch="Uniform" Width="15" Height="15"/>
               </Button>
               <StackPanel x:Name="EnhancementJobsQueuedBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
-                <Button x:Name="EnhancementJobsClearQueuedButton" Style="{StaticResource DangerButton}" Content="待機中をすべて消す"
+                <Button x:Name="EnhancementJobsClearQueuedButton" Style="{StaticResource DangerButton}" Content="待機をすべて中止"
                         Click="CancelAllQueuedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="126" Margin="0,0,6,0"
                         AutomationProperties.Name="待機中のAI処理をすべて中止"
-                        ToolTip="実行中のジョブは変えず、待機中だけをキャンセルします"
+                        ToolTip="実行中の処理は変えず、待機中だけを中止します"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
               </StackPanel>
               <StackPanel x:Name="EnhancementJobsFailedBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
-                <Button x:Name="EnhancementJobsRetryFailedButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
+                <Button x:Name="EnhancementJobsRetryFailedButton" Style="{StaticResource GhostButton}" Content="すべて再試行"
                         Click="RetryAllFailedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="92" Margin="0,0,6,0"
                         AutomationProperties.Name="失敗したAI処理を保存済み設定ですべて再試行"
-                        ToolTip="再試行できる失敗Jobを、それぞれの保存済みPrompt・設定で待機列へ追加します"
+                        ToolTip="再試行できる失敗処理を、それぞれの保存済みPrompt・設定で待機列へ追加します"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
-                <Button x:Name="EnhancementJobsClearFailedButton" Style="{StaticResource DangerButton}" Content="失敗を全部消す"
+                <Button x:Name="EnhancementJobsClearFailedButton" Style="{StaticResource DangerButton}" Content="失敗履歴を削除"
                         Click="ClearAllFailedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="108" Margin="0,0,6,0"
                         AutomationProperties.Name="失敗したAI処理履歴をすべて削除"
                         ToolTip="削除可能な失敗履歴だけを消します。保護対象、元画像、出力ファイルは変更しません"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
               </StackPanel>
               <StackPanel x:Name="EnhancementJobsCanceledBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
-                <Button x:Name="EnhancementJobsRetryCanceledButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
+                <Button x:Name="EnhancementJobsRetryCanceledButton" Style="{StaticResource GhostButton}" Content="すべて再試行"
                         Click="RetryAllCanceledEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="92" Margin="0,0,6,0"
                         AutomationProperties.Name="中止したAI処理を保存済み設定ですべて再試行"
-                        ToolTip="再試行できるキャンセル済みJobを、それぞれの保存済みPrompt・設定で待機列へ追加します"
+                        ToolTip="再試行できる中止済み処理を、それぞれの保存済みPrompt・設定で待機列へ追加します"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
-                <Button x:Name="EnhancementJobsClearCanceledButton" Style="{StaticResource DangerButton}" Content="キャンセルを全部消す"
+                <Button x:Name="EnhancementJobsClearCanceledButton" Style="{StaticResource DangerButton}" Content="中止履歴を削除"
                         Click="ClearAllCanceledEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="132" Margin="0,0,6,0"
                         AutomationProperties.Name="中止したAI処理履歴をすべて削除"
-                        ToolTip="削除可能なキャンセル履歴だけを消します。保護対象、元画像、出力ファイルは変更しません"
+                        ToolTip="削除可能な中止履歴だけを消します。保護対象、元画像、出力ファイルは変更しません"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
               </StackPanel>
               <Button x:Name="EnhancementJobsRefreshButton" Style="{StaticResource GhostButton}" Content="更新" Click="RefreshEnhancementJobs_Click"
@@ -1718,18 +1718,18 @@
                 <UniformGrid x:Name="EnhancementJobsStatusFiltersPanel" Columns="1">
                   <CheckBox x:Name="EnhancementJobsAllFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsStatusFilter_Click" ToolTip="すべての状態を表示"/>
                   <CheckBox x:Name="EnhancementJobsQueuedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="待機中" Tag="queued" Click="EnhancementJobsStatusFilter_Click" ToolTip="待機中だけを表示。実行中は含みません"/>
-                  <CheckBox x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="完成" Tag="completed" Click="EnhancementJobsStatusFilter_Click" ToolTip="完成または出力削除済みの履歴を表示"/>
-                  <CheckBox x:Name="EnhancementJobsFailedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="失敗" Tag="failed" Click="EnhancementJobsStatusFilter_Click" ToolTip="失敗したJobだけを表示"/>
-                  <CheckBox x:Name="EnhancementJobsCanceledFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="キャンセル" Tag="canceled" Click="EnhancementJobsStatusFilter_Click" ToolTip="キャンセル済みのJobだけを表示"/>
+                  <CheckBox x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="完了" Tag="completed" Click="EnhancementJobsStatusFilter_Click" ToolTip="完了または出力削除済みの履歴を表示"/>
+                  <CheckBox x:Name="EnhancementJobsFailedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="失敗" Tag="failed" Click="EnhancementJobsStatusFilter_Click" ToolTip="失敗したAI処理だけを表示"/>
+                  <CheckBox x:Name="EnhancementJobsCanceledFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="中止済み" Tag="canceled" Click="EnhancementJobsStatusFilter_Click" ToolTip="中止済みのAI処理だけを表示"/>
                 </UniformGrid>
                 <TextBlock Text="AI処理の種類" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,14,0,4"/>
                 <UniformGrid x:Name="EnhancementJobsOperationFiltersPanel" Columns="1">
                   <CheckBox x:Name="EnhancementJobsAllOperationsFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsOperationFilter_Click" ToolTip="すべてのAI処理を表示"/>
-                  <CheckBox x:Name="EnhancementJobsUpscaleFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="高画質化" Tag="upscale" Click="EnhancementJobsOperationFilter_Click" ToolTip="高画質化Jobだけを表示"/>
-                  <CheckBox x:Name="EnhancementJobsPhotorealFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="実写化" Tag="photoreal" Click="EnhancementJobsOperationFilter_Click" ToolTip="実写化Jobだけを表示"/>
-                  <CheckBox x:Name="EnhancementJobsVideoFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="動画化" Tag="video" Click="EnhancementJobsOperationFilter_Click" ToolTip="動画化Jobだけを表示"
+                  <CheckBox x:Name="EnhancementJobsUpscaleFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="高画質化" Tag="upscale" Click="EnhancementJobsOperationFilter_Click" ToolTip="高画質化だけを表示"/>
+                  <CheckBox x:Name="EnhancementJobsPhotorealFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="実写化" Tag="photoreal" Click="EnhancementJobsOperationFilter_Click" ToolTip="実写化だけを表示"/>
+                  <CheckBox x:Name="EnhancementJobsVideoFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="動画化" Tag="video" Click="EnhancementJobsOperationFilter_Click" ToolTip="動画化だけを表示"
                             AutomationProperties.Name="動画化のAI処理だけを表示"/>
-                  <CheckBox x:Name="EnhancementJobsI2iFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="AI編集" Tag="i2i" Click="EnhancementJobsOperationFilter_Click" ToolTip="AI編集Jobだけを表示"/>
+                  <CheckBox x:Name="EnhancementJobsI2iFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="AI編集" Tag="i2i" Click="EnhancementJobsOperationFilter_Click" ToolTip="AI編集だけを表示"/>
                 </UniformGrid>
                 <TextBlock Text="{DynamicResource UiJobsVideoKindTitle}"
                            Foreground="{StaticResource TextSecondary}"
@@ -1899,6 +1899,7 @@
                             <TextBlock Text="{Binding PresetSummary}" Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextTrimming="CharacterEllipsis"/>
                           </DockPanel>
                           <ProgressBar Grid.Row="2" Height="4" Minimum="0" Maximum="100" Value="{Binding DisplayProgress, Mode=OneWay}" IsIndeterminate="{Binding IsProgressIndeterminate, Mode=OneWay}" Margin="0,7,0,0"
+                                       Visibility="{Binding ShowProgressBar, Converter={StaticResource BoolToVis}}"
                                        AutomationProperties.Name="{Binding StatusLabel}"/>
                           <TextBlock Grid.Row="3" Text="{Binding DetailText}" Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextWrapping="Wrap" MaxHeight="34" Margin="0,6,0,0"/>
                           <DockPanel Grid.Row="4" Margin="0,8,0,0" LastChildFill="True">

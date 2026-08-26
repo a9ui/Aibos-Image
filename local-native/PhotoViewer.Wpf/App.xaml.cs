@@ -21515,28 +21515,32 @@ public partial class App : Application
                 bool activeProgressIsTruthful = activeProgressView is
                     {
                         IsProgressIndeterminate: false,
+                        ShowProgressBar: true,
                         DisplayProgress: 42,
                         StatusLabel: "処理中 42%",
                     }
                     && queuedProgressView is
                     {
                         IsProgressIndeterminate: false,
+                        ShowProgressBar: false,
                         DisplayProgress: 0,
                     }
                     && queuedProgressView.StatusLabel.StartsWith(
-                        "待機中 0%・順番 ",
+                        "待機順 ",
                         StringComparison.Ordinal)
+                    && !queuedProgressView.StatusLabel.Contains("%", StringComparison.Ordinal)
                     && completedProgressView is
                     {
                         IsProgressIndeterminate: false,
+                        ShowProgressBar: false,
                         DisplayProgress: 100,
-                        StatusLabel: "完了 100%",
+                        StatusLabel: "完了",
                     }
                     && initial.VisibleStatusLabels.Any(static label =>
                         label == "処理中 42%")
                     && initial.VisibleStatusLabels
-                        .Where(static label => label.StartsWith("待機中", StringComparison.Ordinal))
-                        .All(static label => label.Contains("0%", StringComparison.Ordinal));
+                        .Where(static label => label.StartsWith("待機順", StringComparison.Ordinal))
+                        .All(static label => !label.Contains("%", StringComparison.Ordinal));
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
@@ -23100,15 +23104,15 @@ public partial class App : Application
                     && terminalHistoryBatchBodies.Count == failedDismissBatchesBefore
                     && rejectedFailedConfirmations.Length == 2
                     && rejectedFailedConfirmations[0].Title.Contains(
-                        "失敗を全部リトライ",
+                        "失敗をすべて再試行",
                         StringComparison.Ordinal)
                     && rejectedFailedConfirmations[1].Title.Contains(
-                        "失敗を全部消す",
+                        "失敗履歴をすべて削除",
                         StringComparison.Ordinal)
                     && rejectedFailedConfirmations.All(static confirmation =>
                         confirmation.Message.Contains("保護対象", StringComparison.Ordinal))
                     && rejectedFailedConfirmations[0].Message.Contains(
-                        "各Jobに保存された",
+                        "各処理に保存された",
                         StringComparison.Ordinal);
                 int requestsBeforeBulkFailed = requests.Count;
                 int bulkFailedRetried =
@@ -23192,15 +23196,15 @@ public partial class App : Application
                     && terminalHistoryBatchBodies.Count == canceledDismissBatchesBefore
                     && rejectedCanceledConfirmations.Length == 2
                     && rejectedCanceledConfirmations[0].Title.Contains(
-                        "キャンセル済みを全部リトライ",
+                        "中止済みをすべて再試行",
                         StringComparison.Ordinal)
                     && rejectedCanceledConfirmations[1].Title.Contains(
-                        "キャンセル済みを全部消す",
+                        "中止済み履歴をすべて削除",
                         StringComparison.Ordinal)
                     && rejectedCanceledConfirmations.All(static confirmation =>
                         confirmation.Message.Contains("保護対象", StringComparison.Ordinal))
                     && rejectedCanceledConfirmations[0].Message.Contains(
-                        "各Jobに保存された",
+                        "各処理に保存された",
                         StringComparison.Ordinal);
                 int requestsBeforeBulkCanceled = requests.Count;
                 int bulkCanceledRetried =
@@ -23380,9 +23384,9 @@ public partial class App : Application
                             "delivery-queue-job",
                         ],
                         StringComparer.Ordinal)
-                    && queued.VisibleStatusLabels[0].Contains("順番 1/3", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[1].Contains("順番 2/3", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[2].Contains("順番 3/3", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[0] == "待機順 1番"
+                    && queued.VisibleStatusLabels[1] == "待機順 2番"
+                    && queued.VisibleStatusLabels[2] == "待機順 3番"
                     && afterMove.VisibleIds.Take(4).SequenceEqual(
                         [
                             "active-job",
@@ -23577,7 +23581,7 @@ public partial class App : Application
                     && afterRetry.Active == 4
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && !afterRetry.VisibleIds.Contains("failed-retry-job", StringComparer.Ordinal)
-                    && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("順番 4/", StringComparison.Ordinal))
+                    && afterRetry.VisibleStatusLabels.Any(static label => label == "待機順 4番")
                     && canceledRetryIssued
                     && afterCanceledRetry.Total == 18
                     && afterCanceledRetry.Active == 5
