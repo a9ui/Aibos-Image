@@ -21526,7 +21526,7 @@ public partial class App : Application
                         DisplayProgress: 0,
                     }
                     && queuedProgressView.StatusLabel.StartsWith(
-                        "待機順 ",
+                        "待機中 · ",
                         StringComparison.Ordinal)
                     && !queuedProgressView.StatusLabel.Contains("%", StringComparison.Ordinal)
                     && completedProgressView is
@@ -21539,7 +21539,7 @@ public partial class App : Application
                     && initial.VisibleStatusLabels.Any(static label =>
                         label == "処理中 42%")
                     && initial.VisibleStatusLabels
-                        .Where(static label => label.StartsWith("待機順", StringComparison.Ordinal))
+                        .Where(static label => label.StartsWith("待機中 · ", StringComparison.Ordinal))
                         .All(static label => !label.Contains("%", StringComparison.Ordinal));
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
@@ -23384,9 +23384,9 @@ public partial class App : Application
                             "delivery-queue-job",
                         ],
                         StringComparer.Ordinal)
-                    && queued.VisibleStatusLabels[0] == "待機順 1番"
-                    && queued.VisibleStatusLabels[1] == "待機順 2番"
-                    && queued.VisibleStatusLabels[2] == "待機順 3番"
+                    && queued.VisibleStatusLabels[0] == "待機中 · 1 / 3"
+                    && queued.VisibleStatusLabels[1] == "待機中 · 2 / 3"
+                    && queued.VisibleStatusLabels[2] == "待機中 · 3 / 3"
                     && afterMove.VisibleIds.Take(4).SequenceEqual(
                         [
                             "active-job",
@@ -23581,7 +23581,7 @@ public partial class App : Application
                     && afterRetry.Active == 4
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && !afterRetry.VisibleIds.Contains("failed-retry-job", StringComparer.Ordinal)
-                    && afterRetry.VisibleStatusLabels.Any(static label => label == "待機順 4番")
+                    && afterRetry.VisibleStatusLabels.Any(static label => label == "待機中 · 4 / 4")
                     && canceledRetryIssued
                     && afterCanceledRetry.Total == 18
                     && afterCanceledRetry.Active == 5
