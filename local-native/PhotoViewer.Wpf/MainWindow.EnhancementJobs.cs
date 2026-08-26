@@ -1812,7 +1812,7 @@ public partial class MainWindow
             _enhancementWorkspaceQueueRecoveryRequired = false;
             RefreshEnhancementQueuePauseControl();
             if (!canReuseCachedInventory)
-                ApplyEnhancementQueueHealthUnavailable("Checking queue health...");
+                ApplyEnhancementQueueHealthUnavailable("処理待ち列の状態を確認しています…");
             EnhancementJobsEmptyText.Visibility = Visibility.Collapsed;
             if (!restoreReturnViewport && !canReuseCachedInventory)
                 EnhancementJobsList.ItemsSource = null;
@@ -2467,7 +2467,7 @@ public partial class MainWindow
             _enhancementWorkspaceHealthInventoryRevisionSupported = false;
             _enhancementWorkspaceLastHealthInventoryRevision = null;
             ApplyEnhancementQueueHealthUnavailable(
-                "Update the local companion to show queue health.");
+                "処理待ち列の状態を表示するには、ローカルAIサービスを更新してください。");
             return null;
         }
 
@@ -2475,14 +2475,14 @@ public partial class MainWindow
         if (!response.Ok || response.Payload is not JsonElement payload)
         {
             ApplyEnhancementQueueHealthUnavailable(
-                "Queue health could not be read. Jobs remain available.");
+                "処理待ち列の状態を取得できません。AI処理履歴は引き続き確認できます。");
             return null;
         }
 
         if (!TryParseEnhancementQueueHealth(payload, out EnhancementQueueHealthView health))
         {
             ApplyEnhancementQueueHealthUnavailable(
-                "The companion returned an unsupported health response.");
+                "ローカルAIサービスから未対応の状態情報が返されました。");
             return null;
         }
 
@@ -8593,7 +8593,7 @@ public partial class MainWindow
         if (!job.CanUseOutput)
         {
             EnhancementJobsStatusText.Text =
-                "Open output unavailable: this operation or state is not eligible. The source image was not changed.";
+                "この処理または状態では出力を開けません。元画像は変更していません。";
             return false;
         }
         if (job.IsVideoOperation)
@@ -8604,7 +8604,7 @@ public partial class MainWindow
                     out string videoReason))
             {
                 EnhancementJobsStatusText.Text =
-                    $"Open output unavailable: {videoReason}. The source image was not changed.";
+                    $"出力を開けません: {videoReason}。元画像は変更していません。";
                 return false;
             }
 
@@ -8612,7 +8612,7 @@ public partial class MainWindow
         }
         if (!TryResolveManagedEnhancementWorkspaceOutput(job, out ManagedEnhancedOutput output, out string reason))
         {
-            EnhancementJobsStatusText.Text = $"Open output unavailable: {reason}. The source image was not changed.";
+            EnhancementJobsStatusText.Text = $"出力を開けません: {reason}。元画像は変更していません。";
             return false;
         }
 
@@ -8961,7 +8961,7 @@ public partial class MainWindow
     {
         canonicalSource = "";
         sourceSizeBytes = 0;
-        reason = "the Jobs source is unavailable";
+        reason = "AI処理履歴の保存元を利用できません";
         if (!IsEnhancementJobsTrustedModalSource(tile)
             || string.IsNullOrWhiteSpace(tile.Path)
             || !Path.IsPathFullyQualified(tile.Path)
@@ -9202,7 +9202,7 @@ public partial class MainWindow
         }
         if (!validOutput)
         {
-            EnhancementJobsStatusText.Text = $"Delete output unavailable: {reason}. The source image was not changed.";
+            EnhancementJobsStatusText.Text = $"出力を削除できません: {reason}。元画像は変更していません。";
             return;
         }
 
