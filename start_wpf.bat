@@ -73,7 +73,7 @@ exit /b %EXIT_CODE%
 
 :build_target
 echo [Aibos WPF] Building direct %CONFIG% launch target...
-"%DOTNET_CMD%" build "%PROJECT%" -c %CONFIG% --nologo
+"%DOTNET_CMD%" build "%PROJECT%" -c %CONFIG% --nologo --disable-build-servers -p:UseSharedCompilation=false
 if errorlevel 1 exit /b %ERRORLEVEL%
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\check-wpf-launch-target.ps1" -ProjectPath "%PROJECT%" -TargetPath "%TARGET%" -Record
 exit /b %ERRORLEVEL%

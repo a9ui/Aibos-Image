@@ -17,6 +17,8 @@ dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --
 ```
 
 `start_wpf.bat` remains as a compatibility entry point.
+When a rebuild is required, the launcher prefers the local .NET 10 SDK and
+uses a one-shot build that does not retain a shared compiler or build server.
 
 ## Product boundary
 
