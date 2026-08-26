@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$OutputPath = (Join-Path $env:TEMP "aibos-wpf-enhancement-jobs-workspace.json"),
-    [string]$DotnetPath = "dotnet",
+    [string]$DotnetPath = "",
     [string]$TargetFrameworkOverride = "",
     [switch]$NoRestore,
     [ValidateRange(1, 300)]
@@ -11,6 +11,20 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'lib\ContractBundles.ps1')
+$localDotnet10 = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+if ([string]::IsNullOrWhiteSpace($DotnetPath)) {
+    $DotnetPath = if (Test-Path -LiteralPath $localDotnet10 -PathType Leaf) {
+        $localDotnet10
+    }
+    else {
+        'dotnet.exe'
+    }
+}
+$DotnetPath = (Get-Command $DotnetPath -ErrorAction Stop).Source
+$installedSdks = @(& $DotnetPath --list-sdks)
+if ($LASTEXITCODE -ne 0 -or -not ($installedSdks | Where-Object { $_ -match '^10\.' })) {
+    throw "The focused Jobs verifier requires a .NET 10 SDK host: $DotnetPath"
+}
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
 $queueContractPath = Join-Path $repoRoot "contracts\enhancement-queue-order-v1.json"
 $healthContractPath = Join-Path $repoRoot "contracts\enhancement-health-v1.json"
@@ -270,7 +284,9 @@ try {
             '-c',
             $Configuration,
             "-p:OutputPath=$buildOutput",
+            '-p:UseSharedCompilation=false',
             '--nologo',
+            '--disable-build-servers',
             '-v:minimal'
         )
         if ($NoRestore) { $buildArguments += '--no-restore' }
@@ -283,6 +299,8 @@ try {
             "-property:TargetFramework=$TargetFrameworkOverride",
             "-property:OutputPath=$buildOutput",
             "-property:Configuration=$Configuration",
+            '-property:UseSharedCompilation=false',
+            '-nodeReuse:false',
             '-nologo',
             '-verbosity:minimal'
         )

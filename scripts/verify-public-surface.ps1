@@ -161,6 +161,12 @@ try {
     if ($launcher -notmatch '(?i)call\s+"?\.\\start_wpf\.bat"?' -or $launcher -match '(?i)(start_viewer|pnpm|node)') {
         Add-Finding 'wpf-launcher' 'start_aibos.bat' 1 'The primary launcher must directly delegate to start_wpf.bat only.'
     }
+    $wpfLauncher = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $repoRoot 'start_wpf.bat')
+    if ($wpfLauncher -notmatch '(?i)--disable-build-servers' -or
+        $wpfLauncher -notmatch '(?i)(?:-p:|-property:)UseSharedCompilation=false' -or
+        $wpfLauncher -match '(?i)build-server\s+shutdown') {
+        Add-Finding 'wpf-build-residency' 'start_wpf.bat' 1 'Required launcher builds must avoid persistent shared build servers without shutting down unrelated servers.'
+    }
 
     if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'LICENSE') -PathType Leaf)) {
         $warnings.Add([pscustomobject]@{
