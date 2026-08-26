@@ -19936,7 +19936,9 @@ public partial class App : Application
                     && !snapshot.ThumbnailDebouncePending
                     && snapshot.ActionPresentationContract
                     && snapshot.RealizedContainerPeak > 0
-                    && snapshot.RealizedContainerPeak <= 8
+                    // Compact rows may realize one extra card at the viewport
+                    // edge; keep the bound small and independent of job count.
+                    && snapshot.RealizedContainerPeak <= 10
                     // Seven action/source buttons plus the passive Details
                     // toggle and its collapsed Copy button per realized row.
                     && snapshot.RealizedButtonPeak <= snapshot.RealizedContainerPeak * 9
@@ -21516,6 +21518,7 @@ public partial class App : Application
                     {
                         IsProgressIndeterminate: false,
                         ShowProgressBar: true,
+                        ShowDetailText: false,
                         DisplayProgress: 42,
                         StatusLabel: "処理中 42%",
                     }
@@ -21523,16 +21526,21 @@ public partial class App : Application
                     {
                         IsProgressIndeterminate: false,
                         ShowProgressBar: false,
+                        ShowDetailText: false,
                         DisplayProgress: 0,
                     }
                     && queuedProgressView.StatusLabel.StartsWith(
                         "待機中 · ",
                         StringComparison.Ordinal)
                     && !queuedProgressView.StatusLabel.Contains("%", StringComparison.Ordinal)
+                    && queuedProgressView.TimestampText.StartsWith(
+                        "追加 ",
+                        StringComparison.Ordinal)
                     && completedProgressView is
                     {
                         IsProgressIndeterminate: false,
                         ShowProgressBar: false,
+                        ShowDetailText: false,
                         DisplayProgress: 100,
                         StatusLabel: "完了",
                     }
@@ -21540,7 +21548,12 @@ public partial class App : Application
                         label == "処理中 42%")
                     && initial.VisibleStatusLabels
                         .Where(static label => label.StartsWith("待機中 · ", StringComparison.Ordinal))
-                        .All(static label => !label.Contains("%", StringComparison.Ordinal));
+                        .All(static label => !label.Contains("%", StringComparison.Ordinal))
+                    && initial.HeaderSummary.StartsWith(
+                        $"{initial.Total:N0}件 · 実行中 1 · 待機 3",
+                        StringComparison.Ordinal)
+                    && !initial.HeaderSummary.Contains(" total ", StringComparison.Ordinal)
+                    && initial.Status == "実行順で表示中 · 履歴は最新 500件";
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
@@ -21584,8 +21597,8 @@ public partial class App : Application
                                 StringComparer.Ordinal)
                             && preserved.Polling
                             && preserved.Status.Contains(
-                                "preserved",
-                                StringComparison.OrdinalIgnoreCase)
+                                "直前の有効な一覧",
+                                StringComparison.Ordinal)
                             && requests.Skip(requestsBeforeInvalidSnapshot)
                                 .All(static request => request.StartsWith(
                                     "GET ",
@@ -21626,8 +21639,8 @@ public partial class App : Application
                                 StringComparer.Ordinal)
                             && preserved.Polling
                             && preserved.Status.Contains(
-                                "last valid snapshot",
-                                StringComparison.OrdinalIgnoreCase)
+                                "直前の有効な一覧",
+                                StringComparison.Ordinal)
                             && requests.Skip(requestsBeforeFailure)
                                 .All(static request => request.StartsWith(
                                     "GET ",
@@ -21667,8 +21680,8 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && afterInvalidRecovery.Polling
                     && !afterInvalidRecovery.Status.Contains(
-                        "last valid snapshot",
-                        StringComparison.OrdinalIgnoreCase);
+                        "直前の有効な一覧",
+                        StringComparison.Ordinal);
                 await window.PollEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterHealthOnlyPoll =
                     window.EnhancementJobsWorkspaceForSmoke();
@@ -22201,22 +22214,22 @@ public partial class App : Application
                     failedVideoView.RequestDetailsExpanded = true;
                     savedPromptDetailsContract &=
                         failedVideoView.RequestDetailsExpanded
-                        && failedVideoView.RequestDetailsButtonLabel == "詳細を閉じる";
+                        && failedVideoView.RequestDetailsButtonLabel == "閉じる";
                     failedVideoView.RequestDetailsExpanded = false;
                     savedPromptDetailsContract &=
-                        failedVideoView.RequestDetailsButtonLabel == "詳細";
+                        failedVideoView.RequestDetailsButtonLabel == "Prompt";
                 }
                 bool reorderLabelsVisible = queuedVideoView is not null
                     && queuedVideoView.Action1 is
                     {
                         Kind: "move-up",
-                        Label: "↑ 上へ",
+                        Label: "↑",
                         Visible: true,
                     }
                     && queuedVideoView.Action2 is
                     {
                         Kind: "move-down",
-                        Label: "↓ 下へ",
+                        Label: "↓",
                         Visible: true,
                     };
                 int requestsBeforeUnsupportedActions = requests.Count;

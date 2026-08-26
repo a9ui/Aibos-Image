@@ -26,6 +26,8 @@ if ($LASTEXITCODE -ne 0 -or -not ($installedSdks | Where-Object { $_ -match '^10
     throw "The focused Jobs verifier requires a .NET 10 SDK host: $DotnetPath"
 }
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
+$mainWindowXamlPath = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\MainWindow.xaml"
+$jobsSourcePath = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\MainWindow.EnhancementJobs.cs"
 $queueContractPath = Join-Path $repoRoot "contracts\enhancement-queue-order-v1.json"
 $healthContractPath = Join-Path $repoRoot "contracts\enhancement-health-v1.json"
 $healthFixturePath = Join-Path $repoRoot "contracts\fixtures\enhancement-health-working-v1.json"
@@ -42,6 +44,25 @@ if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
 try {
+    $mainWindowXaml = Get-Content -LiteralPath $mainWindowXamlPath -Raw
+    $jobsSource = Get-Content -LiteralPath $jobsSourcePath -Raw
+    $jobsPresentationChecks = @(
+        $mainWindowXaml.Contains('<TextBlock Text="Jobs" Foreground="{StaticResource TextPrimary}"')
+        $mainWindowXaml.Contains('<TextBlock Text="FILTERS" Foreground="{StaticResource TextTertiary}"')
+        $mainWindowXaml.Contains('<TextBlock Text="LOCAL AI" Foreground="{StaticResource TextSecondary}"')
+        $mainWindowXaml.Contains('<TextBlock Text="Prompt / Settings" Foreground="{StaticResource TextSecondary}"')
+        $mainWindowXaml.Contains('Visibility="{Binding ShowProgressBar, Converter={StaticResource BoolToVis}}"')
+        $mainWindowXaml.Contains('Visibility="{Binding ShowDetailText, Converter={StaticResource BoolToVis}}"')
+        (-not $mainWindowXaml.Contains('AI処理版は元画像とは別に保存しています。'))
+        (-not $mainWindowXaml.Contains('AI処理結果は別ファイルに保存します。'))
+        $jobsSource.Contains('$"待機中 · {QueuePosition} / {QueueCount}"')
+        $jobsSource.Contains('public bool ShowProgressBar => Status == "running";')
+        $jobsSource.Contains('RequestDetailsExpanded ? "閉じる" : "Prompt";')
+        (-not $jobsSource.Contains('反映中  ·  '))
+    )
+    if ($jobsPresentationChecks -contains $false) {
+        throw "Jobs presentation hierarchy checks failed."
+    }
     if (-not (Test-Path -LiteralPath $queueContractPath -PathType Leaf)) {
         throw "Enhancement queue ordering contract was not found: $queueContractPath"
     }

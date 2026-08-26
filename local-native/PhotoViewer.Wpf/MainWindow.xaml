@@ -467,7 +467,7 @@
             <Path Data="M12,5 v14 M5,12 h14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" Stretch="Uniform" Width="17" Height="17"/>
           </Button>
           <Button x:Name="OpenEnhancementJobsButton" Style="{StaticResource GhostButton}" Height="32" MinWidth="70" Padding="9,0" Margin="4,0,4,0"
-                  Click="OpenEnhancementJobs_Click" ToolTip="AI処理履歴を開く" AutomationProperties.Name="AI処理履歴を開く"
+                  Click="OpenEnhancementJobs_Click" ToolTip="Jobsを開く" AutomationProperties.Name="Jobsを開く"
                   WindowChrome.IsHitTestVisibleInChrome="True">
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="{DynamicResource UiJobs}"/>
@@ -1617,8 +1617,8 @@
     <!-- AI Enhancement jobs: passive until explicitly opened; polling stops when hidden. -->
     <Grid x:Name="EnhancementJobsDialog" Grid.RowSpan="3" Panel.ZIndex="520" Visibility="Collapsed" Background="{DynamicResource OverlayStrongBrush}"
           MouseLeftButtonDown="EnhancementJobsBackdrop_MouseLeftButtonDown"
-          AutomationProperties.Name="AI処理履歴の画面"
-          AutomationProperties.HelpText="AI処理履歴を確認します。Escキーまたは背景のクリックで閉じます。">
+          AutomationProperties.Name="Jobs画面"
+          AutomationProperties.HelpText="Jobsを確認します。Escキーまたは背景のクリックで閉じます。">
       <Border x:Name="EnhancementJobsDialogSurface" MaxWidth="1120" MaxHeight="1040" Margin="32,10" CornerRadius="6"
               Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
               HorizontalAlignment="Stretch" VerticalAlignment="Stretch" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
@@ -1626,7 +1626,7 @@
           <Grid.RowDefinitions><RowDefinition Height="54"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
           <DockPanel Grid.Row="0" Margin="16,0,10,0" LastChildFill="True">
             <Button x:Name="EnhancementJobsCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseEnhancementJobs_Click"
-                    ToolTip="AI処理履歴を閉じる" AutomationProperties.Name="AI処理履歴を閉じる"
+                    ToolTip="Jobsを閉じる" AutomationProperties.Name="Jobsを閉じる"
                     WindowChrome.IsHitTestVisibleInChrome="True">
               <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
             </Button>
@@ -1699,11 +1699,11 @@
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
               </StackPanel>
               <Button x:Name="EnhancementJobsRefreshButton" Style="{StaticResource GhostButton}" Content="更新" Click="RefreshEnhancementJobs_Click"
-                      Height="30" MinWidth="72" AutomationProperties.Name="AI処理履歴を更新"
+                      Height="30" MinWidth="72" AutomationProperties.Name="Jobsを更新"
                       WindowChrome.IsHitTestVisibleInChrome="True"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-              <TextBlock Text="AI処理履歴" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold"/>
+              <TextBlock Text="Jobs" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold"/>
               <TextBlock x:Name="EnhancementJobsHeaderSummary" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="12,2,0,0"/>
             </StackPanel>
           </DockPanel>
@@ -1713,7 +1713,7 @@
             <Border Grid.Column="0" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,1,0" Padding="11,14">
               <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel>
-                <TextBlock Text="絞り込み" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="4,0,0,8"/>
+                <TextBlock Text="FILTERS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="4,0,0,8"/>
                 <TextBlock Text="状態" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,0,0,4"/>
                 <UniformGrid x:Name="EnhancementJobsStatusFiltersPanel" Columns="1">
                   <CheckBox x:Name="EnhancementJobsAllFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsStatusFilter_Click" ToolTip="すべての状態を表示"/>
@@ -1722,7 +1722,7 @@
                   <CheckBox x:Name="EnhancementJobsFailedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="失敗" Tag="failed" Click="EnhancementJobsStatusFilter_Click" ToolTip="失敗したAI処理だけを表示"/>
                   <CheckBox x:Name="EnhancementJobsCanceledFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="中止済み" Tag="canceled" Click="EnhancementJobsStatusFilter_Click" ToolTip="中止済みのAI処理だけを表示"/>
                 </UniformGrid>
-                <TextBlock Text="AI処理の種類" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,14,0,4"/>
+                <TextBlock Text="種類" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,14,0,4"/>
                 <UniformGrid x:Name="EnhancementJobsOperationFiltersPanel" Columns="1">
                   <CheckBox x:Name="EnhancementJobsAllOperationsFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsOperationFilter_Click" ToolTip="すべてのAI処理を表示"/>
                   <CheckBox x:Name="EnhancementJobsUpscaleFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="高画質化" Tag="upscale" Click="EnhancementJobsOperationFilter_Click" ToolTip="高画質化だけを表示"/>
@@ -1777,7 +1777,7 @@
                             AutomationProperties.Name="{DynamicResource UiJobsVideoKindFinish}"
                             AutomationProperties.HelpText="{DynamicResource UiJobsVideoKindFinishHelp}"/>
                 </UniformGrid>
-                <TextBlock Text="履歴の表示件数" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,14,0,4"/>
+                <TextBlock Text="HISTORY" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,14,0,4"/>
                 <ComboBox x:Name="EnhancementJobsHistoryLimitComboBox"
                           Style="{StaticResource PhotorealSettingsComboBox}"
                           SelectedIndex="1"
@@ -1798,8 +1798,7 @@
                         ToolTip="待機中の実写化へ現在のPrompt・LoRA・強さ・CFG・品質・解像度・Seedを反映。各PNGの個別Prompt変換と待ち順は維持します"/>
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="9" Margin="0,16,0,0">
                   <StackPanel>
-                    <TextBlock Text="ローカルAIサービス" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold"/>
-                    <TextBlock Text="この画面は処理状態を読み取るだけです。開くだけで新しい処理を作成したり、処理役を起動したりしません。" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                    <TextBlock Text="LOCAL AI" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold"/>
                     <TextBlock x:Name="EnhancementJobsHealthStateText" Text="状態を取得できません" Foreground="{StaticResource TextTertiary}"
                                FontSize="11.5" FontWeight="SemiBold" Margin="0,10,0,0"
                                AutomationProperties.Name="AI処理待ち列の状態"
@@ -1817,7 +1816,7 @@
 
             <Grid Grid.Column="1" Margin="12,10,10,8">
               <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-              <TextBlock Grid.Row="0" x:Name="EnhancementJobsEmptyText" Text="この条件に該当するAI処理履歴はありません。" Foreground="{StaticResource TextTertiary}" FontSize="13"
+              <TextBlock Grid.Row="0" x:Name="EnhancementJobsEmptyText" Text="該当するJobはありません。" Foreground="{StaticResource TextTertiary}" FontSize="13"
                          HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
               <ListBox Grid.Row="0" x:Name="EnhancementJobsList" Background="Transparent" BorderThickness="0" Padding="0"
                        ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
@@ -1825,7 +1824,7 @@
                        VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"
                        VirtualizingPanel.CacheLength="0.25,0.25" VirtualizingPanel.CacheLengthUnit="Page"
                        ScrollViewer.ScrollChanged="EnhancementJobsList_ScrollChanged"
-                       AutomationProperties.Name="AI処理履歴の一覧">
+                       AutomationProperties.Name="Jobs一覧">
                 <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
                 <ListBox.ItemContainerStyle>
                   <Style TargetType="ListBoxItem">
@@ -1901,13 +1900,14 @@
                           <ProgressBar Grid.Row="2" Height="4" Minimum="0" Maximum="100" Value="{Binding DisplayProgress, Mode=OneWay}" IsIndeterminate="{Binding IsProgressIndeterminate, Mode=OneWay}" Margin="0,7,0,0"
                                        Visibility="{Binding ShowProgressBar, Converter={StaticResource BoolToVis}}"
                                        AutomationProperties.Name="{Binding StatusLabel}"/>
-                          <TextBlock Grid.Row="3" Text="{Binding DetailText}" Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextWrapping="Wrap" MaxHeight="34" Margin="0,6,0,0"/>
+                          <TextBlock Grid.Row="3" Text="{Binding DetailText}" Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextWrapping="Wrap" MaxHeight="34" Margin="0,6,0,0"
+                                     Visibility="{Binding ShowDetailText, Converter={StaticResource BoolToVis}}"/>
                           <DockPanel Grid.Row="4" Margin="0,8,0,0" LastChildFill="True">
                             <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" VerticalAlignment="Center"/>
                             <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
                               <Button Style="{StaticResource GhostButton}" Content="{Binding RequestDetailsButtonLabel}" Tag="{Binding}" Click="ToggleEnhancementJobDetails_Click"
-                                      Height="28" MinWidth="58" Margin="6,0,0,0" ToolTip="保存されたPromptとAI設定を表示"
-                                      AutomationProperties.Name="保存されたPromptとAI設定の詳細を表示"/>
+                                      Height="28" MinWidth="58" Margin="6,0,0,0" ToolTip="保存されたPromptと設定を表示"
+                                      AutomationProperties.Name="保存されたPromptと設定を表示"/>
                               <Button Style="{StaticResource GhostButton}" Content="{Binding Action1.Label}" Tag="{Binding}" CommandParameter="{Binding Action1.Kind}" Click="EnhancementJobAction_Click" Height="28" MinWidth="{Binding Action1.MinWidth}" Margin="6,0,0,0" Visibility="{Binding Action1.Visible, Converter={StaticResource BoolToVis}}" IsEnabled="{Binding Action1.Enabled}" ToolTip="{Binding Action1.ToolTip}" AutomationProperties.Name="{Binding Action1.AutomationName}"/>
                               <Button Style="{StaticResource GhostButton}" Content="{Binding Action2.Label}" Tag="{Binding}" CommandParameter="{Binding Action2.Kind}" Click="EnhancementJobAction_Click" Height="28" MinWidth="{Binding Action2.MinWidth}" Margin="6,0,0,0" Visibility="{Binding Action2.Visible, Converter={StaticResource BoolToVis}}" IsEnabled="{Binding Action2.Enabled}" ToolTip="{Binding Action2.ToolTip}" AutomationProperties.Name="{Binding Action2.AutomationName}"/>
                               <Button Style="{StaticResource GhostButton}" Content="{Binding Action3.Label}" Tag="{Binding}" CommandParameter="{Binding Action3.Kind}" Click="EnhancementJobAction_Click" Height="28" MinWidth="{Binding Action3.MinWidth}" Margin="6,0,0,0" Visibility="{Binding Action3.Visible, Converter={StaticResource BoolToVis}}" IsEnabled="{Binding Action3.Enabled}" ToolTip="{Binding Action3.ToolTip}" AutomationProperties.Name="{Binding Action3.AutomationName}"/>
@@ -1925,9 +1925,9 @@
                             <DockPanel Grid.Row="0" LastChildFill="True">
                               <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="コピー" Tag="{Binding}"
                                       Click="CopyEnhancementJobDetails_Click" Height="27" MinWidth="62" Margin="8,0,0,5"
-                                      ToolTip="表示中のPromptと設定をClipboardへコピー"
+                                      ToolTip="表示中のPromptと設定をクリップボードへコピー"
                                       AutomationProperties.Name="PromptとAI設定をコピー"/>
-                              <TextBlock Text="保存されたPrompt・設定" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                              <TextBlock Text="Prompt / Settings" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
                             </DockPanel>
                             <TextBox Grid.Row="1" Text="{Binding RequestDetailsText, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True"
                                      TextWrapping="Wrap" MaxHeight="300" Padding="8" Background="{StaticResource BgSecondary}"
@@ -1945,20 +1945,20 @@
                          HorizontalAlignment="Right" Margin="0,4,2,0">
                 <Button x:Name="EnhancementJobsPreviousPageButton" Style="{StaticResource GhostButton}" Content="前へ"
                         Click="EnhancementJobsPreviousPage_Click" Height="28" MinWidth="58" IsEnabled="False"
-                        AutomationProperties.Name="AI処理履歴の前のページ"/>
+                        AutomationProperties.Name="Jobsの前のページ"/>
                 <TextBlock x:Name="EnhancementJobsPageText" Text="0 / 0" Foreground="{StaticResource TextSecondary}"
                            FontSize="11" VerticalAlignment="Center" Margin="10,0"
-                           AutomationProperties.Name="AI処理履歴のページ範囲"/>
+                           AutomationProperties.Name="Jobsのページ範囲"/>
                 <Button x:Name="EnhancementJobsNextPageButton" Style="{StaticResource GhostButton}" Content="次へ"
                         Click="EnhancementJobsNextPage_Click" Height="28" MinWidth="58" IsEnabled="False"
-                        AutomationProperties.Name="AI処理履歴の次のページ"/>
+                        AutomationProperties.Name="Jobsの次のページ"/>
               </DockPanel>
             </Grid>
           </Grid>
 
           <Border Grid.Row="2" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,0,0" Padding="12,0">
             <TextBlock x:Name="EnhancementJobsStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                       AutomationProperties.Name="AI処理履歴の状態" AutomationProperties.LiveSetting="Polite"/>
+                       AutomationProperties.Name="Jobsの状態" AutomationProperties.LiveSetting="Polite"/>
           </Border>
         </Grid>
       </Border>
