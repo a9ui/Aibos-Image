@@ -21514,32 +21514,41 @@ public partial class App : Application
                         as EnhancementWorkspaceJobView;
                 bool activeProgressIsTruthful = activeProgressView is
                     {
-                        IsProgressIndeterminate: true,
-                        StatusLabel: "実行中  ·  Running",
+                        IsProgressIndeterminate: false,
+                        DisplayProgress: 42,
+                        StatusLabel: "処理中 42%",
                     }
-                    && queuedProgressView is { IsProgressIndeterminate: true }
-                    && queuedProgressView.StatusLabel.EndsWith(
-                        "  ·  Queued",
+                    && queuedProgressView is
+                    {
+                        IsProgressIndeterminate: false,
+                        DisplayProgress: 0,
+                    }
+                    && queuedProgressView.StatusLabel.StartsWith(
+                        "待機中 0%・順番 ",
                         StringComparison.Ordinal)
                     && completedProgressView is
                     {
                         IsProgressIndeterminate: false,
-                        StatusLabel: "Completed",
+                        DisplayProgress: 100,
+                        StatusLabel: "完了 100%",
                     }
-                    && initial.VisibleStatusLabels.All(static label =>
-                        !label.Contains('%'));
+                    && initial.VisibleStatusLabels.Any(static label =>
+                        label == "処理中 42%")
+                    && initial.VisibleStatusLabels
+                        .Where(static label => label.StartsWith("待機中", StringComparison.Ordinal))
+                        .All(static label => label.Contains("0%", StringComparison.Ordinal));
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
                     && passiveOpenRequests.Contains("GET /api/enhance/jobs", StringComparer.Ordinal)
                     && passiveOpenRequests.Contains("GET /api/enhance/health", StringComparer.Ordinal);
-                bool healthVisible = initial.HealthState == "Working"
-                    && initial.HealthDetail == "1 running / 3 queued"
+                bool healthVisible = initial.HealthState == "処理中"
+                    && initial.HealthDetail == "実行中 1件 / 待機中 3件"
                     && initial.QueuePaused == false
                     && initial.QueuePauseLabel == "一時停止"
                     && initial.QueuePauseEnabled
                     && initial.QueuedPhotorealPromptUpdateSupported;
-                bool healthProvenance = initial.HealthRevision == "Local AI 69684954";
+                bool healthProvenance = initial.HealthRevision == "ローカルAI 69684954";
                 bool healthPassive = initial.HealthGetRequests >= 1 && passiveOpen;
                 string[] validSnapshotIds = initial.VisibleIds.ToArray();
                 async Task<bool> InvalidJobsSnapshotRejectedAsync(
@@ -21757,7 +21766,7 @@ public partial class App : Application
                 EnhancementJobsWorkspaceSmokeSnapshot legacyPromptUpdateHealth =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool legacyPromptUpdateCapabilitySafe =
-                    legacyPromptUpdateHealth.HealthState == "Working"
+                    legacyPromptUpdateHealth.HealthState == "処理中"
                     && !legacyPromptUpdateHealth
                         .QueuedPhotorealPromptUpdateSupported
                     && legacyPromptUpdateHealth.QueuePaused == false
@@ -21767,7 +21776,7 @@ public partial class App : Application
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot legacyPauseHealth =
                     window.EnhancementJobsWorkspaceForSmoke();
-                bool legacyPauseCapabilitySafe = legacyPauseHealth.HealthState == "Working"
+                bool legacyPauseCapabilitySafe = legacyPauseHealth.HealthState == "処理中"
                     && legacyPauseHealth.QueuePaused is null
                     && !legacyPauseHealth.QueuePauseEnabled
                     && legacyPauseHealth.Total == initial.Total;
@@ -21775,7 +21784,7 @@ public partial class App : Application
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot legacyHealth =
                     window.EnhancementJobsWorkspaceForSmoke();
-                bool legacyHealthFallback = legacyHealth.HealthState == "Health unavailable"
+                bool legacyHealthFallback = legacyHealth.HealthState == "状態を取得できません"
                     && legacyHealth.Total == initial.Total
                     && legacyHealth.Active == initial.Active
                     && legacyHealth.Polling;
@@ -21783,24 +21792,24 @@ public partial class App : Application
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot futureHealth =
                     window.EnhancementJobsWorkspaceForSmoke();
-                bool futureHealthFallback = futureHealth.HealthState == "Health unavailable"
+                bool futureHealthFallback = futureHealth.HealthState == "状態を取得できません"
                     && futureHealth.Total == initial.Total
                     && futureHealth.Active == initial.Active;
                 healthMode = "unknown-issue";
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot unknownIssueHealth =
                     window.EnhancementJobsWorkspaceForSmoke();
-                bool unknownIssueSafe = unknownIssueHealth.HealthState == "Needs attention"
-                    && unknownIssueHealth.HealthDetail == "Queue attention is required."
+                bool unknownIssueSafe = unknownIssueHealth.HealthState == "確認が必要"
+                    && unknownIssueHealth.HealthDetail == "処理待ち列の確認が必要です。"
                     && unknownIssueHealth.Total == initial.Total;
                 healthMode = "h3-seal-missing";
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot missingH3SealHealth =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool h3SealRecoveryAction =
-                    missingH3SealHealth.HealthState == "Needs attention"
+                    missingH3SealHealth.HealthState == "確認が必要"
                     && missingH3SealHealth.HealthDetail
-                        == "MiniMax H3 sealed runtime is not mounted. Resume the queue to restore it."
+                        == "MiniMax H3の保護済み実行環境が接続されていません。再開して復旧してください。"
                     && missingH3SealHealth.QueuePaused == false
                     && missingH3SealHealth.QueuePauseLabel == "再開"
                     && missingH3SealHealth.QueuePauseEnabled
@@ -21812,14 +21821,14 @@ public partial class App : Application
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot recoveredHealth =
                     window.EnhancementJobsWorkspaceForSmoke();
-                bool healthRecovered = recoveredHealth.HealthState == "Working"
-                    && recoveredHealth.HealthRevision == "Local AI 69684954";
+                bool healthRecovered = recoveredHealth.HealthState == "処理中"
+                    && recoveredHealth.HealthRevision == "ローカルAI 69684954";
                 bool pauseIssued = await window.SetEnhancementQueuePausedForSmokeAsync(true);
                 EnhancementJobsWorkspaceSmokeSnapshot pausedQueue =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool pauseCurrentContinues = pauseIssued
-                    && pausedQueue.HealthState == "Paused"
-                    && pausedQueue.HealthDetail == "1 running now; 3 queued jobs will remain paused"
+                    && pausedQueue.HealthState == "一時停止中"
+                    && pausedQueue.HealthDetail == "実行中 1件。待機中 3件は一時停止を維持します"
                     && pausedQueue.QueuePaused == true
                     && pausedQueue.QueuePauseLabel == "再開"
                     && pausedQueue.QueuePauseEnabled
@@ -21830,7 +21839,7 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool queuePauseContract = pauseCurrentContinues
                     && resumeIssued
-                    && resumedQueue.HealthState == "Working"
+                    && resumedQueue.HealthState == "処理中"
                     && resumedQueue.QueuePaused == false
                     && resumedQueue.QueuePauseLabel == "一時停止"
                     && resumedQueue.QueuePauseEnabled
@@ -21872,7 +21881,7 @@ public partial class App : Application
                         ["queue-later-job", "delivery-queue-job"],
                         StringComparer.Ordinal)
                     && queuedVideoOnly.VisibleOperationLabels.All(static label =>
-                        string.Equals(label, "VIDEO  動画化", StringComparison.Ordinal))
+                        string.Equals(label, "動画化", StringComparison.Ordinal))
                     && window.QueuedBulkPanelVisibleForSmoke;
                 window.SelectEnhancementJobsStatusFilterForSmoke("all");
                 window.SelectEnhancementJobsOperationFilterForSmoke("all");
@@ -21892,7 +21901,7 @@ public partial class App : Application
                     && operationPillTurnedOff
                     && toggledVideo.Filtered > 0
                     && toggledVideo.VisibleOperationLabels.All(static label =>
-                        string.Equals(label, "VIDEO  動画化", StringComparison.Ordinal));
+                        string.Equals(label, "動画化", StringComparison.Ordinal));
                 window.SelectEnhancementJobsFilterForSmoke("failed");
                 EnhancementJobsWorkspaceSmokeSnapshot failed = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("completed");
@@ -23371,9 +23380,9 @@ public partial class App : Application
                             "delivery-queue-job",
                         ],
                         StringComparer.Ordinal)
-                    && queued.VisibleStatusLabels[0].Contains("待ち順 1", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[1].Contains("待ち順 2", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[2].Contains("待ち順 3", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[0].Contains("順番 1/3", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[1].Contains("順番 2/3", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[2].Contains("順番 3/3", StringComparison.Ordinal)
                     && afterMove.VisibleIds.Take(4).SequenceEqual(
                         [
                             "active-job",
@@ -23382,14 +23391,14 @@ public partial class App : Application
                             "delivery-queue-job",
                         ],
                         StringComparer.Ordinal);
-                bool operationLabelsVisible = initial.VisibleOperationLabels.Contains("HQ  高画質化", StringComparer.Ordinal)
-                    && initial.VisibleOperationLabels.Contains("VIDEO  動画化", StringComparer.Ordinal)
-                    && initial.VisibleOperationLabels.Contains("UNSUPPORTED  未対応", StringComparer.Ordinal)
-                    && completed.VisibleOperationLabels.Contains("REAL  実写化", StringComparer.Ordinal)
-                    && completed.VisibleOperationLabels.Contains("VIDEO  動画化", StringComparer.Ordinal)
+                bool operationLabelsVisible = initial.VisibleOperationLabels.Contains("高画質化", StringComparer.Ordinal)
+                    && initial.VisibleOperationLabels.Contains("動画化", StringComparer.Ordinal)
+                    && initial.VisibleOperationLabels.Contains("未対応", StringComparer.Ordinal)
+                    && completed.VisibleOperationLabels.Contains("実写化", StringComparer.Ordinal)
+                    && completed.VisibleOperationLabels.Contains("動画化", StringComparer.Ordinal)
                     && videoOnly.Filtered > 0
                     && videoOnly.VisibleOperationLabels.All(static label =>
-                        string.Equals(label, "VIDEO  動画化", StringComparison.Ordinal));
+                        string.Equals(label, "動画化", StringComparison.Ordinal));
                 bool rerunSettingsContract = false;
                 if (!string.IsNullOrWhiteSpace(randomRerunBody))
                 {
@@ -23568,7 +23577,7 @@ public partial class App : Application
                     && afterRetry.Active == 4
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && !afterRetry.VisibleIds.Contains("failed-retry-job", StringComparer.Ordinal)
-                    && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 4", StringComparison.Ordinal))
+                    && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("順番 4/", StringComparison.Ordinal))
                     && canceledRetryIssued
                     && afterCanceledRetry.Total == 18
                     && afterCanceledRetry.Active == 5

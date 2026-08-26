@@ -2219,7 +2219,7 @@ public partial class MainWindow
         EnhancementJobsRefreshButton.IsEnabled = false;
         RefreshEnhancementQueuePauseControl();
         if (!isPoll)
-            EnhancementJobsStatusText.Text = "Refreshing jobs...";
+            EnhancementJobsStatusText.Text = "処理履歴を更新しています…";
         try
         {
             if (refreshHealth)
@@ -2562,7 +2562,7 @@ public partial class MainWindow
             return false;
         }
 
-        string revision = "Local AI revision unavailable";
+        string revision = "ローカルAIの版を取得できません";
         if (runtimeElement.TryGetProperty("sourceRevision", out JsonElement revisionElement))
         {
             if (revisionElement.ValueKind == JsonValueKind.String)
@@ -2573,7 +2573,7 @@ public partial class MainWindow
                     string prefix = sourceRevision.Length > 8
                         ? sourceRevision[..8]
                         : sourceRevision;
-                    revision = $"Local AI {prefix}";
+                    revision = $"ローカルAI {prefix}";
                 }
             }
             else if (revisionElement.ValueKind != JsonValueKind.Null)
@@ -2853,12 +2853,12 @@ public partial class MainWindow
 
         string stateLabel = status switch
         {
-            "healthy" => "Healthy",
-            "working" => "Working",
-            _ => "Needs attention",
+            "healthy" => "正常",
+            "working" => "処理中",
+            _ => "確認が必要",
         };
         if (status != "needs-attention" && paused == true)
-            stateLabel = "Paused";
+            stateLabel = "一時停止中";
         bool queueRecoveryRequired = string.Equals(
             firstIssueCode,
             "queued-without-pump",
@@ -2868,16 +2868,16 @@ public partial class MainWindow
                 ? DescribeMiniMaxH3QueueUnavailable(unavailableMiniMaxH3.ReasonCode)
                 : DescribeEnhancementQueueHealthIssue(firstIssueCode);
         string detail = status == "needs-attention"
-            ? firstIssue ?? "Queue attention is required."
+            ? firstIssue ?? "処理待ち列の確認が必要です。"
             : paused == true && running > 0
-                ? $"{running:N0} running now; {queued:N0} queued jobs will remain paused"
+                ? $"実行中 {running:N0}件。待機中 {queued:N0}件は一時停止を維持します"
             : paused == true && queued > 0
-                ? $"{queued:N0} queued; no new job will start"
+                ? $"待機中 {queued:N0}件。新しい処理は開始しません"
             : paused == true
-                ? "Queue is paused"
+                ? "処理待ち列は一時停止中です"
             : running == 0 && queued == 0
-                ? "Queue is idle"
-                : $"{running:N0} running / {queued:N0} queued";
+                ? "処理待ち列は空です"
+                : $"実行中 {running:N0}件 / 待機中 {queued:N0}件";
         string foregroundResource = status switch
         {
             "healthy" => "Success",
@@ -2952,36 +2952,36 @@ public partial class MainWindow
     private static string DescribeEnhancementQueueHealthIssue(string? issue)
         => issue switch
         {
-            "multiple-running-jobs" => "More than one job is marked running.",
-            "running-without-worker-identity" => "The running job has no worker identity.",
-            "running-without-local-pump" => "A job is running without this process's queue pump.",
-            "queued-without-pump" => "Queued work is waiting without a queue pump.",
-            "worker-loop-failing" => "The worker loop reported a failure.",
-            "non-loopback-server" => "The local companion is not loopback-only.",
-            "non-loopback-comfyui" => "ComfyUI is not loopback-only.",
-            _ => "Queue attention is required.",
+            "multiple-running-jobs" => "複数の処理が同時に実行中として記録されています。",
+            "running-without-worker-identity" => "実行中の処理に実行役の識別情報がありません。",
+            "running-without-local-pump" => "このローカル処理役が管理していない実行中の処理があります。",
+            "queued-without-pump" => "待機中の処理を開始する実行役が動いていません。",
+            "worker-loop-failing" => "処理役の繰り返し実行で失敗が報告されました。",
+            "non-loopback-server" => "ローカルAIサービスがこのPC内だけの接続に限定されていません。",
+            "non-loopback-comfyui" => "ComfyUIがこのPC内だけの接続に限定されていません。",
+            _ => "処理待ち列の確認が必要です。",
         };
 
     private static string DescribeMiniMaxH3QueueUnavailable(string? reasonCode)
         => reasonCode switch
         {
             "MINIMAX_H3_RUNTIME_SEAL_INVALID" =>
-                "MiniMax H3 sealed runtime is not mounted. Resume the queue to restore it.",
+                "MiniMax H3の保護済み実行環境が接続されていません。再開して復旧してください。",
             "MINIMAX_H3_RUNTIME_MANIFEST_INVALID" =>
-                "MiniMax H3 runtime verification failed. Restore the configured runtime, then resume.",
+                "MiniMax H3実行環境の検証に失敗しました。設定済み環境を復旧してから再開してください。",
             "MINIMAX_H3_LICENSE_NOT_ACCEPTED" =>
-                "MiniMax H3 license acceptance is not verified.",
+                "MiniMax H3の利用条件への同意を確認できません。",
             "MINIMAX_H3_MODELS_UNVERIFIED" =>
-                "MiniMax H3 model verification failed.",
+                "MiniMax H3モデルの検証に失敗しました。",
             "MINIMAX_H3_WORKFLOW_UNVERIFIED" =>
-                "MiniMax H3 workflow verification failed.",
+                "MiniMax H3処理手順の検証に失敗しました。",
             "MINIMAX_H3_GPU_CANARY_UNVERIFIED" =>
-                "MiniMax H3 GPU verification is incomplete.",
+                "MiniMax H3のGPU検証が完了していません。",
             "MINIMAX_H3_BACKEND_CONFIG_INVALID" =>
-                "MiniMax H3 backend configuration is invalid.",
+                "MiniMax H3の裏側設定が正しくありません。",
             "MINIMAX_H3_WRITER_DISABLED" =>
-                "MiniMax H3 processing is disabled in the local companion.",
-            _ => "MiniMax H3 is unavailable. Restore it, then resume the queue.",
+                "ローカルAIサービスでMiniMax H3処理が無効です。",
+            _ => "MiniMax H3を利用できません。復旧してから処理待ち列を再開してください。",
         };
 
     private void ApplyEnhancementQueueHealth(EnhancementQueueHealthView health)
@@ -3039,7 +3039,7 @@ public partial class MainWindow
         _enhancementWorkspaceQueuedJobsBatchReorderSupported = false;
         _enhancementWorkspaceTerminalHistoryTargetsSupported = false;
         _enhancementWorkspaceTerminalHistoryBatchRetrySupported = false;
-        EnhancementJobsHealthStateText.Text = "Health unavailable";
+        EnhancementJobsHealthStateText.Text = "状態を取得できません";
         EnhancementJobsHealthStateText.Foreground =
             (Brush)FindResource("TextTertiary");
         EnhancementJobsHealthDetailText.Text = detail;
@@ -3078,7 +3078,7 @@ public partial class MainWindow
         {
             return $"ローカルJob履歴を読み取り専用で表示中です。実行中記録 {runningCount:N0}、待ち記録 {queuedCount:N0}。ローカルAIサービスに未接続のため自動更新は停止しています。";
         }
-        return $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
+        return $"{DateTime.Now:HH:mm:ss}に更新しました。実行中の処理がないため自動更新を停止しています。";
     }
 
     private void ApplyQueuedPhotorealPromptUpdateCapability(bool supported)
@@ -7322,7 +7322,7 @@ public partial class MainWindow
                     canonicalInput,
                     canonicalInput,
                     null,
-                    "Original",
+                    "元画像",
                     UsesDisplayedFileDirectly: false),
                 inputSizeBytes,
                 inputSizeBytes,
@@ -11470,7 +11470,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         "running" => "高画質化を中止",
         _ => "キャンセル済みにする",
     };
-    public string SourceName => string.IsNullOrWhiteSpace(SourcePath) ? "Unknown source" : Path.GetFileName(SourcePath);
+    public string SourceName => string.IsNullOrWhiteSpace(SourcePath) ? "元画像不明" : Path.GetFileName(SourcePath);
     public string SourceVersionLabel => VideoToolsV2Snapshot is { } v2Source
         ? v2Source.SourceKind == "managed-video-job"
             ? "管理動画"
@@ -11487,8 +11487,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && !string.IsNullOrWhiteSpace(SourceProducerJobId)
             ? "実写版"
             : IsVideoOperation
-                ? ManagedStillSourceVersionLabel(SourcePath) ?? "Original"
-                : "Original";
+                ? ManagedStillSourceVersionLabel(SourcePath) ?? "元画像"
+                : "元画像";
 
     private static string? ManagedStillSourceVersionLabel(string? path)
     {
@@ -11520,9 +11520,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : VideoTrimV1Snapshot is { } trimV1
             ? $"Video Trim v1 · [{trimV1.SelectionStartFrame}, {trimV1.SelectionEndFrameExclusive}) · {trimV1.OutputFrameCount} frame · {trimV1.AudioPolicy}"
         : VideoToolsKind == "retake"
-        ? "Video Tools · 区間を作り直す · Reader-only"
+        ? "動画ツール · 区間を作り直す · 読み取り専用"
         : VideoToolsKind == "finish"
-            ? $"Video Tools · 動画高画質化 2x · {(VideoToolsFinishMode == "detail" ? "Detail" : "Faithful")} · Reader-only"
+            ? $"動画ツール · 動画高画質化 2x · {(VideoToolsFinishMode == "detail" ? "細部優先" : "忠実度優先")} · 読み取り専用"
         : VideoToolsEnvelopeClaimed
             ? "Video Tools · 互換性を確認できないため保護"
         : VideoTrimEnvelopeClaimed
@@ -11530,41 +11530,41 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : IsVideoOperation
         ? $"{(PresetId switch
         {
-            "minimax-h3-i2v-preview-v1" => "MiniMax H3 Preview · 24 fps · 音声あり",
-            "wan22-ti2v-5b-normal-v1" => "Wan2.2 TI2V 5B · 標準 · 20 step",
-            "wan22-ti2v-5b-high-v1" => "Wan2.2 TI2V 5B · 高品質 · 40 step",
+            "minimax-h3-i2v-preview-v1" => "MiniMax H3 プレビュー · 24 fps · 音声あり",
+            "wan22-ti2v-5b-normal-v1" => "Wan2.2 TI2V 5B · 標準 · 20ステップ",
+            "wan22-ti2v-5b-high-v1" => "Wan2.2 TI2V 5B · 高品質 · 40ステップ",
             _ => PresetId,
         })}  ·  {SourceVersionLabel}"
         : Operation == "i2i" && I2iV3Snapshot is I2iV3WorkspaceSnapshot v3
-            ? $"Schema v3  ·  {I2iTarget ?? "統合編集"}  ·  STEP {v3.Steps}  ·  CFG {v3.CfgScale.ToString("0.0", CultureInfo.InvariantCulture)}  ·  {SourceVersionLabel}"
+            ? $"形式 v3  ·  {I2iTarget ?? "統合編集"}  ·  ステップ {v3.Steps}  ·  CFG {v3.CfgScale.ToString("0.0", CultureInfo.InvariantCulture)}  ·  {SourceVersionLabel}"
         : Operation == "i2i" && I2iMutationSafe
-            ? $"Schema v{I2iSchemaVersion ?? 0}  ·  Target: {I2iTargetDisplayLabel}  ·  {SourceVersionLabel}"
+            ? $"形式 v{I2iSchemaVersion ?? 0}  ·  対象: {I2iTargetDisplayLabel}  ·  {SourceVersionLabel}"
         : $"{PresetId}  ·  {AdapterId}";
     public string OperationLabel => BuildOperationLabel();
 
     private string BuildOperationLabel()
     {
         if (VideoToolsV2Snapshot?.Kind == "edit")
-            return "VIDEO EDIT  AI動画編集";
+            return "AI動画編集";
         if (VideoToolsV2Snapshot?.Kind == "finish")
-            return "VIDEO HQ  AI動画高画質化";
+            return "AI動画高画質化";
         if (VideoTrimV1Snapshot is not null)
-            return "VIDEO TRIM  動画トリム";
+            return "動画トリム";
         if (VideoToolsKind == "retake")
-            return "RETAKE  区間を作り直す";
+            return "区間を作り直す";
         if (VideoToolsKind == "finish")
-            return "VIDEO HQ  動画高画質化";
+            return "動画高画質化";
         if (VideoToolsEnvelopeClaimed)
-            return "VIDEO TOOLS  保護中";
+            return "動画ツール・保護中";
         if (VideoTrimEnvelopeClaimed)
-            return "VIDEO TRIM  保護中";
+            return "動画トリム・保護中";
         return Operation switch
         {
-            "upscale" => "HQ  高画質化",
-            "photoreal" => "REAL  実写化",
-            "i2i" => "EDIT  AI編集",
-            "video" => "VIDEO  動画化",
-            _ => "UNSUPPORTED  未対応",
+            "upscale" => "高画質化",
+            "photoreal" => "実写化",
+            "i2i" => "AI編集",
+            "video" => "動画化",
+            _ => "未対応",
         };
     }
     public string? VideoKindFilterKey => !IsVideoOperation
@@ -11592,67 +11592,81 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             "comfyui-flux2-i2i-v2",
             StringComparison.Ordinal);
     private string SafeI2iV2DetailText => !I2iMutationSafe
-        ? "This AI edit row is incomplete or incompatible and remains protected from mutations."
+        ? "このAI編集履歴は不完全または非互換のため、変更操作から保護しています。"
         : I2iV3Snapshot is I2iV3WorkspaceSnapshot v3
             ? $"{I2iTarget ?? "統合編集"} · STEP {v3.Steps} · CFG {v3.CfgScale.ToString("0.0", CultureInfo.InvariantCulture)} · 服装マスク {v3.OutfitMaskMode} {v3.OutfitMaskExpandPixels}px"
         : !string.IsNullOrWhiteSpace(I2iInstructionSummary)
             ? $"{I2iTargetDisplayLabel}: {I2iInstructionSummary}"
-            : $"{I2iTargetDisplayLabel}: verified public instruction is unavailable.";
-    public bool IsProgressIndeterminate => Status is "queued" or "running";
+            : $"{I2iTargetDisplayLabel}: 検証済みの公開指示を取得できません。";
+    // Durable jobs already carry a bounded 0..100 progress value. Keep the
+    // bar determinate so the UI never substitutes a connection-style sweep
+    // for the persisted job progress. Queued rows naturally remain at zero.
+    public bool IsProgressIndeterminate => false;
+    public int DisplayProgress => Status switch
+    {
+        "queued" => 0,
+        "running" => Math.Clamp(Progress, 1, 99),
+        "succeeded" or "deleted" => 100,
+        "failed" or "canceled" => Math.Clamp(Progress, 0, 99),
+        _ => Math.Clamp(Progress, 0, 100),
+    };
     private string PersistedStatusLabel => CancelRequested && Status == "running"
-        ? "中止処理中  ·  Canceling"
+        ? $"中止処理中 {DisplayProgress}%"
         : Status switch
         {
-            "queued" => $"待ち順 {QueuePosition ?? 0}  ·  Queued",
-            "running" => "実行中  ·  Running",
-            "succeeded" => "Completed",
-            "failed" => "Failed",
-            "canceled" => "Canceled",
-            "deleted" => "Output deleted",
-            _ => Status,
+            "queued" when QueueCount > 0 =>
+                $"待機中 0%・順番 {QueuePosition ?? 0}/{QueueCount}",
+            "queued" => "待機中 0%",
+            "running" when DisplayProgress >= 99 => "最終処理中 99%",
+            "running" => $"処理中 {DisplayProgress}%",
+            "succeeded" => "完了 100%",
+            "failed" => $"失敗（{DisplayProgress}%で停止）",
+            "canceled" => $"中止済み（{DisplayProgress}%で停止）",
+            "deleted" => "出力削除済み 100%",
+            _ => "状態不明",
         };
     public string StatusLabel => _isBusy
         ? $"反映中  ·  {PersistedStatusLabel}"
         : PersistedStatusLabel;
     public string DetailText => VideoToolsV2Snapshot is { Kind: "edit" } editV2
-        ? $"Video Tools v2 Edit Jobです。管理元は{SourceVersionLabel}、出力は[{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive})だけの非破壊child clipです。状態に応じたJobs操作は認証済みCompanionが最終判定します。"
+        ? $"動画ツールv2のAI動画編集です。管理元は{SourceVersionLabel}、出力は[{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive})だけの非破壊子クリップです。状態に応じた操作は認証済みローカルAIサービスが最終判定します。"
         : VideoToolsV2Snapshot is { Kind: "finish" } finishV2
-            ? $"Video Tools v2 Finish Jobです。管理元は{SourceVersionLabel}、{finishV2.FinishScale}x出力でもfps・フレーム数・長さ・元音声を維持します。状態に応じたJobs操作は認証済みCompanionが最終判定します。"
+            ? $"動画ツールv2のAI動画高画質化です。管理元は{SourceVersionLabel}、{finishV2.FinishScale}倍出力でも毎秒フレーム数・フレーム数・長さ・元音声を維持します。状態に応じた操作は認証済みローカルAIサービスが最終判定します。"
         : VideoTrimV1Snapshot is { } trimV1
-            ? $"Video Trim v1 Jobです。管理元は{SourceVersionLabel}、出力は[{trimV1.SelectionStartFrame}, {trimV1.SelectionEndFrameExclusive})の{trimV1.OutputFrameCount} frameです。映像と保持音声はexact区間へ再エンコードし、元動画は変更しません。"
+            ? $"動画トリムv1です。管理元は{SourceVersionLabel}、出力は[{trimV1.SelectionStartFrame}, {trimV1.SelectionEndFrameExclusive})の{trimV1.OutputFrameCount}フレームです。映像と保持音声は選択した正確な区間へ再変換し、元動画は変更しません。"
         : VideoToolsKind == "retake"
-        ? "Retake snapshotを読取専用で表示しています。選択区間と実際の差し替え窓、全尺・元音声保持の情報は保存済みです。runtime検証前の変更操作は無効です。"
+        ? "区間作り直しの保存情報を読み取り専用で表示しています。選択区間と実際の差し替え範囲、全尺・元音声保持の情報は保存済みです。実行環境の検証前は変更できません。"
         : VideoToolsKind == "finish"
-            ? "Video Finish 2x snapshotを読取専用で表示しています。fps・フレーム数・長さ・音声保持の情報は保存済みです。runtime検証前の変更操作は無効です。"
+            ? "動画高画質化2倍の保存情報を読み取り専用で表示しています。毎秒フレーム数・フレーム数・長さ・音声保持の情報は保存済みです。実行環境の検証前は変更できません。"
         : VideoToolsEnvelopeClaimed
-            ? "This Video Tools row is malformed, future, or incomplete and remains protected from every mutation action."
+            ? "この動画ツール履歴は不正・将来形式・不完全のいずれかであるため、すべての変更操作から保護しています。"
         : VideoTrimEnvelopeClaimed
-            ? "This Video Trim row is malformed, future, or incomplete and remains protected from every mutation and output action."
+            ? "この動画トリム履歴は不正・将来形式・不完全のいずれかであるため、すべての変更操作と出力操作から保護しています。"
         : IsStructuredI2iEnvelope
         ? SafeI2iV2DetailText
         : !string.IsNullOrWhiteSpace(ErrorMessage)
         ? ErrorMessage
         : CancelRequested && Status == "running"
-            ? "Cancel requested. Waiting for the exact GPU prompt to settle before the next job starts."
+            ? "中止を受け付けました。現在のGPU処理が安全に終了してから次の処理へ進みます。"
         : IsVideoOperation
             ? !VideoMutationSafe
-                ? "This video row is incomplete or incompatible and remains protected from mutations."
+                ? "この動画履歴は不完全または非互換のため、変更操作から保護しています。"
                 : Status == "succeeded"
-                    ? $"Managed video output from {SourceVersionLabel} is separate from the original source image."
-                    : $"Video generation from {SourceVersionLabel} uses the same durable queue and GPU worker as image Enhancement."
+                    ? $"{SourceVersionLabel}から作った管理動画は、元画像とは別に保存しています。"
+                    : $"{SourceVersionLabel}からの動画化は、画像AI処理と同じ永続的な待ち列とGPU処理役を使います。"
             : Operation == "i2i"
                 ? !I2iMutationSafe
-                    ? "This AI edit row is incomplete or incompatible and remains protected from mutations."
+                    ? "このAI編集履歴は不完全または非互換のため、変更操作から保護しています。"
                     : Status == "succeeded"
-                        ? $"Managed AI edit output from {SourceVersionLabel} is separate from the original source image."
-                        : $"AI hair-color editing from {SourceVersionLabel} uses the same durable queue and GPU worker."
+                        ? $"{SourceVersionLabel}から作ったAI編集版は、元画像とは別に保存しています。"
+                        : $"{SourceVersionLabel}からのAI編集は、同じ永続的な待ち列とGPU処理役を使います。"
             : !IsImageOperation
-                ? "This operation is unsupported and protected from image actions."
+                ? "この処理は未対応のため、画像操作から保護しています。"
                 : Status == "succeeded"
-                    ? "Managed output is separate from the original source."
+                    ? "AI処理版は元画像とは別に保存しています。"
                     : Status == "deleted"
-                        ? "Managed output removed; original source kept."
-                        : "Original source remains unchanged.";
+                        ? "AI処理版を削除しました。元画像は保持しています。"
+                        : "元画像は変更しません。";
     public TimeSpan? CompletedElapsed =>
         Status == "succeeded"
         && StartedAt is DateTimeOffset startedAt
@@ -11670,12 +11684,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             if (Status == "running")
             {
                 return StartedAt is DateTimeOffset startedAt
-                    ? $"Started {startedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}"
-                    : "Start time unavailable";
+                    ? $"開始 {startedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}"
+                    : "開始時刻を取得できません";
             }
             string updated = UpdatedAt == DateTimeOffset.MinValue
-                ? "Time unavailable"
-                : $"Updated {UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
+                ? "更新時刻を取得できません"
+                : $"更新 {UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
             return ElapsedText is { } elapsed
                 ? $"{updated} · {elapsed}"
                 : updated;
@@ -11817,7 +11831,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         }
 
         if (progressChanged)
+        {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
+        }
         if (statusChanged
             || cancelRequestedChanged
             || progressChanged
@@ -11828,7 +11845,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
             if (statusChanged)
+            {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsProgressIndeterminate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
+            }
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCancel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRetry)));
@@ -11889,7 +11909,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         if (Status != "running")
             return;
 
-        int nextProgress = Math.Clamp(progress, 0, 100);
+        int nextProgress = Math.Clamp(progress, 1, 99);
         bool progressChanged = Progress != nextProgress;
         bool updatedChanged = updatedAt.HasValue && UpdatedAt != updatedAt.Value;
         if (!progressChanged && !updatedChanged)
@@ -11901,6 +11921,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         if (progressChanged)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));

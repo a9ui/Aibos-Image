@@ -83,10 +83,10 @@
       "legacyOperationDefault": "absence of operation means upscale; a present known operation must parse as that same operation"
     },
     "progressPresentation": {
-      "durableFieldMeaning": "progress is a companion-owned integer milestone for bounded change detection and diagnostics; it is not a measured percent-complete value, remaining-work estimate, or ETA",
-      "activeRows": "queued and running rows render progress as indeterminate and do not present the durable milestone as a numeric percentage",
-      "terminalRows": "terminal status, not progress, is completion authority; succeeded and deleted rows may render a complete bar, while failed and canceled rows remain terminal without implying remaining work",
-      "compatibility": "WPF continues to validate and retain the bounded progress field when present, ignores unknown fields, and does not write, normalize, or infer queue state from presentation"
+      "durableFieldMeaning": "progress is the companion-owned integer percentage of completed adapter execution stages; it is not an ETA or a remaining-time estimate",
+      "activeRows": "queued rows render a determinate zero; running rows render a determinate value clamped to 1 through 99, with 99 explicitly labelled as final publication or verification",
+      "terminalRows": "terminal status remains completion authority; only succeeded and deleted rows render 100, while failed and canceled rows retain their last bounded value without implying completion",
+      "compatibility": "WPF validates and retains the bounded progress field when present, clamps presentation to lifecycle-safe bounds, ignores unknown fields, and does not write or infer queue state from presentation"
     },
     "jobDetailSurface": {
       "selection": "payload_json is queried only for the exact selected id after an explicit Details or Copy action",
