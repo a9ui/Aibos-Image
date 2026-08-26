@@ -2448,24 +2448,24 @@
     <!-- App settings are separate from the modal generation-metadata Settings tab. -->
     <Grid x:Name="AppSettingsDialog" Grid.RowSpan="3" Panel.ZIndex="500" Visibility="Collapsed" Background="{StaticResource BgPrimary}"
           MouseLeftButtonDown="AppSettingsBackdrop_MouseLeftButtonDown" PreviewMouseWheel="AppSettingsDialog_PreviewMouseWheel"
-          AutomationProperties.Name="App settings dialog" AutomationProperties.HelpText="Change local safety settings and keyboard shortcuts. Escape or a backdrop click closes this dialog.">
+          AutomationProperties.Name="{DynamicResource UiSettingsDialogAutomation}" AutomationProperties.HelpText="{DynamicResource UiSettingsDialogHelp}">
       <Border x:Name="AppSettingsDialogSurface" Width="680" MaxHeight="660" Margin="24" CornerRadius="6" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
         <Grid>
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <Grid.ColumnDefinitions><ColumnDefinition Width="152"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <DockPanel Grid.Row="0" Grid.ColumnSpan="2" Margin="16,12,12,10" LastChildFill="False"><TextBlock Text="{DynamicResource UiSettings}" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/><Button x:Name="AppSettingsCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseAppSettings_Click" ToolTip="{DynamicResource UiClose}" AutomationProperties.Name="Close app settings"><Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/></Button></DockPanel>
+          <DockPanel Grid.Row="0" Grid.ColumnSpan="2" Margin="16,12,12,10" LastChildFill="False"><TextBlock Text="{DynamicResource UiSettings}" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/><Button x:Name="AppSettingsCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseAppSettings_Click" ToolTip="{DynamicResource UiClose}" AutomationProperties.Name="{DynamicResource UiClose}"><Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/></Button></DockPanel>
           <Border Grid.Row="1" Grid.RowSpan="2" Grid.Column="0" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,1,0" Padding="10,11">
-            <StackPanel>
-              <RadioButton x:Name="SettingsGeneralNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsGeneral}" Tag="general" IsChecked="True" Click="AppSettingsNavigation_Click" AutomationProperties.Name="General settings"/>
-              <RadioButton x:Name="SettingsUpscaleNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="AI高画質化" Tag="upscale" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI upscale settings"/>
-              <RadioButton x:Name="SettingsPhotorealNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="AI実写化" Tag="photoreal" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI photorealization settings"/>
-              <RadioButton x:Name="SettingsVideoNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="動画化" Tag="video" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Video generation settings"/>
-              <RadioButton x:Name="SettingsVideoToolsV2Nav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiVideoToolsV2Settings}" Tag="video-tools-v2" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI video edit and enhancement settings"/>
-              <RadioButton x:Name="SettingsDisplayNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsDisplay}" Tag="display" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Display settings"/>
-              <RadioButton x:Name="SettingsThumbnailsNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsThumbnails}" Tag="thumbnails" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Thumbnail settings"/>
-              <RadioButton x:Name="SettingsKeyboardNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsKeyboard}" Tag="keyboard" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Keyboard settings"/>
-              <RadioButton x:Name="SettingsStorageNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsStorage}" Tag="storage" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Shared data storage"/>
-              <RadioButton x:Name="SettingsAboutNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsAbout}" Tag="about" Click="AppSettingsNavigation_Click" AutomationProperties.Name="About and diagnostics"/>
+            <StackPanel x:Name="AppSettingsNavigationPanel">
+              <RadioButton x:Name="SettingsGeneralNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsGeneral}" Tag="general" IsChecked="True" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiSettingsGeneral}"/>
+              <RadioButton x:Name="SettingsUpscaleNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsUpscale}" Tag="upscale" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiSettingsUpscale}"/>
+              <RadioButton x:Name="SettingsPhotorealNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsPhotoreal}" Tag="photoreal" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiSettingsPhotoreal}"/>
+              <RadioButton x:Name="SettingsVideoNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsVideo}" Tag="video" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiSettingsVideo}"/>
+              <RadioButton x:Name="SettingsVideoToolsV2Nav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiVideoToolsV2Settings}" Tag="video-tools-v2" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiVideoToolsV2Settings}"/>
+              <RadioButton x:Name="SettingsDisplayNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsDisplay}" Tag="display" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiSettingsDisplay}"/>
+              <RadioButton x:Name="SettingsThumbnailsNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsThumbnails}" Tag="thumbnails" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiSettingsThumbnails}"/>
+              <RadioButton x:Name="SettingsStorageNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsStorage}" Tag="storage" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiSettingsStorage}"/>
+              <RadioButton x:Name="SettingsKeyboardNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsKeyboard}" Tag="keyboard" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiSettingsKeyboard}"/>
+              <RadioButton x:Name="SettingsAboutNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsAbout}" Tag="about" Click="AppSettingsNavigation_Click" AutomationProperties.Name="{DynamicResource UiSettingsAbout}"/>
             </StackPanel>
           </Border>
           <ScrollViewer x:Name="AppSettingsScrollViewer" Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" Padding="18,10,10,0" AutomationProperties.Name="App settings content">
@@ -3256,13 +3256,13 @@
           </Border>
           <TextBlock x:Name="ThumbnailSettingsHeading" Text="THUMBNAILS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Thumbnail settings section"/>
           <CheckBox x:Name="LastDisplayedThumbnailVersionCheckBox"
-                    Content="最後に表示した画像バージョンを一覧サムネイルに使う"
+                    Content="{DynamicResource UiLastDisplayedThumbnailVersion}"
                     Foreground="{StaticResource TextSecondary}" Margin="0,4,0,4"
                     Checked="ThumbnailVersionPreference_Changed"
                     Unchecked="ThumbnailVersionPreference_Changed"
-                    AutomationProperties.Name="Use the last displayed image version for gallery thumbnails"
-                    AutomationProperties.HelpText="OFFでは一覧サムネイルをOriginalに固定します。画像ごとの最後の表示版はWPFの現在のセッション内だけで保持します。"/>
-          <TextBlock Text="OFFではOriginalを表示。動画を見た場合も、直前に表示した画像版を維持します。"
+                    AutomationProperties.Name="{DynamicResource UiLastDisplayedThumbnailVersion}"
+                    AutomationProperties.HelpText="{DynamicResource UiLastDisplayedThumbnailHelp}"/>
+          <TextBlock Text="{DynamicResource UiLastDisplayedThumbnailHelp}"
                      Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,0,0,12"/>
           <TextBlock Text="STATUS BORDERS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
           <Grid Margin="0,0,0,6">
@@ -3288,30 +3288,31 @@
               <TextBlock x:Name="SharedDataModeText" Foreground="{StaticResource TextPrimary}" FontSize="12.5" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.Name="Shared data mode"/>
               <TextBlock x:Name="SharedDataDescriptionText" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,4,0,9" AutomationProperties.Name="Shared data description"/>
               <TextBlock Text="{DynamicResource UiDataLocation}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" Margin="0,0,0,4"/>
-              <TextBox x:Name="SharedDataRootTextBox" IsReadOnly="True" IsReadOnlyCaretVisible="True" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" TextWrapping="NoWrap" Padding="7,5" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" Foreground="{StaticResource TextSecondary}" AutomationProperties.Name="Current shared data location" AutomationProperties.HelpText="Read-only path used for shared durable data in this Aibos process."/>
-              <Button x:Name="OpenSharedDataFolderButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiOpenDataFolder}" Click="OpenSharedDataFolder_Click" HorizontalAlignment="Left" MinWidth="132" Margin="0,8,0,0" AutomationProperties.Name="Open current shared data folder" AutomationProperties.HelpText="Opens the existing data folder without creating or changing files."/>
+              <TextBox x:Name="SharedDataRootTextBox" IsReadOnly="True" IsReadOnlyCaretVisible="True" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" TextWrapping="NoWrap" Padding="7,5" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" Foreground="{StaticResource TextSecondary}" AutomationProperties.Name="{DynamicResource UiDataLocation}" AutomationProperties.HelpText="{DynamicResource UiDataLocationHelp}"/>
+              <Button x:Name="OpenSharedDataFolderButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiOpenDataFolder}" Click="OpenSharedDataFolder_Click" HorizontalAlignment="Left" MinWidth="132" Margin="0,8,0,0" AutomationProperties.Name="{DynamicResource UiOpenDataFolder}" AutomationProperties.HelpText="{DynamicResource UiOpenDataFolderHelp}"/>
               <TextBlock x:Name="SharedDataStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="Shared data location status"/>
             </StackPanel>
           </Border>
           <TextBlock x:Name="KeyBindingsHeading" Text="KEYBOARD SHORTCUTS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Keyboard shortcuts"/>
           <TextBlock Text="{DynamicResource UiKeyBindingsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,10"/>
-          <StackPanel x:Name="KeyBindingsPanel" AutomationProperties.Name="Editable key bindings"/>
+          <StackPanel x:Name="KeyBindingsPanel" AutomationProperties.Name="{DynamicResource UiKeyBindingsPanelAutomation}"/>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,4">
-            <Button x:Name="ResetKeyBindingsButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiResetToDefaults}" Click="ResetKeyBindings_Click" MinWidth="126" Margin="0,0,8,0" AutomationProperties.Name="Reset key bindings to defaults"/>
-            <Button x:Name="SaveKeyBindingsButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiSaveKeyBindings}" Click="SaveKeyBindings_Click" MinWidth="126" AutomationProperties.Name="Save key bindings"/>
+            <Button x:Name="ResetKeyBindingsButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiResetToDefaults}" Click="ResetKeyBindings_Click" MinWidth="126" Margin="0,0,8,0" AutomationProperties.Name="{DynamicResource UiResetToDefaults}"/>
+            <Button x:Name="SaveKeyBindingsButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiSaveKeyBindings}" Click="SaveKeyBindings_Click" MinWidth="126" AutomationProperties.Name="{DynamicResource UiSaveKeyBindings}"/>
           </StackPanel>
           <TextBlock x:Name="KeyBindingsStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,18" AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="Key binding status"/>
           <TextBlock x:Name="AboutSettingsHeading" Text="ABOUT / DIAGNOSTICS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="About and diagnostics section"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,8">
             <StackPanel>
-              <TextBlock x:Name="DiagnosticsText" Foreground="{StaticResource TextSecondary}" FontSize="11" TextWrapping="Wrap" AutomationProperties.Name="Read-only application diagnostics"/>
-              <Button x:Name="CopyDiagnosticsButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiCopyDiagnostics}" Click="CopyDiagnostics_Click" HorizontalAlignment="Left" Margin="0,8,0,0" MinWidth="132" AutomationProperties.Name="Copy safe diagnostics" AutomationProperties.HelpText="Copies product, build, runtime, counts, and safety flags only. No paths or image metadata."/>
+              <TextBlock x:Name="DiagnosticsText" Foreground="{StaticResource TextSecondary}" FontSize="11" TextWrapping="Wrap" AutomationProperties.Name="{DynamicResource UiDiagnosticsAutomation}"/>
+              <Button x:Name="CopyDiagnosticsButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiCopyDiagnostics}" Click="CopyDiagnostics_Click" HorizontalAlignment="Left" Margin="0,8,0,0" MinWidth="132" AutomationProperties.Name="{DynamicResource UiCopyDiagnostics}" AutomationProperties.HelpText="{DynamicResource UiCopyDiagnosticsHelp}"/>
               <TextBlock x:Name="DiagnosticsStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="Diagnostics copy status"/>
             </StackPanel>
           </Border>
+          <Border x:Name="AppSettingsAnchorTail" Height="390" IsHitTestVisible="False"/>
           </StackPanel>
           </ScrollViewer>
-          <Button x:Name="AppSettingsDoneButton" Grid.Row="2" Grid.Column="1" Style="{StaticResource PrimaryButton}" Click="CloseAppSettings_Click" HorizontalAlignment="Right" MinWidth="82" Margin="0,10,16,12" AutomationProperties.Name="Done with app settings"><TextBlock Text="{DynamicResource UiDone}" Foreground="{StaticResource SelectionText}"/></Button>
+          <Button x:Name="AppSettingsDoneButton" Grid.Row="2" Grid.Column="1" Style="{StaticResource PrimaryButton}" Click="CloseAppSettings_Click" HorizontalAlignment="Right" MinWidth="82" Margin="0,10,16,12" AutomationProperties.Name="{DynamicResource UiDone}"><TextBlock Text="{DynamicResource UiDone}" Foreground="{StaticResource SelectionText}"/></Button>
         </Grid>
       </Border>
     </Grid>

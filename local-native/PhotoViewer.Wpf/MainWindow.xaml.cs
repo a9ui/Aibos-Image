@@ -542,7 +542,8 @@ public partial class MainWindow : Window
         static () => SharedDataRootActivation.Current;
     private Func<string, bool> _sharedDataRootDirectoryExists = Directory.Exists;
     private SharedDataLocationView _sharedDataLocation =
-        SharedDataLocationView.Unavailable("Shared data has not been resolved for this process.");
+        SharedDataLocationView.Unavailable(
+            UiLanguageResources.Text("UiSharedDataUnresolvedStatus"));
     private Func<ProcessStartInfo, bool> _explorerLauncher = static startInfo =>
     {
         Process.Start(startInfo);
@@ -662,6 +663,7 @@ public partial class MainWindow : Window
     private bool _sharedKeyBindingsProtected;
     private string? _sharedKeyBindingsError;
     private readonly Dictionary<ViewerKeyAction, Button> _keyBindingButtons = [];
+    private readonly Dictionary<ViewerKeyAction, TextBlock> _keyBindingLabels = [];
     private readonly Dictionary<ViewerKeyAction, TextBlock> _keyBindingConflictTexts = [];
     private ViewerKeyAction? _recordingKeyAction;
     private string? _keyBindingCaptureError;
@@ -12677,6 +12679,9 @@ public partial class MainWindow : Window
         if (_dirtyThumbnailStatusBorderPreferences == ThumbnailStatusBorderDirtyPreferences.None)
             RefreshThumbnailStatusBorderIdleText();
         ApplyKeyBindingTooltips();
+        RefreshKeyBindingEditor();
+        RefreshSharedDataSettings();
+        DiagnosticsStatusText.Text = UiLanguageResources.Text("UiDiagnosticsReady");
         SyncAccessibilityPreferenceControls();
         UpdateLoadTimingPresentation();
         UpdateFolderStats();
@@ -21983,6 +21988,7 @@ public partial class MainWindow : Window
     {
         foreach (KeyBindingDefinition definition in KeyBindingSettings.Definitions)
         {
+            (string labelText, string helpText) = KeyBindingPresentation(definition);
             var row = new StackPanel { Margin = new Thickness(0, 0, 0, 7) };
             var line = new DockPanel { LastChildFill = true };
             var capture = new Button
@@ -21996,13 +22002,15 @@ public partial class MainWindow : Window
             };
             DockPanel.SetDock(capture, Dock.Right);
             capture.Click += KeyBindingCapture_Click;
-            AutomationProperties.SetName(capture, $"{definition.Label} key binding");
-            AutomationProperties.SetHelpText(capture, $"{definition.HelpText} Activate, then press a new key combination.");
+            AutomationProperties.SetName(
+                capture,
+                UiLanguageResources.Format("UiKeyButtonAutomationFormat", labelText));
+            AutomationProperties.SetHelpText(
+                capture,
+                UiLanguageResources.Format("UiKeyButtonHelpFormat", helpText, definition.DefaultChord.DisplayText));
             var label = new TextBlock
             {
-                Text = definition.Label + (KeyBindingSettings.IsBrowserSharedAction(definition.Action)
-                    ? "  ·  Browser + WPF"
-                    : ""),
+                Text = labelText,
                 Foreground = (Brush)FindResource("TextSecondary"),
                 FontSize = 11.5,
                 TextWrapping = TextWrapping.Wrap,
@@ -22024,9 +22032,67 @@ public partial class MainWindow : Window
             row.Children.Add(conflict);
             KeyBindingsPanel.Children.Add(row);
             _keyBindingButtons[definition.Action] = capture;
+            _keyBindingLabels[definition.Action] = label;
             _keyBindingConflictTexts[definition.Action] = conflict;
         }
         RefreshKeyBindingEditor();
+    }
+
+    private (string Label, string HelpText) KeyBindingPresentation(
+        KeyBindingDefinition definition)
+    {
+        if (!string.Equals(
+                _uiLanguage,
+                UiLanguageResources.Japanese,
+                StringComparison.Ordinal))
+        {
+            return (definition.Label, definition.HelpText);
+        }
+
+        string prefix = $"UiShortcut{definition.Action}";
+        return (
+            UiLanguageResources.Text(prefix + "Label"),
+            UiLanguageResources.Text(prefix + "Help"));
+    }
+
+    private string LocalizeKeyBindingError(string error)
+    {
+        if (!string.Equals(
+                _uiLanguage,
+                UiLanguageResources.Japanese,
+                StringComparison.Ordinal))
+        {
+            return error;
+        }
+
+        return error switch
+        {
+            "Press a non-modifier key. Modifier-only shortcuts are not valid." =>
+                "CtrlやShiftだけではなく、文字・数字・記号キーも入力してください。",
+            "Tab combinations are reserved for keyboard focus navigation." =>
+                "Tabを含む組み合わせはfocus移動に予約されています。",
+            "That Alt combination is reserved by Windows." =>
+                "そのAltの組み合わせはWindowsに予約されています。",
+            "Ctrl + Alt + Delete is reserved by Windows." =>
+                "Ctrl + Alt + DeleteはWindowsに予約されています。",
+            "Ctrl + Shift + Escape is reserved by Windows." =>
+                "Ctrl + Shift + EscapeはWindowsに予約されています。",
+            "Ctrl + Escape combinations are reserved by Windows." =>
+                "Ctrl + Escapeを含む組み合わせはWindowsに予約されています。",
+            "Alt + Escape combinations are reserved by Windows." =>
+                "Alt + Escapeを含む組み合わせはWindowsに予約されています。",
+            "Windows-key combinations are owned by the operating system and cannot be used reliably by this app." =>
+                "Windowsキーを含む組み合わせはOSが使用するため、Aibosでは設定できません。",
+            "Windows-key combinations cannot be assigned because Windows may consume them before Aibos." =>
+                "Windowsキーを含む組み合わせは、Aibosより先にWindowsが処理するため設定できません。",
+            "This shared action must use one key without Ctrl, Alt, Shift, or Win." =>
+                "この基本操作にはCtrl・Alt・Shift・Winを付けず、1キーを指定してください。",
+            "Shared key bindings contain an overlapping shortcut conflict." =>
+                "共有キー設定に操作範囲の重なる競合があります。",
+            "Shared key bindings could not be composed with Aibos-only shortcuts safely." =>
+                "共有キーとAibos固有キーを安全に組み合わせられません。",
+            _ => error,
+        };
     }
 
     private void BeginKeyBindingEdit()
@@ -22035,8 +22101,10 @@ public partial class MainWindow : Window
         _keyBindingCaptureError = null;
         _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
         KeyBindingsStatusText.Text = _sharedKeyBindingsProtected
-            ? $"Shared Browser/WPF shortcuts are protected. {_sharedKeyBindingsError}"
-            : "Browser-shared actions use one key; WPF-only actions may use key combinations.";
+            ? UiLanguageResources.Format(
+                "UiKeyBindingsProtectedFormat",
+                LocalizeKeyBindingError(_sharedKeyBindingsError ?? ""))
+            : UiLanguageResources.Text("UiKeyBindingsReady");
         RefreshKeyBindingEditor();
     }
 
@@ -22054,7 +22122,11 @@ public partial class MainWindow : Window
             return;
         _recordingKeyAction = action;
         _keyBindingCaptureError = null;
-        KeyBindingsStatusText.Text = $"Press the new key combination for {KeyBindingSettings.Definition(action).Label}. Escape cancels recording.";
+        string label = KeyBindingPresentation(
+            KeyBindingSettings.Definition(action)).Label;
+        KeyBindingsStatusText.Text = UiLanguageResources.Format(
+            "UiKeyCapturePromptFormat",
+            label);
         RefreshKeyBindingEditor();
         button.Focus();
     }
@@ -22067,28 +22139,33 @@ public partial class MainWindow : Window
         {
             _recordingKeyAction = null;
             _keyBindingCaptureError = null;
-            KeyBindingsStatusText.Text = "Key recording canceled. Press Escape again to close App Settings.";
+            KeyBindingsStatusText.Text = UiLanguageResources.Text("UiKeyCaptureCanceled");
             RefreshKeyBindingEditor();
             return true;
         }
         if (!KeyChord.TryCreate(key, modifiers, out KeyChord chord, out string error))
         {
-            _keyBindingCaptureError = error;
-            KeyBindingsStatusText.Text = error;
+            _keyBindingCaptureError = LocalizeKeyBindingError(error);
+            KeyBindingsStatusText.Text = _keyBindingCaptureError;
             RefreshKeyBindingEditor();
             return true;
         }
         if (!KeyBindingSettings.IsAllowedForAction(action, chord, out error))
         {
-            _keyBindingCaptureError = error;
-            KeyBindingsStatusText.Text = error;
+            _keyBindingCaptureError = LocalizeKeyBindingError(error);
+            KeyBindingsStatusText.Text = _keyBindingCaptureError;
             RefreshKeyBindingEditor();
             return true;
         }
         _draftKeyBindings[action] = chord;
         _recordingKeyAction = null;
         _keyBindingCaptureError = null;
-        KeyBindingsStatusText.Text = $"Draft: {KeyBindingSettings.Definition(action).Label} = {chord.DisplayText}. Save to apply.";
+        string draftLabel = KeyBindingPresentation(
+            KeyBindingSettings.Definition(action)).Label;
+        KeyBindingsStatusText.Text = UiLanguageResources.Format(
+            "UiKeyDraftFormat",
+            draftLabel,
+            chord.DisplayText);
         RefreshKeyBindingEditor();
         return true;
     }
@@ -22101,16 +22178,29 @@ public partial class MainWindow : Window
             KeyBindingSettings.FindConflicts(_draftKeyBindings);
         foreach (KeyBindingDefinition definition in KeyBindingSettings.Definitions)
         {
+            (string labelText, string helpText) = KeyBindingPresentation(definition);
             KeyChord chord = _draftKeyBindings.TryGetValue(definition.Action, out KeyChord draft)
                 ? draft
                 : definition.DefaultChord;
+            if (_keyBindingLabels.TryGetValue(definition.Action, out TextBlock? label))
+                label.Text = labelText;
             if (_keyBindingButtons.TryGetValue(definition.Action, out Button? button))
             {
-                button.Content = _recordingKeyAction == definition.Action ? "Press key…" : chord.DisplayText;
-                button.ToolTip = definition.HelpText;
+                button.Content = _recordingKeyAction == definition.Action
+                    ? UiLanguageResources.Text("UiKeyPress")
+                    : chord.DisplayText;
+                button.ToolTip = helpText;
+                AutomationProperties.SetName(
+                    button,
+                    UiLanguageResources.Format(
+                        "UiKeyButtonAutomationFormat",
+                        labelText));
                 AutomationProperties.SetHelpText(
                     button,
-                    $"{definition.HelpText} Current draft is {chord.DisplayText}. Activate, then press a new key combination.");
+                    UiLanguageResources.Format(
+                        "UiKeyButtonHelpFormat",
+                        helpText,
+                        chord.DisplayText));
             }
             if (!_keyBindingConflictTexts.TryGetValue(definition.Action, out TextBlock? conflictText))
                 continue;
@@ -22118,20 +22208,39 @@ public partial class MainWindow : Window
             {
                 conflictText.Text = _keyBindingCaptureError;
                 conflictText.Visibility = Visibility.Visible;
-                AutomationProperties.SetName(conflictText, $"Invalid key binding for {definition.Label}: {_keyBindingCaptureError}");
+                AutomationProperties.SetName(
+                    conflictText,
+                    UiLanguageResources.Format(
+                        "UiKeyInvalidAutomationFormat",
+                        labelText,
+                        _keyBindingCaptureError));
             }
             else if (conflicts.TryGetValue(definition.Action, out IReadOnlyList<ViewerKeyAction>? others))
             {
-                string labels = string.Join(", ", others.Select(action => KeyBindingSettings.Definition(action).Label));
-                conflictText.Text = $"Also assigned to {labels} in an overlapping context.";
+                string labels = string.Join(
+                    ", ",
+                    others.Select(action =>
+                        KeyBindingPresentation(KeyBindingSettings.Definition(action)).Label));
+                conflictText.Text = UiLanguageResources.Format(
+                    "UiKeyConflictFormat",
+                    labels);
                 conflictText.Visibility = Visibility.Visible;
-                AutomationProperties.SetName(conflictText, $"Key binding conflict: {definition.Label} is also assigned to {labels}");
+                AutomationProperties.SetName(
+                    conflictText,
+                    UiLanguageResources.Format(
+                        "UiKeyConflictAutomationFormat",
+                        labelText,
+                        labels));
             }
             else if (!chord.IsBound)
             {
-                conflictText.Text = "No collision-free migration key was available. Choose a key to enable this action.";
+                conflictText.Text = UiLanguageResources.Text("UiKeyUnassigned");
                 conflictText.Visibility = Visibility.Visible;
-                AutomationProperties.SetName(conflictText, $"{definition.Label} is unassigned and needs a key");
+                AutomationProperties.SetName(
+                    conflictText,
+                    UiLanguageResources.Format(
+                        "UiKeyUnassignedAutomationFormat",
+                        labelText));
             }
             else
             {
@@ -22148,7 +22257,7 @@ public partial class MainWindow : Window
         _recordingKeyAction = null;
         _keyBindingCaptureError = null;
         _draftKeyBindings = KeyBindingSettings.CreateDefaults();
-        KeyBindingsStatusText.Text = "Default key bindings are in the draft. Save to apply them.";
+        KeyBindingsStatusText.Text = UiLanguageResources.Text("UiKeyDefaultsDraft");
         RefreshKeyBindingEditor();
     }
 
@@ -22158,7 +22267,7 @@ public partial class MainWindow : Window
             KeyBindingSettings.FindConflicts(_draftKeyBindings);
         if (conflicts.Count > 0)
         {
-            KeyBindingsStatusText.Text = "Resolve the highlighted key conflicts before saving.";
+            KeyBindingsStatusText.Text = UiLanguageResources.Text("UiKeyResolveConflicts");
             RefreshKeyBindingEditor();
             return;
         }
@@ -22168,7 +22277,9 @@ public partial class MainWindow : Window
         {
             _sharedKeyBindingsProtected = true;
             _sharedKeyBindingsError = sharedError;
-            KeyBindingsStatusText.Text = $"Shared Browser/WPF shortcuts were not changed. {sharedError}";
+            KeyBindingsStatusText.Text = UiLanguageResources.Format(
+                "UiKeySharedUnchangedFormat",
+                LocalizeKeyBindingError(sharedError ?? ""));
             RefreshKeyBindingEditor();
             return;
         }
@@ -22184,7 +22295,7 @@ public partial class MainWindow : Window
                 KeyBindingSettings.NormalizePersisted(savedState.KeyBindings, out _));
         if (!persisted)
         {
-            KeyBindingsStatusText.Text = "Shared Browser/WPF shortcuts are saved and active, but WPF-only shortcut state could not be saved. Fix the local state error and retry.";
+            KeyBindingsStatusText.Text = UiLanguageResources.Text("UiKeyLocalSaveFailed");
             ApplyKeyBindingTooltips();
             RefreshKeyBindingEditor();
             return;
@@ -22192,7 +22303,7 @@ public partial class MainWindow : Window
 
         _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
         _keyBindingCaptureError = null;
-        KeyBindingsStatusText.Text = "Browser/WPF shortcuts saved and applied through shared settings.";
+        KeyBindingsStatusText.Text = UiLanguageResources.Text("UiKeySaved");
         ApplyKeyBindingTooltips();
         RefreshKeyBindingEditor();
     }
@@ -22740,7 +22851,7 @@ public partial class MainWindow : Window
         RefreshEnhancementOutputRootSettings();
         RefreshSharedDataSettings();
         DiagnosticsText.Text = BuildDiagnosticsText();
-        DiagnosticsStatusText.Text = "Read-only diagnostics. Copy excludes paths, image metadata, prompts, and personal state.";
+        DiagnosticsStatusText.Text = UiLanguageResources.Text("UiDiagnosticsReady");
         AppSettingsDialog.Visibility = Visibility.Visible;
         SelectAppSettingsSection(focusShortcuts ? "keyboard" : "general", bringIntoView: false);
         Dispatcher.BeginInvoke(() =>
@@ -22819,18 +22930,21 @@ public partial class MainWindow : Window
         Func<string, bool> directoryExists)
     {
         if (activation is null)
-            return SharedDataLocationView.Unavailable("Shared data has not been resolved for this process.");
+        {
+            return SharedDataLocationView.Unavailable(
+                UiLanguageResources.Text("UiSharedDataUnresolvedStatus"));
+        }
 
         if (activation.Status == SharedDataRootActivationStatus.OverridesOnly)
         {
             return new SharedDataLocationView(
                 "overrides",
-                "Individual store overrides",
-                "Advanced per-store paths are active, so this process has no single data folder.",
-                "No single data folder",
+                UiLanguageResources.Text("UiSharedDataOverridesTitle"),
+                UiLanguageResources.Text("UiSharedDataOverridesDescription"),
+                UiLanguageResources.Text("UiSharedDataOverridesDisplay"),
                 null,
                 false,
-                "Nothing was opened or changed.");
+                UiLanguageResources.Text("UiSharedDataNothingChanged"));
         }
 
         string? normalizedRoot = null;
@@ -22849,7 +22963,10 @@ public partial class MainWindow : Window
         }
 
         if (normalizedRoot is null)
-            return SharedDataLocationView.Unavailable("The fixed data location is unavailable. No files were changed.");
+        {
+            return SharedDataLocationView.Unavailable(
+                UiLanguageResources.Text("UiSharedDataFixedUnavailable"));
+        }
 
         bool exists;
         try
@@ -22865,23 +22982,25 @@ public partial class MainWindow : Window
         {
             return new SharedDataLocationView(
                 "legacy-uninitialized",
-                "Local data not initialized",
-                "No shared-root locator is active. Aibos will create its local data folder only after an explicit state change.",
+                UiLanguageResources.Text("UiSharedDataLocalUninitializedTitle"),
+                UiLanguageResources.Text("UiSharedDataLocalUninitializedDescription"),
                 normalizedRoot,
                 normalizedRoot,
                 exists,
                 exists
-                    ? "The local data folder already exists and can be opened."
-                    : "The folder does not exist yet. Opening Settings did not create it.");
+                    ? UiLanguageResources.Text("UiSharedDataLocalExists")
+                    : UiLanguageResources.Text("UiSharedDataLocalMissing"));
         }
 
         bool sharedByLocator =
             activation.Status == SharedDataRootActivationStatus.Activated
             && activation.ResolutionStatus == SharedDataRootResolutionStatus.Resolved;
-        string title = sharedByLocator ? "Shared with Browser" : "Local Aibos data";
+        string title = sharedByLocator
+            ? UiLanguageResources.Text("UiSharedDataSharedTitle")
+            : UiLanguageResources.Text("UiSharedDataLocalTitle");
         string description = sharedByLocator
-            ? "Aibos and the Browser app use this location for Favorites, Seen, shared settings, Albums, Search History, Recent folders, and Enhancement data."
-            : "No shared-root locator is active. Aibos is using its existing local durable-data folder.";
+            ? UiLanguageResources.Text("UiSharedDataSharedDescription")
+            : UiLanguageResources.Text("UiSharedDataLocalDescription");
         return new SharedDataLocationView(
             sharedByLocator ? "shared" : "legacy",
             title,
@@ -22890,8 +23009,8 @@ public partial class MainWindow : Window
             normalizedRoot,
             exists,
             exists
-                ? "The existing folder can be opened without changing shared data."
-                : "The configured folder is currently unavailable. No folder was created.");
+                ? UiLanguageResources.Text("UiSharedDataExistingOpen")
+                : UiLanguageResources.Text("UiSharedDataConfiguredUnavailable"));
     }
 
     private void RefreshSharedDataSettings()
@@ -22929,11 +23048,11 @@ public partial class MainWindow : Window
             startInfo.ArgumentList.Add(_sharedDataLocation.RootPath);
             if (!_explorerLauncher(startInfo))
             {
-                SharedDataStatusText.Text = "The data folder could not be opened. Check folder access and try again.";
+                SharedDataStatusText.Text = UiLanguageResources.Text("UiSharedDataOpenFailed");
                 return false;
             }
 
-            SharedDataStatusText.Text = "Opened the data folder. No shared data was changed.";
+            SharedDataStatusText.Text = UiLanguageResources.Text("UiSharedDataOpened");
             return true;
         }
         catch (Exception ex) when (ex is Win32Exception
@@ -22945,7 +23064,7 @@ public partial class MainWindow : Window
             or System.Security.SecurityException)
         {
             Trace.TraceWarning($"Shared data folder open failed: {ex.GetType().Name}");
-            SharedDataStatusText.Text = "The data folder could not be opened. Check folder access and try again.";
+            SharedDataStatusText.Text = UiLanguageResources.Text("UiSharedDataOpenFailed");
             return false;
         }
     }
@@ -23134,13 +23253,13 @@ public partial class MainWindow : Window
         try
         {
             _diagnosticsClipboardWriter(text);
-            DiagnosticsStatusText.Text = "Diagnostics copied. It contains no paths, metadata, prompts, or saved image state.";
+            DiagnosticsStatusText.Text = UiLanguageResources.Text("UiDiagnosticsCopied");
             return true;
         }
         catch (Exception ex)
         {
             Trace.TraceWarning($"Diagnostics clipboard copy failed: {ex.GetType().Name}");
-            DiagnosticsStatusText.Text = "Diagnostics could not be copied. Try again after another app releases the clipboard.";
+            DiagnosticsStatusText.Text = UiLanguageResources.Text("UiDiagnosticsCopyFailed");
             return false;
         }
     }
@@ -26385,16 +26504,16 @@ public partial class MainWindow : Window
         => string.Equals(SettingsStorageNav.Tag?.ToString(), "storage", StringComparison.Ordinal)
             && string.Equals(
                 AutomationProperties.GetName(SettingsStorageNav),
-                "Shared data storage",
+                UiLanguageResources.Text("UiSettingsStorage"),
                 StringComparison.Ordinal)
             && SharedDataRootTextBox.IsReadOnly
             && string.Equals(
                 AutomationProperties.GetName(SharedDataRootTextBox),
-                "Current shared data location",
+                UiLanguageResources.Text("UiDataLocation"),
                 StringComparison.Ordinal)
             && string.Equals(
                 AutomationProperties.GetName(OpenSharedDataFolderButton),
-                "Open current shared data folder",
+                UiLanguageResources.Text("UiOpenDataFolder"),
                 StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(OpenSharedDataFolderButton.ToolTip?.ToString()
                 ?? AutomationProperties.GetHelpText(OpenSharedDataFolderButton))
@@ -26665,6 +26784,39 @@ public partial class MainWindow : Window
         => SearchHistoryPopup.PopupAnimation == PopupAnimation.None;
     public string UiSearchPlaceholderForSmoke => SearchWatermark.Text;
     public string UiGeneralNavigationForSmoke => SettingsGeneralNav.Content?.ToString() ?? "";
+    public string[] SettingsNavigationLabelsForSmoke =>
+        AppSettingsNavigationPanel.Children
+            .OfType<RadioButton>()
+            .Select(item => item.Content?.ToString() ?? "")
+            .ToArray();
+    public string PreviousImageKeyBindingLabelForSmoke
+        => _keyBindingLabels.TryGetValue(
+                ViewerKeyAction.PreviousImage,
+                out TextBlock? label)
+            ? label.Text
+            : "";
+    public string SharedDataModeForSmoke => SharedDataModeText.Text;
+    public string SharedDataStatusForSmoke => SharedDataStatusText.Text;
+    public string DiagnosticsStatusForSmoke => DiagnosticsStatusText.Text;
+    public bool SettingsArchiveLanguageAbsentForSmoke
+    {
+        get
+        {
+            string surface = string.Join(
+                "\n",
+                SettingsNavigationLabelsForSmoke
+                    .Append(UiLanguageResources.Text("UiKeyBindingsHelp"))
+                    .Append(KeyBindingsStatusText.Text)
+                    .Append(SharedDataModeText.Text)
+                    .Append(SharedDataDescriptionText.Text)
+                    .Append(SharedDataStatusText.Text)
+                    .Append(DiagnosticsStatusText.Text)
+                    .Concat(_keyBindingLabels.Values.Select(static label => label.Text)));
+            return !surface.Contains("Browser", StringComparison.OrdinalIgnoreCase)
+                && !surface.Contains("WPF-only", StringComparison.OrdinalIgnoreCase)
+                && !surface.Contains("Browser + WPF", StringComparison.OrdinalIgnoreCase);
+        }
+    }
     public string UiModalShortcutHintForSmoke => ModalShortcutHintText.Text;
     public string EnhancedOnlyLabelForSmoke => EnhancedOnlyFilter.Content?.ToString() ?? "";
     public string UnseenOnlyLabelForSmoke => UnseenOnlyFilter.Content?.ToString() ?? "";
@@ -26766,9 +26918,18 @@ public partial class MainWindow : Window
     public void OpenAppSettingsForSmoke() => OpenAppSettings_Click(this, new RoutedEventArgs());
     public bool KeyBindingSurfaceContractForSmoke
         => KeyBindingsPanel.Children.Count == KeyBindingSettings.Definitions.Count
-            && string.Equals(AutomationProperties.GetName(KeyBindingsPanel), "Editable key bindings", StringComparison.Ordinal)
-            && string.Equals(AutomationProperties.GetName(ResetKeyBindingsButton), "Reset key bindings to defaults", StringComparison.Ordinal)
-            && string.Equals(AutomationProperties.GetName(SaveKeyBindingsButton), "Save key bindings", StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(KeyBindingsPanel),
+                UiLanguageResources.Text("UiKeyBindingsPanelAutomation"),
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(ResetKeyBindingsButton),
+                UiLanguageResources.Text("UiResetToDefaults"),
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(SaveKeyBindingsButton),
+                UiLanguageResources.Text("UiSaveKeyBindings"),
+                StringComparison.Ordinal)
             && AutomationProperties.GetLiveSetting(KeyBindingsStatusText) == AutomationLiveSetting.Polite
             && KeyBindingSettings.Definitions.All(definition =>
                 _keyBindingButtons.TryGetValue(definition.Action, out Button? button)
@@ -31605,9 +31766,9 @@ public sealed class ViewerState
     public bool ConfirmBeforeDelete { get; set; } = true;
     // Missing in v1 state means expanded, preserving the original sidebar behavior.
     public bool? FoldersSectionExpanded { get; set; }
-    // Missing in older state means open, matching the Browser and original WPF default.
+    // Missing in older state means open, preserving the established modal default.
     public bool? ModalFilmstripOpen { get; set; }
-    // WPF-only viewer hit zone; it does not modify the shared settings.json contract.
+    // Local viewer hit zone; it does not modify the shared settings.json contract.
     public double? ModalEdgeNavigationPercent { get; set; }
     // WPF-local request defaults for the explicit AI photorealization action.
     public bool? PhotorealLoraEnabled { get; set; }
@@ -31653,7 +31814,7 @@ public sealed class ViewerState
     public List<I2iEditStyleState>? I2iEditStyles { get; set; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? SelectedI2iEditStyleName { get; set; }
-    // WPF-only presentation language. Browser settings.json remains untouched.
+    // Local presentation language. Shared settings.json remains untouched.
     public string? UiLanguage { get; set; }
     // WPF-local presentation overrides. Null follows the current Windows preference.
     public bool? ReducedMotionOverride { get; set; }
@@ -32111,9 +32272,9 @@ public sealed record SharedDataLocationView(
     public static SharedDataLocationView Unavailable(string status)
         => new(
             "unavailable",
-            "Shared data unavailable",
-            "Aibos could not provide a safe shared-data location for this process.",
-            "Unavailable",
+            UiLanguageResources.Text("UiSharedDataUnavailableTitle"),
+            UiLanguageResources.Text("UiSharedDataUnavailableDescription"),
+            UiLanguageResources.Text("UiSharedDataUnavailableDisplay"),
             null,
             false,
             status);
