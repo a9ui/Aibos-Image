@@ -171,6 +171,11 @@ try {
         $wpfLauncher -match '(?i):(?:resolve|try)_companion_root') {
         Add-Finding 'companion-root-authority' 'start_wpf.bat' 1 'The public launcher must not guess a private Companion root from Git worktree order.'
     }
+    if ([regex]::Matches(
+            $wpfLauncher,
+            '(?im)^\s*start\s+""\s+/wait\s+/normal\s+').Count -ne 2) {
+        Add-Finding 'wpf-launch-window-state' 'start_wpf.bat' 1 'The production launcher must explicitly start both WPF targets in the normal window state.'
+    }
 
     if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'LICENSE') -PathType Leaf)) {
         $warnings.Add([pscustomobject]@{

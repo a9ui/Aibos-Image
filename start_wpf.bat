@@ -54,9 +54,9 @@ if "%CHECK_CODE%"=="10" (
 echo [Aibos WPF] Launching with %DOTNET_CMD%...
 echo.
 if exist "%LOCAL_DOTNET10%" (
-    "%DOTNET_CMD%" "%TARGET_DLL%" %*
+    start "" /wait /normal "%DOTNET_CMD%" "%TARGET_DLL%" %*
 ) else (
-    "%TARGET%" %*
+    start "" /wait /normal "%TARGET%" %*
 )
 
 :capture_exit_code
