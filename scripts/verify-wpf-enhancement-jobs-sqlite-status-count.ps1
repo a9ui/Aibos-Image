@@ -52,7 +52,7 @@ Assert-Contains $method 'token.ThrowIfCancellationRequested();' `
     "The bounded status reader must remain cancelable."
 Assert-Contains $method 'if (total >= EnhancementJobsWorkspaceMaximumRows)' `
     "The maximumRows + 1 sentinel must fail closed in application code."
-Assert-Contains $method 'contains an unsupported status' `
+Assert-Contains $method '未対応の状態が含まれています' `
     "Unknown status values must continue to fail closed."
 Assert-Contains $source `
     'private const int EnhancementJobsWorkspaceMaximumRows = 100_000;' `

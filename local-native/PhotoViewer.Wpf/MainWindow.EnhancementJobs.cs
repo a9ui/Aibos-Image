@@ -1799,10 +1799,10 @@ public partial class MainWindow
                 && _enhancementWorkspaceHealthInventorySignature is not null
                 && _enhancementWorkspaceHealthEndpointSupported != false;
             EnhancementJobsStatusText.Text = canReuseCachedInventory
-                ? "Checking the cached jobs inventory..."
+                ? "保存済みのJobs一覧を確認しています…"
                 : UsesDirectEnhancementJobsSqliteReader()
                     ? "ローカルJob履歴を読み込んでいます…"
-                    : "Loading jobs from the local companion...";
+                    : "ローカルAIサービスからJobsを読み込んでいます…";
             if (!canReuseCachedInventory)
             {
                 _enhancementWorkspaceHealthEndpointSupported = null;
@@ -1929,7 +1929,7 @@ public partial class MainWindow
         catch (Exception ex)
         {
             PreserveEnhancementWorkspaceAfterRefreshFailure(
-                "Jobs could not be refreshed. The last valid snapshot is still shown; retrying.");
+                "Jobsを更新できません。直前の有効な一覧を表示したまま再試行します。");
             operationOutcome = $"failed:{ex.GetType().Name}";
         }
         finally
@@ -2047,7 +2047,7 @@ public partial class MainWindow
                 || pausedElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
             {
                 EnhancementJobsStatusText.Text = response.Ok
-                    ? "The companion returned an invalid queue pause response."
+                    ? "ローカルAIサービスの一時停止応答が不正です。"
                     : response.Error;
                 AibosOperationLog.Write(
                     "queue_pause_change",
@@ -2065,7 +2065,7 @@ public partial class MainWindow
             if (persistedPaused != paused)
             {
                 EnhancementJobsStatusText.Text =
-                    "The companion did not apply the requested queue pause state.";
+                    "ローカルAIサービスが要求した一時停止状態を反映しませんでした。";
                 return false;
             }
 
@@ -2119,7 +2119,7 @@ public partial class MainWindow
         catch (Exception ex)
         {
             PreserveEnhancementWorkspaceAfterRefreshFailure(
-                "Jobs could not be refreshed. The last valid snapshot is still shown; retrying.");
+                "Jobsを更新できません。直前の有効な一覧を表示したまま再試行します。");
             AibosOperationLog.Write(
                 "jobs_workspace_poll",
                 "failed",
@@ -2272,10 +2272,10 @@ public partial class MainWindow
             if (!parsed)
             {
                 string failure = string.IsNullOrWhiteSpace(error)
-                    ? "Jobs could not be refreshed."
+                    ? "Jobsを更新できません。"
                     : error.Trim();
                 PreserveEnhancementWorkspaceAfterRefreshFailure(
-                    $"{failure} The last valid snapshot is still shown; retrying.");
+                    $"{failure} 直前の有効な一覧を表示したまま再試行します。");
                 return;
             }
 
@@ -2389,10 +2389,10 @@ public partial class MainWindow
                 || !UsesDirectEnhancementJobsSqliteReader();
             RefreshEnhancementQueueBulkControls();
             EnhancementJobsHeaderSummary.Text =
-                $"{counts.Total:N0} total  ·  {activeCount:N0} active  ·  {completedCount:N0} completed"
-                + $"  ·  {failedCount:N0} failed  ·  {canceledCount:N0} canceled"
+                $"{counts.Total:N0}件 · 実行中 {runningCount:N0} · 待機 {queuedCount:N0}"
+                + $" · 完了 {completedCount:N0} · 失敗 {failedCount:N0} · 中止 {canceledCount:N0}"
                 + (loadedHistoryCount < totalHistoryCount
-                    ? $"  ·  latest {loadedHistoryCount:N0}/{totalHistoryCount:N0} history loaded"
+                    ? $" · 履歴 {loadedHistoryCount:N0} / {totalHistoryCount:N0}"
                     : "");
             EnhancementJobsStatusText.Text = FormatEnhancementJobsInventoryStatus(
                 activeCount,
@@ -2400,7 +2400,7 @@ public partial class MainWindow
                 queuedCount,
                 automaticPollingAvailable);
             if (highlightedBatchAlreadyTerminal)
-                EnhancementJobsStatusText.Text += " The new batch already finished, so all highlighted jobs are shown.";
+                EnhancementJobsStatusText.Text += " 新しい一括処理は完了済みのため、該当履歴を表示しています。";
             if (!_aiProcessingMinimizedMode
                 && (activeCount > 0 && automaticPollingAvailable
                     || forceHealthPollAfterInventory
@@ -2475,7 +2475,7 @@ public partial class MainWindow
         if (!response.Ok || response.Payload is not JsonElement payload)
         {
             ApplyEnhancementQueueHealthUnavailable(
-                "処理待ち列の状態を取得できません。AI処理履歴は引き続き確認できます。");
+                "処理待ち列の状態を取得できません。Jobsは引き続き確認できます。");
             return null;
         }
 
@@ -3071,14 +3071,14 @@ public partial class MainWindow
     {
         if (activeCount > 0 && automaticPollingAvailable)
         {
-            return $"共有GPUキューを実行順で表示中です。実行中 {runningCount:N0}、待ち {queuedCount:N0}。履歴は最新 {_enhancementJobsHistoryLimit:N0}件まで読みます。";
+            return $"実行順で表示中 · 履歴は最新 {_enhancementJobsHistoryLimit:N0}件";
         }
         if (!automaticPollingAvailable
             && UsesDirectEnhancementJobsSqliteReader())
         {
-            return $"ローカルJob履歴を読み取り専用で表示中です。実行中記録 {runningCount:N0}、待ち記録 {queuedCount:N0}。ローカルAIサービスに未接続のため自動更新は停止しています。";
+            return "ローカル履歴を読み取り専用で表示中 · 自動更新は停止中";
         }
-        return $"{DateTime.Now:HH:mm:ss}に更新しました。実行中の処理がないため自動更新を停止しています。";
+        return $"{DateTime.Now:HH:mm:ss} 更新 · 実行中なし";
     }
 
     private void ApplyQueuedPhotorealPromptUpdateCapability(bool supported)
@@ -3205,7 +3205,7 @@ public partial class MainWindow
                 return (
                     false,
                     [],
-                    "The local Jobs database path could not be resolved safely.");
+                    "ローカルJobsデータベースの場所を安全に解決できません。");
             }
 
             if (IsEnhancementSqliteStore(jobsPath))
@@ -3223,7 +3223,7 @@ public partial class MainWindow
                 false,
                 [],
                 string.IsNullOrWhiteSpace(response.Error)
-                    ? "Jobs could not be refreshed."
+                    ? "Jobsを更新できません。"
                     : response.Error.Trim());
         }
         (bool parsed, List<EnhancementWorkspaceJobView> jobs, string? error) =
@@ -3295,7 +3295,7 @@ public partial class MainWindow
         if (!IsEnhancementSqliteStore(fullPath))
         {
             throw new InvalidDataException(
-                "The Jobs workspace direct reader requires a SQLite store.");
+                "Jobsの直接読み取りにはSQLite形式の保存先が必要です。");
         }
 
         using SqliteConnection connection = OpenEnhancementSqliteReadConnection(fullPath);
@@ -3342,7 +3342,7 @@ public partial class MainWindow
             if (apiOrdinal >= EnhancementJobsWorkspaceMaximumRows)
             {
                 throw new InvalidDataException(
-                    "The Jobs workspace SQLite inventory exceeds the safe row limit.");
+                    "JobsのSQLite一覧が安全な行数上限を超えています。");
             }
 
             long position = ReadRequiredSqliteInteger(reader, 0, "job position");
@@ -3382,7 +3382,7 @@ public partial class MainWindow
                 > EnhancementJobsWorkspaceMaximumTotalPayloadBytes - payloadBytes)
             {
                 throw new InvalidDataException(
-                    "The Jobs workspace SQLite inventory exceeds the safe total payload limit.");
+                    "JobsのSQLite一覧が安全な総データ量上限を超えています。");
             }
             totalPayloadBytes += payloadBytes;
 
@@ -3484,7 +3484,7 @@ public partial class MainWindow
             if (total >= EnhancementJobsWorkspaceMaximumRows)
             {
                 throw new InvalidDataException(
-                    "The Jobs workspace SQLite inventory exceeds the safe row limit.");
+                    "JobsのSQLite一覧が安全な行数上限を超えています。");
             }
             string status = ReadRequiredSqliteText(reader, 0, "job status");
             switch (status)
@@ -3509,7 +3509,7 @@ public partial class MainWindow
                     break;
                 default:
                     throw new InvalidDataException(
-                        "The Jobs workspace SQLite inventory contains an unsupported status.");
+                        "JobsのSQLite一覧に未対応の状態が含まれています。");
             }
             total++;
         }
@@ -3595,7 +3595,7 @@ public partial class MainWindow
             return (
                 false,
                 [],
-                "Jobs could not be read safely from the local queue database.");
+                "ローカル待ち列データベースからJobsを安全に読み取れません。");
         }
         finally
         {
@@ -3614,7 +3614,7 @@ public partial class MainWindow
         if (!IsEnhancementSqliteStore(fullPath))
         {
             throw new InvalidDataException(
-                "Job details require a SQLite Jobs store.");
+                "処理の詳細表示にはSQLite形式のJobs保存先が必要です。");
         }
 
         using SqliteConnection connection = OpenEnhancementSqliteReadConnection(fullPath);
@@ -3634,7 +3634,7 @@ public partial class MainWindow
         if (!reader.Read())
         {
             throw new InvalidDataException(
-                "The selected Job no longer exists in the local queue database.");
+                "選択した処理はローカル待ち列データベースに存在しません。");
         }
 
         token.ThrowIfCancellationRequested();
@@ -3644,7 +3644,7 @@ public partial class MainWindow
         if (reader.Read())
         {
             throw new InvalidDataException(
-                "The selected Job id is not unique in the local queue database.");
+                "選択したJob IDがローカル待ち列データベース内で重複しています。");
         }
         reader.Close();
 
@@ -3652,13 +3652,13 @@ public partial class MainWindow
             || !string.Equals(rowStatus, expected.Status, StringComparison.Ordinal))
         {
             throw new InvalidDataException(
-                "The selected Job changed while its details were being read.");
+                "詳細の読み取り中に選択した処理が更新されました。");
         }
         int payloadBytes = Encoding.UTF8.GetByteCount(payloadText);
         if (payloadBytes > EnhancementJobsWorkspaceMaximumPayloadBytesPerRow)
         {
             throw new InvalidDataException(
-                "The selected Job detail exceeds the safe per-job payload limit.");
+                "選択した処理の詳細が安全なデータ量上限を超えています。");
         }
 
         JsonDocument payload;
@@ -3669,7 +3669,7 @@ public partial class MainWindow
         catch (JsonException ex)
         {
             throw new InvalidDataException(
-                "The selected Job detail payload is malformed.",
+                "選択した処理の詳細データが不正です。",
                 ex);
         }
 
@@ -3688,7 +3688,7 @@ public partial class MainWindow
                 || !string.Equals(detailed.AdapterId, expected.AdapterId, StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    "The selected Job detail does not match the displayed Jobs row.");
+                    "選択した処理の詳細が表示中のJobs行と一致しません。");
             }
 
             transaction.Commit();
@@ -3959,7 +3959,7 @@ public partial class MainWindow
             || !payload.TryGetProperty("jobs", out JsonElement jobsElement)
             || jobsElement.ValueKind != JsonValueKind.Array)
         {
-            error = "The companion response does not contain a jobs array.";
+            error = "ローカルAIサービスの応答にJobs一覧がありません。";
             return false;
         }
 
@@ -3975,13 +3975,13 @@ public partial class MainWindow
             if (job is null)
             {
                 jobs.Clear();
-                error = "The companion returned an invalid jobs row. The last valid snapshot was preserved.";
+                error = "ローカルAIサービスから不正なJobs行が返されました。直前の有効な一覧を保持します。";
                 return false;
             }
             if (!ids.Add(job.Id))
             {
                 jobs.Clear();
-                error = "The companion returned duplicate job identifiers. The last valid snapshot was preserved.";
+                error = "ローカルAIサービスから重複したJob IDが返されました。直前の有効な一覧を保持します。";
                 return false;
             }
             jobs.Add(job);
@@ -4591,6 +4591,9 @@ public partial class MainWindow
     {
         _enhancementWorkspacePageIndex = 0;
         ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
+        if (EnhancementJobsList.Items.Count > 0)
+            EnhancementJobsList.ScrollIntoView(EnhancementJobsList.Items[0]);
+        EnhancementJobsList.UpdateLayout();
         FindVisualDescendant<ScrollViewer>(EnhancementJobsList)?.ScrollToTop();
     }
 
@@ -4601,6 +4604,10 @@ public partial class MainWindow
             int.MaxValue);
         _enhancementWorkspacePageIndex = page.PageIndex;
         ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
+        if (EnhancementJobsList.Items.Count > 0)
+            EnhancementJobsList.ScrollIntoView(
+                EnhancementJobsList.Items[^1]);
+        EnhancementJobsList.UpdateLayout();
         FindVisualDescendant<ScrollViewer>(EnhancementJobsList)?.ScrollToBottom();
     }
 
@@ -5045,7 +5052,7 @@ public partial class MainWindow
     private async void CancelEnhancementJob_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: EnhancementWorkspaceJobView job } && job.CanCancel)
-            await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel", "Cancel requested.");
+            await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel", "中止を受け付けました。");
     }
 
     private async void EnhancementJobAction_Click(object sender, RoutedEventArgs e)
@@ -5200,7 +5207,7 @@ public partial class MainWindow
                 job,
                 HttpMethod.Post,
                 $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry",
-                "Retry queued. The original terminal history was removed.",
+                "再試行を待機列へ追加し、元の終了履歴を削除しました。",
                 removeTerminalOriginalAfterSuccess:
                     job.Status is "failed" or "canceled",
                 operationLogName: "job_retry");
@@ -5215,7 +5222,7 @@ public partial class MainWindow
                 job,
                 HttpMethod.Delete,
                 $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}",
-                "Job removed from history. Source and output files were not changed.");
+                "履歴から削除しました。元画像と出力ファイルは変更していません。");
         }
     }
 
@@ -7978,7 +7985,7 @@ public partial class MainWindow
                         out I2iV3CapabilityState capability)
                     || !capability.IsReady)
                 {
-                    return "The Aibos Image local AI service is not ready for unified AI editing. No job was added.";
+                    return "LOCAL AIは統合AI編集の準備ができていません。Jobは追加していません。";
                 }
                 return null;
             }
@@ -8451,7 +8458,7 @@ public partial class MainWindow
                 if (!removeResponse.Ok)
                 {
                     EnhancementJobsStatusText.Text =
-                        $"Retry was queued, but the original terminal history could not be removed. {removeResponse.Error}";
+                        $"再試行は待機列へ追加しましたが、元の終了履歴を削除できませんでした。{removeResponse.Error}";
                     AibosOperationLog.Write(
                         operationLogName,
                         "partial",
@@ -8533,7 +8540,7 @@ public partial class MainWindow
                     out I2iV2CapabilityState capability)
                 && capability.IsReadyFor(target)
                     ? null
-                    : "The Aibos Image local AI service is not ready for this AI edit Retry. No reservation was saved.";
+                    : "LOCAL AIはこのAI編集の再試行を準備できていません。予約は保存していません。";
         }
 
         return payload => TryParseI2iCapability(
@@ -8542,7 +8549,7 @@ public partial class MainWindow
                 out _)
             && ready
                 ? null
-                : "The Aibos Image local AI service is not ready for this AI edit Retry. No reservation was saved.";
+                : "LOCAL AIはこのAI編集の再試行を準備できていません。予約は保存していません。";
     }
 
     private async void OpenEnhancementOutput_Click(object sender, RoutedEventArgs e)
@@ -8878,7 +8885,7 @@ public partial class MainWindow
                 preferredOutput.OutputPath,
                 StringComparison.OrdinalIgnoreCase);
         if (!opened)
-            SetStatusToast("The managed output could not be selected in the Aibos viewer.");
+            SetStatusToast("管理中の出力をAibosで選択できませんでした。");
         return opened;
     }
 
@@ -8920,7 +8927,7 @@ public partial class MainWindow
             versionIndex,
             autoplay: true);
         if (!opened)
-            SetStatusToast("The managed video could not be selected in the Aibos viewer.");
+            SetStatusToast("管理中の動画をAibosで選択できませんでした。");
         return opened;
     }
 
@@ -8963,7 +8970,7 @@ public partial class MainWindow
     {
         canonicalSource = "";
         sourceSizeBytes = 0;
-        reason = "AI処理履歴の保存元を利用できません";
+        reason = "Jobsの保存元を利用できません";
         if (!IsEnhancementJobsTrustedModalSource(tile)
             || string.IsNullOrWhiteSpace(tile.Path)
             || !Path.IsPathFullyQualified(tile.Path)
@@ -9208,11 +9215,11 @@ public partial class MainWindow
             return;
         }
 
-        string mediaName = job.IsVideoOperation ? "video" : "enhanced";
+        string mediaName = job.IsVideoOperation ? "動画" : "AI処理版";
         bool confirmed = _confirmEnhancedOutputDeleteForSmoke?.Invoke() ?? MessageBox.Show(
                 this,
-                $"Delete only this managed {mediaName} output? The original source image will be kept.",
-                $"Delete {mediaName} output",
+                $"管理中の{mediaName}出力だけを削除しますか？ 元画像は残します。",
+                $"{mediaName}出力を削除",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning,
                 MessageBoxResult.No) == MessageBoxResult.Yes;
@@ -9892,6 +9899,7 @@ public partial class MainWindow
             _enhancementWorkspacePollTimer.IsEnabled,
             _enhancementWorkspaceGetCount,
             _enhancementWorkspacePollCount,
+            EnhancementJobsHeaderSummary.Text,
             EnhancementJobsStatusText.Text,
             _enhancementWorkspaceHealthGetCount,
             EnhancementJobsHealthStateText.Text,
@@ -9929,7 +9937,7 @@ public partial class MainWindow
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
         if (job is null || !job.CanCancel)
             return false;
-        await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel", "Cancel requested.");
+        await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel", "中止を受け付けました。");
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
         return true;
     }
@@ -9943,7 +9951,7 @@ public partial class MainWindow
             job,
             HttpMethod.Post,
             $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry",
-            "Retry queued. The original terminal history was removed.",
+            "再試行を待機列へ追加し、元の終了履歴を削除しました。",
             removeTerminalOriginalAfterSuccess:
                 job.Status is "failed" or "canceled",
             operationLogName: "job_retry");
@@ -11105,7 +11113,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         }
     }
     public string RequestDetailsButtonLabel =>
-        RequestDetailsExpanded ? "詳細を閉じる" : "詳細";
+        RequestDetailsExpanded ? "閉じる" : "Prompt";
 
     internal void AttachVideoMutationProbe(
         EnhancementVideoMutationProbe probe)
@@ -11188,11 +11196,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         "queued" => JobAction(
             "move-up",
-            "↑ 上へ",
+            "↑",
             "待機順を1つ上へ",
             ShowMoveUp,
             CanMoveUp,
-            58),
+            40),
         "running" or "failed" => JobAction(
             "cancel",
             CancelLabel,
@@ -11239,11 +11247,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         "queued" => JobAction(
             "move-down",
-            "↓ 下へ",
+            "↓",
             "待機順を1つ下へ",
             ShowMoveDown,
             CanMoveDown,
-            58),
+            40),
         "failed" => JobAction(
             "retry",
             RetryLabel,
@@ -11281,12 +11289,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         "queued" => JobAction(
             "move-next",
-            "これを次に処理",
+            "先頭へ",
             "画面へすぐ反映し、処理中ジョブの直後へ保存",
             ShowMoveNext,
             CanMoveNext,
-            96,
-            "このジョブを次に処理"),
+            64,
+            "この処理を次に実行"),
         "failed" => JobAction(
             "rerun",
             "現在設定で再実写化",
@@ -11325,11 +11333,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         "queued" => JobAction(
             "update-prompts",
-            "現在設定へ更新",
+            "設定を更新",
             "現在のPrompt・LoRA・強さ・CFG・品質・解像度・Seedへ更新。元画像ごとの個別Prompt変換と待ち順は維持",
             CanUpdatePhotorealPrompts,
             CanUpdatePhotorealPrompts,
-            114),
+            88),
         "failed" => JobAction(
             "rerun-next",
             "現在設定で次に実写化",
@@ -11516,11 +11524,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         return null;
     }
     public string PresetSummary => VideoToolsV2Snapshot is { Kind: "edit" } editV2
-        ? $"Video Tools v2 · AI動画編集 · [{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive}) · 非破壊child clip"
+        ? $"Video Tools v2 · Edit · {FormatVideoFrameRange(editV2.SelectionStartFrame, editV2.SelectionEndFrameExclusive)} · {SourceVersionLabel}"
         : VideoToolsV2Snapshot is { Kind: "finish" } finishV2
-            ? $"Video Tools v2 · AI動画高画質化 · {finishV2.FinishMode} · {finishV2.FinishScale}x"
+            ? $"Video Tools v2 · Finish · {FormatVideoFinishMode(finishV2.FinishMode)} · {finishV2.FinishScale}x · {SourceVersionLabel}"
         : VideoTrimV1Snapshot is { } trimV1
-            ? $"Video Trim v1 · [{trimV1.SelectionStartFrame}, {trimV1.SelectionEndFrameExclusive}) · {trimV1.OutputFrameCount} frame · {trimV1.AudioPolicy}"
+            ? $"Video Trim v1 · {FormatVideoFrameRange(trimV1.SelectionStartFrame, trimV1.SelectionEndFrameExclusive)} · {trimV1.OutputFrameCount} Frames · {FormatVideoAudioPolicy(trimV1.AudioPolicy)} · {SourceVersionLabel}"
         : VideoToolsKind == "retake"
         ? "動画ツール · 区間を作り直す · 読み取り専用"
         : VideoToolsKind == "finish"
@@ -11532,16 +11540,50 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : IsVideoOperation
         ? $"{(PresetId switch
         {
-            "minimax-h3-i2v-preview-v1" => "MiniMax H3 プレビュー · 24 fps · 音声あり",
-            "wan22-ti2v-5b-normal-v1" => "Wan2.2 TI2V 5B · 標準 · 20ステップ",
-            "wan22-ti2v-5b-high-v1" => "Wan2.2 TI2V 5B · 高品質 · 40ステップ",
+            "minimax-h3-i2v-preview-v1" => "MiniMax H3 Preview · 24 FPS · Audio",
+            "wan22-ti2v-5b-normal-v1" => "Wan2.2 TI2V 5B · Standard · 20 STEP",
+            "wan22-ti2v-5b-high-v1" => "Wan2.2 TI2V 5B · High Quality · 40 STEP",
             _ => PresetId,
-        })}  ·  {SourceVersionLabel}"
+        })} · {SourceVersionLabel}"
         : Operation == "i2i" && I2iV3Snapshot is I2iV3WorkspaceSnapshot v3
-            ? $"形式 v3  ·  {I2iTarget ?? "統合編集"}  ·  ステップ {v3.Steps}  ·  CFG {v3.CfgScale.ToString("0.0", CultureInfo.InvariantCulture)}  ·  {SourceVersionLabel}"
+            ? $"I2I v3 · {(string.IsNullOrWhiteSpace(I2iTarget) ? "統合編集" : I2iTargetDisplayLabel)} · {v3.Steps} STEP · CFG {v3.CfgScale.ToString("0.0", CultureInfo.InvariantCulture)} · {SourceVersionLabel}"
         : Operation == "i2i" && I2iMutationSafe
-            ? $"形式 v{I2iSchemaVersion ?? 0}  ·  対象: {I2iTargetDisplayLabel}  ·  {SourceVersionLabel}"
-        : $"{PresetId}  ·  {AdapterId}";
+            ? $"I2I v{I2iSchemaVersion ?? 0} · {I2iTargetDisplayLabel} · {SourceVersionLabel}"
+        : BuildImagePresetSummary();
+
+    private static string FormatVideoFrameRange(int? startFrame, int? endFrameExclusive)
+    {
+        if (startFrame is not int start || endFrameExclusive is not int end)
+            return "Frame ?";
+        return $"Frame {start}–{Math.Max(start, end - 1)}";
+    }
+
+    private static string FormatVideoFinishMode(string? finishMode) => finishMode switch
+    {
+        "detail" => "Detail",
+        "fidelity" => "Fidelity",
+        _ => string.IsNullOrWhiteSpace(finishMode) ? "Unknown" : finishMode,
+    };
+
+    private static string FormatVideoAudioPolicy(string? audioPolicy) => audioPolicy switch
+    {
+        "preserve" => "Audio Keep",
+        "mute" => "Muted",
+        _ => string.IsNullOrWhiteSpace(audioPolicy) ? "Audio ?" : audioPolicy,
+    };
+
+    private string BuildImagePresetSummary() => (PresetId, AdapterId) switch
+    {
+        ("photoreal-balanced", "comfyui-flux2-photoreal") =>
+            "Balanced · FLUX.2 Photoreal",
+        ("photo-detail-x4", "realesrgan-ncnn") =>
+            "Photo Detail 4x · Real-ESRGAN",
+        ("anime-sharp-x2", "realesrgan-ncnn") =>
+            "Anime Sharp 2x · Real-ESRGAN",
+        ("photo-natural-x2", "realesrgan-ncnn") =>
+            "Photo Natural 2x · Real-ESRGAN",
+        _ => $"{PresetId} · {AdapterId}",
+    };
     public string OperationLabel => BuildOperationLabel();
 
     private string BuildOperationLabel()
@@ -11593,13 +11635,6 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             AdapterId,
             "comfyui-flux2-i2i-v2",
             StringComparison.Ordinal);
-    private string SafeI2iV2DetailText => !I2iMutationSafe
-        ? "このAI編集履歴は不完全または非互換のため、変更操作から保護しています。"
-        : I2iV3Snapshot is I2iV3WorkspaceSnapshot v3
-            ? $"{I2iTarget ?? "統合編集"} · STEP {v3.Steps} · CFG {v3.CfgScale.ToString("0.0", CultureInfo.InvariantCulture)} · 服装マスク {v3.OutfitMaskMode} {v3.OutfitMaskExpandPixels}px"
-        : !string.IsNullOrWhiteSpace(I2iInstructionSummary)
-            ? $"{I2iTargetDisplayLabel}: {I2iInstructionSummary}"
-            : $"{I2iTargetDisplayLabel}: 検証済みの公開指示を取得できません。";
     // Durable jobs carry a bounded 0..100 lifecycle value. Only running rows
     // expose that value as determinate progress; queued and terminal rows use
     // their status as the clearer authority and do not render a decorative bar.
@@ -11631,47 +11666,32 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             _ => "状態不明",
         };
     public string StatusLabel => _isBusy
-        ? $"反映中  ·  {PersistedStatusLabel}"
+        ? $"反映中 · {PersistedStatusLabel}"
         : PersistedStatusLabel;
-    public string DetailText => VideoToolsV2Snapshot is { Kind: "edit" } editV2
-        ? $"動画ツールv2のAI動画編集です。管理元は{SourceVersionLabel}、出力は[{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive})だけの非破壊子クリップです。状態に応じた操作は認証済みローカルAIサービスが最終判定します。"
-        : VideoToolsV2Snapshot is { Kind: "finish" } finishV2
-            ? $"動画ツールv2のAI動画高画質化です。管理元は{SourceVersionLabel}、{finishV2.FinishScale}倍出力でも毎秒フレーム数・フレーム数・長さ・元音声を維持します。状態に応じた操作は認証済みローカルAIサービスが最終判定します。"
-        : VideoTrimV1Snapshot is { } trimV1
-            ? $"動画トリムv1です。管理元は{SourceVersionLabel}、出力は[{trimV1.SelectionStartFrame}, {trimV1.SelectionEndFrameExclusive})の{trimV1.OutputFrameCount}フレームです。映像と保持音声は選択した正確な区間へ再変換し、元動画は変更しません。"
-        : VideoToolsKind == "retake"
-        ? "区間作り直しの保存情報を読み取り専用で表示しています。選択区間と実際の差し替え範囲、全尺・元音声保持の情報は保存済みです。実行環境の検証前は変更できません。"
-        : VideoToolsKind == "finish"
-            ? "動画高画質化2倍の保存情報を読み取り専用で表示しています。毎秒フレーム数・フレーム数・長さ・音声保持の情報は保存済みです。実行環境の検証前は変更できません。"
+    public string DetailText => !string.IsNullOrWhiteSpace(ErrorMessage)
+        ? ErrorMessage
+        : CancelRequested && Status == "running"
+            ? "中止を受け付けました。現在のGPU処理が安全に終了してから次の処理へ進みます。"
+        : VideoToolsKind is "retake" or "finish"
+            ? "Legacy Video Toolsの履歴のため、読み取り専用で表示しています。"
         : VideoToolsEnvelopeClaimed
             ? "この動画ツール履歴は不正・将来形式・不完全のいずれかであるため、すべての変更操作から保護しています。"
         : VideoTrimEnvelopeClaimed
             ? "この動画トリム履歴は不正・将来形式・不完全のいずれかであるため、すべての変更操作と出力操作から保護しています。"
-        : IsStructuredI2iEnvelope
-        ? SafeI2iV2DetailText
-        : !string.IsNullOrWhiteSpace(ErrorMessage)
-        ? ErrorMessage
-        : CancelRequested && Status == "running"
-            ? "中止を受け付けました。現在のGPU処理が安全に終了してから次の処理へ進みます。"
+        : IsStructuredI2iEnvelope && !I2iMutationSafe
+            ? "このAI編集履歴は不完全または非互換のため、変更操作から保護しています。"
         : IsVideoOperation
             ? !VideoMutationSafe
                 ? "この動画履歴は不完全または非互換のため、変更操作から保護しています。"
-                : Status == "succeeded"
-                    ? $"{SourceVersionLabel}から作った管理動画は、元画像とは別に保存しています。"
-                    : $"{SourceVersionLabel}からの動画化は、画像AI処理と同じ永続的な待ち列とGPU処理役を使います。"
+                : ""
             : Operation == "i2i"
                 ? !I2iMutationSafe
                     ? "このAI編集履歴は不完全または非互換のため、変更操作から保護しています。"
-                    : Status == "succeeded"
-                        ? $"{SourceVersionLabel}から作ったAI編集版は、元画像とは別に保存しています。"
-                        : $"{SourceVersionLabel}からのAI編集は、同じ永続的な待ち列とGPU処理役を使います。"
+                    : ""
             : !IsImageOperation
                 ? "この処理は未対応のため、画像操作から保護しています。"
-                : Status == "succeeded"
-                    ? "AI処理版は元画像とは別に保存しています。"
-                    : Status == "deleted"
-                        ? "AI処理版を削除しました。元画像は保持しています。"
-                        : "元画像は変更しません。";
+                : "";
+    public bool ShowDetailText => !string.IsNullOrWhiteSpace(DetailText);
     public TimeSpan? CompletedElapsed =>
         Status == "succeeded"
         && StartedAt is DateTimeOffset startedAt
@@ -11686,20 +11706,38 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         get
         {
+            if (Status == "queued")
+            {
+                return CreatedAt == DateTimeOffset.MinValue
+                    ? "追加時刻を取得できません"
+                    : $"追加 {FormatCompactJobTimestamp(CreatedAt)}";
+            }
             if (Status == "running")
             {
                 return StartedAt is DateTimeOffset startedAt
-                    ? $"開始 {startedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}"
+                    ? $"開始 {FormatCompactJobTimestamp(startedAt)}"
                     : "開始時刻を取得できません";
             }
-            string updated = UpdatedAt == DateTimeOffset.MinValue
+            DateTimeOffset terminalTime = FinishedAt ?? UpdatedAt;
+            string terminalLabel = Status switch
+            {
+                "succeeded" => "完了",
+                "failed" => "失敗",
+                "canceled" => "中止",
+                "deleted" => "削除",
+                _ => "更新",
+            };
+            string updated = terminalTime == DateTimeOffset.MinValue
                 ? "更新時刻を取得できません"
-                : $"更新 {UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
+                : $"{terminalLabel} {FormatCompactJobTimestamp(terminalTime)}";
             return ElapsedText is { } elapsed
                 ? $"{updated} · {elapsed}"
                 : updated;
         }
     }
+
+    private static string FormatCompactJobTimestamp(DateTimeOffset value)
+        => value.ToLocalTime().ToString("M/d HH:mm", CultureInfo.InvariantCulture);
     public string AccessibleName => ElapsedText is { } elapsed
         ? $"{SourceName}, {OperationLabel}, {StatusLabel}, {PresetId}, {elapsed}"
         : $"{SourceName}, {OperationLabel}, {StatusLabel}, {PresetId}";
@@ -11895,7 +11933,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             || cancelRequestedChanged
             || outputChanged
             || errorChanged)
+        {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowDetailText)));
+        }
         if (statusChanged || updatedChanged || timingChanged)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TimestampText)));
@@ -12108,6 +12149,7 @@ public sealed record EnhancementJobsWorkspaceSmokeSnapshot(
     bool Polling,
     int GetRequests,
     int PollRequests,
+    string HeaderSummary,
     string Status,
     int HealthGetRequests,
     string HealthState,
