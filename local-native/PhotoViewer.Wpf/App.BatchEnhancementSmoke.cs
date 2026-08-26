@@ -471,10 +471,40 @@ public partial class App
                     && ten.Eligible == 10
                     && hundred.Selected == 100
                     && hundred.Eligible == 100;
+                bool presentationContract = one.CountsText
+                        == "1件 · 対象 1 · 対象外 0"
+                    && one.CompanionStatus
+                        == "LOCAL AI · 接続済み · 対象画像ごとに1 Jobを作成します"
+                    && one.StatusText == "まだJobsへ追加していません"
+                    && one.StartLabel == "Jobsへ追加（1）"
+                    && one.CancelLabel == "閉じる"
+                    && one.ViewJobsLabel == "Jobsを見る"
+                    && one.Items is
+                    [
+                        {
+                            State: "Ready",
+                            StatusLabel: "対象",
+                            Detail: "",
+                            ShowDetailText: false,
+                        },
+                    ];
+                bool rowDensityContract = ten.Items.All(static item =>
+                        item.State != "Ready"
+                        || item.StatusLabel == "対象"
+                        && !item.ShowDetailText)
+                    && firstRun.Items
+                        .Where(static item => item.State == "Queued")
+                        .All(static item =>
+                            item.StatusLabel == "追加済み"
+                            && !item.ShowDetailText)
+                    && firstRun.Items
+                        .Where(static item => item.State is
+                            "Failed" or "SavedForDelivery")
+                        .All(static item => item.ShowDetailText);
                 bool responsiveOpen = hundred.SynchronousOpenMilliseconds <= 100;
                 static bool IsCustomAdapterDeferred(BatchEnhancementSmokeSnapshot snapshot)
                     => snapshot.AdapterStatus.Contains(
-                        "custom configuration present; the companion will validate it",
+                        "Custom pathは追加時にLOCAL AIが検証",
                         StringComparison.Ordinal);
                 bool customAdapterPathDeferred =
                     !IsCustomAdapterDeferred(one)
@@ -502,6 +532,8 @@ public partial class App
 
                 ok = ordinaryBrowsingPassive
                     && sizesOk
+                    && presentationContract
+                    && rowDensityContract
                     && preflightPostZero
                     && reviewCancelPostZero
                     && escapeClosedReview
@@ -530,6 +562,8 @@ public partial class App
                     one,
                     ten,
                     hundred,
+                    presentationContract,
+                    rowDensityContract,
                     preflightPostZero,
                     reviewCancelPostZero,
                     escapeClosedReview,
