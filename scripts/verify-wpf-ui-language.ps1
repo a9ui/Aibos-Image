@@ -1,5 +1,7 @@
 param(
     [string]$Configuration = 'Release',
+    [string]$DotnetPath = 'dotnet',
+    [switch]$NoRestore,
     [ValidateRange(1, 300)]
     [int]$OverallTimeoutSeconds = 90
 )
@@ -25,14 +27,21 @@ Assert-True $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCa
 try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    $buildArgs = @(
+        'build', $project,
+        '-c', $Configuration,
+        "-p:OutputPath=$buildOutput",
+        '--nologo', '-v:minimal'
+    )
+    if ($NoRestore) { $buildArgs += '--no-restore' }
+    & $DotnetPath @buildArgs
     Assert-True ($LASTEXITCODE -eq 0) "WPF build failed with exit code $LASTEXITCODE."
 
-    $exe = Join-Path $buildRoot 'PhotoViewer.Wpf.exe'
-    Assert-True (Test-Path -LiteralPath $exe -PathType Leaf) "WPF executable was not found: $exe"
+    $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+    Assert-True (Test-Path -LiteralPath $dll -PathType Leaf) "WPF assembly was not found: $dll"
 
-    $process = Start-Process -FilePath $exe `
-        -ArgumentList @('--ui-language-smoke', ('"{0}"' -f $resultPath)) `
+    $process = Start-Process -FilePath $DotnetPath `
+        -ArgumentList @(('"{0}"' -f $dll), '--ui-language-smoke', ('"{0}"' -f $resultPath)) `
         -WindowStyle Hidden `
         -PassThru
 
@@ -54,10 +63,13 @@ try {
     $required = @(
         'englishLoaded',
         'englishFavoriteFilterSurface',
+        'englishGalleryShellSurface',
         'japaneseSaved',
+        'japaneseHotApplied',
         'japanesePersisted',
         'japaneseReloaded',
         'japaneseFavoriteFilterSurface',
+        'japaneseGalleryShellSurface',
         'englishSaved',
         'englishReloaded',
         'unknownLocalPreserved',

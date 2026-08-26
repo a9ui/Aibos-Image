@@ -4710,10 +4710,41 @@ public partial class App : Application
                 var english = HiddenWindow();
                 windows.Add(english);
                 english.Show();
+                string[] expectedSortLabels =
+                [
+                    "Modified ↓",
+                    "Modified ↑",
+                    "Created ↓",
+                    "Created ↑",
+                    "HQ Done",
+                    "HQ Added",
+                    "Real Done",
+                    "Real Added",
+                    "Video Done",
+                    "Video Added",
+                    "Fav Changed",
+                ];
+                english.SetMetadataIndexPresentationForSmoke(
+                    "UiMetadataReadyFormat",
+                    12,
+                    0,
+                    12);
                 bool englishLoaded = english.UiLanguageForSmoke == UiLanguageResources.English
                     && english.UiSearchPlaceholderForSmoke.StartsWith("Search filenames", StringComparison.Ordinal)
                     && english.UiGeneralNavigationForSmoke == "General"
                     && english.UiModalShortcutHintForSmoke.Contains("navigate", StringComparison.Ordinal);
+                bool englishGalleryShellSurface = english.EnhancedOnlyLabelForSmoke == "Enhanced only"
+                    && english.UnseenOnlyLabelForSmoke == "Unseen only"
+                    && english.DateFilterLabelForSmoke == "No date filter"
+                    && english.FolderCountLabelForSmoke.Contains("images indexed", StringComparison.Ordinal)
+                    && english.HeaderStatsForSmoke.Contains("selected", StringComparison.Ordinal)
+                    && english.SidebarSettingsLabelForSmoke == "Settings"
+                    && english.PreviewTabsEmptyLabelForSmoke == "Preview tabs · 0"
+                    && english.GallerySortLabelsForSmoke.SequenceEqual(expectedSortLabels)
+                    && english.PreviewCopyActionsHiddenForSmoke
+                    && english.MetadataIndexStatusTextForSmoke.StartsWith(
+                        "Prompt metadata ready",
+                        StringComparison.Ordinal);
                 bool englishFavoriteFilterSurface = english.FavoriteFilterSurfaceContractForSmoke
                     && english.FavoriteFilterGroupTitleForSmoke == "Favorites"
                     && english.OriginalFavoriteFilterTitleForSmoke == "Original"
@@ -4729,6 +4760,14 @@ public partial class App : Application
                     && english.GridFileInfoOverlayHelpForSmoke.Contains("List identity text", StringComparison.Ordinal);
 
                 bool japaneseSaved = english.SetUiLanguageForSmoke(UiLanguageResources.Japanese);
+                bool japaneseHotApplied = english.EnhancedOnlyLabelForSmoke == "高画質化済み"
+                    && english.UnseenOnlyLabelForSmoke == "未表示のみ"
+                    && english.DateFilterLabelForSmoke == "期間指定なし"
+                    && english.FolderCountLabelForSmoke.StartsWith("画像 ", StringComparison.Ordinal)
+                    && english.HeaderStatsForSmoke.StartsWith("選択 ", StringComparison.Ordinal)
+                    && english.MetadataIndexStatusTextForSmoke.StartsWith(
+                        "Prompt Index · Ready",
+                        StringComparison.Ordinal);
                 english.FlushStateForSmoke();
                 using JsonDocument japaneseDocument = JsonDocument.Parse(File.ReadAllText(statePath));
                 bool japanesePersisted = japaneseDocument.RootElement.TryGetProperty("UiLanguage", out JsonElement japaneseLanguage)
@@ -4740,15 +4779,20 @@ public partial class App : Application
                 var japanese = HiddenWindow();
                 windows.Add(japanese);
                 japanese.Show();
+                japanese.SetMetadataIndexPresentationForSmoke(
+                    "UiMetadataReadyFormat",
+                    12,
+                    0,
+                    12);
                 bool japaneseReloaded = japanese.UiLanguageForSmoke == UiLanguageResources.Japanese
                     && japanese.UiSearchPlaceholderForSmoke.StartsWith("ファイル名", StringComparison.Ordinal)
                     && japanese.UiGeneralNavigationForSmoke == "一般"
                     && japanese.UiModalShortcutHintForSmoke.Contains("移動", StringComparison.Ordinal);
                 bool japaneseFavoriteFilterSurface = japanese.FavoriteFilterSurfaceContractForSmoke
-                    && japanese.FavoriteFilterGroupTitleForSmoke == "お気に入り"
-                    && japanese.OriginalFavoriteFilterTitleForSmoke == "元画像"
-                    && japanese.PhotorealFavoriteFilterTitleForSmoke == "実写"
-                    && japanese.VideoFavoriteFilterTitleForSmoke == "動画"
+                    && japanese.FavoriteFilterGroupTitleForSmoke == "Favorite"
+                    && japanese.OriginalFavoriteFilterTitleForSmoke == "Original"
+                    && japanese.PhotorealFavoriteFilterTitleForSmoke == "Photoreal"
+                    && japanese.VideoFavoriteFilterTitleForSmoke == "Video"
                     && japanese.PhotorealFavoriteFilterSummaryForSmoke == "すべての評価"
                     && japanese.VideoFavoriteFilterSummaryForSmoke == "すべての評価"
                     && japanese.PhotorealFavoriteLevelZeroHelpForSmoke.Contains("最高Lv", StringComparison.Ordinal)
@@ -4757,6 +4801,18 @@ public partial class App : Application
                     && japanese.VideoFavoriteLevelOneHelpForSmoke.Contains("最も高い", StringComparison.Ordinal)
                     && japanese.GridFileInfoOverlayLabelForSmoke == "Gridのファイル情報を重ねる"
                     && japanese.GridFileInfoOverlayHelpForSmoke.Contains("状態バッジ", StringComparison.Ordinal);
+                bool japaneseGalleryShellSurface = japanese.EnhancedOnlyLabelForSmoke == "高画質化済み"
+                    && japanese.UnseenOnlyLabelForSmoke == "未表示のみ"
+                    && japanese.DateFilterLabelForSmoke == "期間指定なし"
+                    && japanese.FolderCountLabelForSmoke.StartsWith("画像 ", StringComparison.Ordinal)
+                    && japanese.HeaderStatsForSmoke.StartsWith("選択 ", StringComparison.Ordinal)
+                    && japanese.SidebarSettingsLabelForSmoke == "Settings"
+                    && japanese.PreviewTabsEmptyLabelForSmoke == "Preview tabs · 0"
+                    && japanese.GallerySortLabelsForSmoke.SequenceEqual(expectedSortLabels)
+                    && japanese.PreviewCopyActionsHiddenForSmoke
+                    && japanese.MetadataIndexStatusTextForSmoke.StartsWith(
+                        "Prompt Index · Ready",
+                        StringComparison.Ordinal);
 
                 bool englishSaved = japanese.SetUiLanguageForSmoke(UiLanguageResources.English);
                 japanese.FlushStateForSmoke();
@@ -4777,10 +4833,13 @@ public partial class App : Application
 
                 ok = englishLoaded
                     && englishFavoriteFilterSurface
+                    && englishGalleryShellSurface
                     && japaneseSaved
+                    && japaneseHotApplied
                     && japanesePersisted
                     && japaneseReloaded
                     && japaneseFavoriteFilterSurface
+                    && japaneseGalleryShellSurface
                     && englishSaved
                     && englishReloaded
                     && unknownLocalPreserved
@@ -4793,10 +4852,13 @@ public partial class App : Application
                         : "UI language contract did not match expectations",
                     englishLoaded,
                     englishFavoriteFilterSurface,
+                    englishGalleryShellSurface,
                     japaneseSaved,
+                    japaneseHotApplied,
                     japanesePersisted,
                     japaneseReloaded,
                     japaneseFavoriteFilterSurface,
+                    japaneseGalleryShellSurface,
                     englishSaved,
                     englishReloaded,
                     unknownLocalPreserved,
@@ -31748,6 +31810,7 @@ public partial class App : Application
                 MetadataCopySmokeSnapshot validCopy = win.CopyCurrentPreviewMetadataForSmoke();
                 MetadataCopySmokeSnapshot validPromptCopy = win.CopyCurrentPreviewPromptForSmoke(negative: false);
                 MetadataCopySmokeSnapshot validNegativeCopy = win.CopyCurrentPreviewPromptForSmoke(negative: true);
+                bool validCopySurface = win.PreviewCopySurfaceMatchesMetadataForSmoke;
                 ModalMetadataSmokeSnapshot initialModal = win.OpenModalMetadataForSmoke();
                 ModalMetadataSmokeSnapshot validModal = win.ToggleModalMetadataSidebarForSmoke();
                 ModalMetadataSmokeSnapshot negativeTabModal = win.SelectModalMetadataTabForSmoke("negative");
@@ -31887,6 +31950,7 @@ public partial class App : Application
                 MetadataCopySmokeSnapshot missingCopy = win.CopyCurrentPreviewMetadataForSmoke();
                 MetadataCopySmokeSnapshot missingPromptCopy = win.CopyCurrentPreviewPromptForSmoke(negative: false);
                 MetadataCopySmokeSnapshot missingNegativeCopy = win.CopyCurrentPreviewPromptForSmoke(negative: true);
+                bool missingCopySurface = win.PreviewCopySurfaceHiddenForPathForSmoke;
                 bool ignoredTextSkipped = !PhotoViewer.Wpf.MainWindow.HasPngParametersForSmoke(ignoredPath);
 
                 bool firstSelectionStarted = win.SelectFileNameForSmoke(validName);
@@ -31915,6 +31979,7 @@ public partial class App : Application
                     && string.Equals(validPromptCopy.CopyText, "masterpiece, studio portrait", StringComparison.Ordinal)
                     && validNegativeCopy.Copied && validNegativeCopy.CopyEnabled
                     && string.Equals(validNegativeCopy.CopyText, "lowres, text", StringComparison.Ordinal)
+                    && validCopySurface
                     && initialModal.ModalVisible
                     && !initialModal.SidebarVisible
                     && initialModal.MetadataCurrent
@@ -31985,6 +32050,7 @@ public partial class App : Application
                     && !missingCopy.CopyEnabled
                     && !missingPromptCopy.Copied && !missingPromptCopy.CopyEnabled
                     && !missingNegativeCopy.Copied && !missingNegativeCopy.CopyEnabled
+                    && missingCopySurface
                     && string.Equals(missing.Prompt, missingPath, StringComparison.OrdinalIgnoreCase)
                     && !missing.SamplerVisible
                     && ignoredTextSkipped
@@ -32008,6 +32074,7 @@ public partial class App : Application
                     EmptyFirstPath = emptyFirstPath,
                     Valid = valid,
                     ValidCopy = validCopy,
+                    ValidCopySurface = validCopySurface,
                     InitialModal = initialModal,
                     ValidModal = validModal,
                     NegativeTabModal = negativeTabModal,
@@ -32038,6 +32105,7 @@ public partial class App : Application
                     ParametersOverrideComfy = parametersOverrideComfy,
                     Missing = missing,
                     MissingCopy = missingCopy,
+                    MissingCopySurface = missingCopySurface,
                     IgnoredTextSkipped = ignoredTextSkipped,
                     FirstSelectionStarted = firstSelectionStarted,
                     LatestSelectionStarted = latestSelectionStarted,
@@ -35556,6 +35624,7 @@ public partial class App : Application
         public string? UnicodePath { get; init; }
         public PngMetadataSmokeSnapshot? Valid { get; init; }
         public MetadataCopySmokeSnapshot? ValidCopy { get; init; }
+        public bool ValidCopySurface { get; init; }
         public ModalMetadataSmokeSnapshot? InitialModal { get; init; }
         public ModalMetadataSmokeSnapshot? ValidModal { get; init; }
         public ModalMetadataSmokeSnapshot? NegativeTabModal { get; init; }
@@ -35585,6 +35654,7 @@ public partial class App : Application
         public bool ParametersOverrideComfy { get; init; }
         public PngMetadataSmokeSnapshot? Missing { get; init; }
         public MetadataCopySmokeSnapshot? MissingCopy { get; init; }
+        public bool MissingCopySurface { get; init; }
         public bool IgnoredTextSkipped { get; init; }
         public bool FirstSelectionStarted { get; init; }
         public bool LatestSelectionStarted { get; init; }
