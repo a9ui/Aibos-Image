@@ -3983,7 +3983,7 @@ public partial class App : Application
                 && !payload.Contains("\\", StringComparison.Ordinal)
                 && !payload.Contains("prompt", StringComparison.OrdinalIgnoreCase);
             bool sharedLocation = shared.Kind == "shared"
-                && shared.ModeText.Contains("Shared with Browser", StringComparison.Ordinal)
+                && shared.ModeText.Contains("Aibos shared data", StringComparison.Ordinal)
                 && string.Equals(shared.DisplayPath, existingRoot, StringComparison.OrdinalIgnoreCase)
                 && shared.OpenEnabled
                 && shared.Opened
@@ -4724,6 +4724,19 @@ public partial class App : Application
                     "Video Added",
                     "Fav Changed",
                 ];
+                string[] expectedSettingsNavigation =
+                [
+                    "General",
+                    "Enhance",
+                    "Photoreal",
+                    "Video",
+                    "Video Tools",
+                    "Display",
+                    "Thumbnails",
+                    "Storage",
+                    "Keyboard",
+                    "About",
+                ];
                 english.SetMetadataIndexPresentationForSmoke(
                     "UiMetadataReadyFormat",
                     12,
@@ -4732,6 +4745,9 @@ public partial class App : Application
                 bool englishLoaded = english.UiLanguageForSmoke == UiLanguageResources.English
                     && english.UiSearchPlaceholderForSmoke.StartsWith("Search filenames", StringComparison.Ordinal)
                     && english.UiGeneralNavigationForSmoke == "General"
+                    && english.SettingsNavigationLabelsForSmoke.SequenceEqual(expectedSettingsNavigation)
+                    && english.PreviousImageKeyBindingLabelForSmoke == "Previous image"
+                    && english.SettingsArchiveLanguageAbsentForSmoke
                     && english.UiModalShortcutHintForSmoke.Contains("navigate", StringComparison.Ordinal);
                 bool englishGalleryShellSurface = english.EnhancedOnlyLabelForSmoke == "Enhanced only"
                     && english.UnseenOnlyLabelForSmoke == "Unseen only"
@@ -4765,6 +4781,10 @@ public partial class App : Application
                     && english.DateFilterLabelForSmoke == "期間指定なし"
                     && english.FolderCountLabelForSmoke.StartsWith("画像 ", StringComparison.Ordinal)
                     && english.HeaderStatsForSmoke.StartsWith("選択 ", StringComparison.Ordinal)
+                    && english.SettingsNavigationLabelsForSmoke.SequenceEqual(expectedSettingsNavigation)
+                    && english.PreviousImageKeyBindingLabelForSmoke == "前の画像"
+                    && english.DiagnosticsStatusForSmoke.StartsWith("読み取り専用", StringComparison.Ordinal)
+                    && english.SettingsArchiveLanguageAbsentForSmoke
                     && english.MetadataIndexStatusTextForSmoke.StartsWith(
                         "Prompt Index · Ready",
                         StringComparison.Ordinal);
@@ -4786,7 +4806,11 @@ public partial class App : Application
                     12);
                 bool japaneseReloaded = japanese.UiLanguageForSmoke == UiLanguageResources.Japanese
                     && japanese.UiSearchPlaceholderForSmoke.StartsWith("ファイル名", StringComparison.Ordinal)
-                    && japanese.UiGeneralNavigationForSmoke == "一般"
+                    && japanese.UiGeneralNavigationForSmoke == "General"
+                    && japanese.SettingsNavigationLabelsForSmoke.SequenceEqual(expectedSettingsNavigation)
+                    && japanese.PreviousImageKeyBindingLabelForSmoke == "前の画像"
+                    && japanese.DiagnosticsStatusForSmoke.StartsWith("読み取り専用", StringComparison.Ordinal)
+                    && japanese.SettingsArchiveLanguageAbsentForSmoke
                     && japanese.UiModalShortcutHintForSmoke.Contains("移動", StringComparison.Ordinal);
                 bool japaneseFavoriteFilterSurface = japanese.FavoriteFilterSurfaceContractForSmoke
                     && japanese.FavoriteFilterGroupTitleForSmoke == "Favorite"
@@ -4799,7 +4823,7 @@ public partial class App : Application
                     && japanese.PhotorealFavoriteLevelOneHelpForSmoke.Contains("最も高い", StringComparison.Ordinal)
                     && japanese.VideoFavoriteLevelZeroHelpForSmoke.Contains("最高Lv", StringComparison.Ordinal)
                     && japanese.VideoFavoriteLevelOneHelpForSmoke.Contains("最も高い", StringComparison.Ordinal)
-                    && japanese.GridFileInfoOverlayLabelForSmoke == "Gridのファイル情報を重ねる"
+                    && japanese.GridFileInfoOverlayLabelForSmoke == "ファイル名とサイズを表示"
                     && japanese.GridFileInfoOverlayHelpForSmoke.Contains("状態バッジ", StringComparison.Ordinal);
                 bool japaneseGalleryShellSurface = japanese.EnhancedOnlyLabelForSmoke == "高画質化済み"
                     && japanese.UnseenOnlyLabelForSmoke == "未表示のみ"
@@ -4820,7 +4844,10 @@ public partial class App : Application
                 windows.Add(finalWindow);
                 finalWindow.Show();
                 bool englishReloaded = finalWindow.UiLanguageForSmoke == UiLanguageResources.English
-                    && finalWindow.UiGeneralNavigationForSmoke == "General";
+                    && finalWindow.UiGeneralNavigationForSmoke == "General"
+                    && finalWindow.SettingsNavigationLabelsForSmoke.SequenceEqual(expectedSettingsNavigation)
+                    && finalWindow.PreviousImageKeyBindingLabelForSmoke == "Previous image"
+                    && finalWindow.SettingsArchiveLanguageAbsentForSmoke;
 
                 using JsonDocument finalDocument = JsonDocument.Parse(File.ReadAllText(statePath));
                 bool unknownLocalPreserved = finalDocument.RootElement.TryGetProperty("futureOwner", out JsonElement finalFuture)

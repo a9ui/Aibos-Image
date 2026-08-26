@@ -417,7 +417,7 @@ internal static class KeyBindingSettings
                 sharedActions.Contains(pair.Key)
                 && pair.Value.Any(sharedActions.Contains)))
         {
-            error = "Shared Browser key bindings contain an overlapping shortcut conflict.";
+            error = "Shared key bindings contain an overlapping shortcut conflict.";
             merged = new Dictionary<ViewerKeyAction, KeyChord>(localBindings);
             return false;
         }
@@ -427,7 +427,7 @@ internal static class KeyBindingSettings
 
         if (FindConflicts(merged).Count > 0)
         {
-            error = "Shared Browser key bindings could not be composed with WPF-only shortcuts safely.";
+            error = "Shared key bindings could not be composed with Aibos-only shortcuts safely.";
             merged = new Dictionary<ViewerKeyAction, KeyChord>(localBindings);
             return false;
         }
@@ -619,7 +619,7 @@ internal static class KeyBindingSettings
         }
         if (BrowserSharedActions.Values.Contains(action) && chord.Modifiers != ModifierKeys.None)
         {
-            error = "This shortcut is shared with the Browser app and must use one key without Ctrl, Alt, Shift, or Win.";
+            error = "This shared action must use one key without Ctrl, Alt, Shift, or Win.";
             return false;
         }
 
@@ -653,7 +653,7 @@ internal static class KeyBindingSettings
         if (!chord.IsBound)
             return KeyChord.UnboundStorageValue;
         if (chord.Modifiers != ModifierKeys.None)
-            throw new InvalidOperationException("Browser-shared shortcuts cannot contain modifiers.");
+            throw new InvalidOperationException("Shared shortcuts cannot contain modifiers.");
         return chord.Key switch
         {
             Key.Left => "ArrowLeft",
