@@ -1467,6 +1467,11 @@ public partial class App
                     && companionLaunch.HasInheritedInstanceId
                     && companionLaunch.NoOpen == "1"
                     && companionLaunch.ComfyAutostart == "0"
+                    && companionLaunch.H3PowerShellPath == Path.Combine(
+                        Environment.SystemDirectory,
+                        "WindowsPowerShell",
+                        "v1.0",
+                        "powershell.exe")
                     && companionLaunch.DefersQueueRecovery;
                 window.ConfigureModalPhotorealSettingsForSmoke(
                     0.55,

@@ -3118,6 +3118,14 @@ public partial class MainWindow
         startInfo.ArgumentList.Add("--defer-queue-recovery");
         startInfo.Environment["PVU_NO_OPEN"] = "1";
         startInfo.Environment["PVU_COMFY_AUTOSTART"] = "0";
+        // Queue resume may need the sealed H3 runtime mount helper. Pass only
+        // the fixed Windows system PowerShell candidate; the Companion
+        // independently validates its canonical system identity before use.
+        startInfo.Environment["PVU_H3_POWERSHELL_PATH"] = Path.Combine(
+            Environment.SystemDirectory,
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
         startInfo.Environment["AIBOS_COMPANION_AUTH_TOKEN"] = authToken;
         startInfo.Environment["AIBOS_COMPANION_INSTANCE_ID"] = instanceId;
         // Do not delegate lifetime authority through a PID-only environment
@@ -3709,6 +3717,7 @@ public partial class MainWindow
             startInfo.Environment.ContainsKey("AIBOS_COMPANION_INSTANCE_ID"),
             startInfo.Environment["PVU_NO_OPEN"],
             startInfo.Environment["PVU_COMFY_AUTOSTART"],
+            startInfo.Environment["PVU_H3_POWERSHELL_PATH"],
             startInfo.ArgumentList.Contains("--defer-queue-recovery"),
             Path.GetFileName(startInfo.ArgumentList[0]));
     }
@@ -4683,5 +4692,6 @@ public sealed record EnhancementCompanionLaunchContractSmokeSnapshot(
     bool HasInheritedInstanceId,
     string? NoOpen,
     string? ComfyAutostart,
+    string? H3PowerShellPath,
     bool DefersQueueRecovery,
     string LauncherFileName);
