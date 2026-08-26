@@ -84,8 +84,8 @@
     },
     "progressPresentation": {
       "durableFieldMeaning": "progress is the companion-owned integer percentage of completed adapter execution stages; it is not an ETA or a remaining-time estimate",
-      "activeRows": "queued rows render a determinate zero; running rows render a determinate value clamped to 1 through 99, with 99 explicitly labelled as final publication or verification",
-      "terminalRows": "terminal status remains completion authority; only succeeded and deleted rows render 100, while failed and canceled rows retain their last bounded value without implying completion",
+      "activeRows": "queued rows retain lifecycle value zero but present only their waiting order and no progress bar; running rows alone render a determinate value clamped to 1 through 99, with 99 explicitly labelled as final publication or verification",
+      "terminalRows": "terminal status remains completion authority; succeeded and deleted rows retain lifecycle value 100 but present a terminal label and no progress bar, while failed and canceled rows retain their last bounded value only as optional status context without implying completion",
       "compatibility": "WPF validates and retains the bounded progress field when present, clamps presentation to lifecycle-safe bounds, ignores unknown fields, and does not write or infer queue state from presentation"
     },
     "jobDetailSurface": {

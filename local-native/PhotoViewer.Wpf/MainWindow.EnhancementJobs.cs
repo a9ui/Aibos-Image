@@ -1589,13 +1589,13 @@ public partial class MainWindow
         bool serverRetriesAllHistory =
             _enhancementWorkspaceTerminalHistoryBatchRetrySupported;
         retryButton.Content = serverRetriesAllHistory
-            ? "全部リトライ (全履歴)"
+            ? "すべて再試行 (全履歴)"
             : legacyHistoryIsComplete
-            ? $"全部リトライ ({retryableCount:N0})"
-            : "全部リトライ (更新が必要)";
+            ? $"すべて再試行 ({retryableCount:N0})"
+            : "すべて再試行 (更新が必要)";
         retryButton.ToolTip = !serverRetriesAllHistory
             && !legacyHistoryIsComplete
-            ? "画面外の履歴を『全部』から漏らさないため、Companionの一括リトライ対応後に実行できます。"
+            ? "画面外の履歴を一括対象から漏らさないため、ローカルAIサービスの一括再試行対応後に実行できます。"
             : serverRetriesAllHistory
                 ? $"現在の種類フィルターに合う{status}履歴を、画面の表示件数に関係なく保存済み設定で一括再試行します。成功した元履歴だけを消します。"
             : retryableCount > 0
@@ -1603,14 +1603,14 @@ public partial class MainWindow
                 + (retryProtectedCount > 0
                     ? $" 保護対象{retryProtectedCount:N0}件は変更しません。"
                     : "")
-            : "保存済み設定で安全に再試行できるJobはありません。future・malformed・read-only等の保護対象は変更しません。";
+            : "保存済み設定で安全に再試行できる処理はありません。将来形式・不正・読み取り専用などの保護対象は変更しません。";
         clearButton.Content = serverSelectsAllHistory
             && _enhancementWorkspaceOperationFilter != "all"
                 ? $"{clearLabel} (全履歴)"
                 : $"{clearLabel} ({dismissibleCount:N0})";
         clearButton.ToolTip = !serverSelectsAllHistory
             && !legacyHistoryIsComplete
-                ? "画面外の履歴を『全部』から漏らさないため、Companion更新後に一括消去できます。"
+                ? "画面外の履歴を一括対象から漏らさないため、ローカルAIサービス更新後に一括削除できます。"
             : dismissibleCount > 0
             ? serverSelectsAllHistory
                 ? $"現在の種類フィルターに合う{status}履歴を、画面の表示件数に関係なく一括で消します。元画像と出力ファイルは変更しません。"
@@ -1618,7 +1618,7 @@ public partial class MainWindow
                 + (dismissProtectedCount > 0
                     ? $" 保護対象{dismissProtectedCount:N0}件は残します。"
                     : "")
-            : "削除可能な履歴はありません。future・malformed・read-only等の保護対象は残します。";
+            : "削除可能な履歴はありません。将来形式・不正・読み取り専用などの保護対象は残します。";
     }
 
     private void RefreshEnhancementQueueBulkControls()
@@ -1634,13 +1634,13 @@ public partial class MainWindow
             int protectedCount = queuedJobs.Length - cancelableCount;
             string operationLabel = EnhancementWorkspaceOperationFilterLabel();
             EnhancementJobsClearQueuedButton.Content =
-                $"待機中をすべて消す ({cancelableCount:N0})";
+                $"待機をすべて中止 ({cancelableCount:N0})";
             EnhancementJobsClearQueuedButton.ToolTip = cancelableCount > 0
-                ? $"現在の種類フィルター「{operationLabel}」で安全にキャンセルできる待機中 {cancelableCount:N0}件だけを消します。実行中のジョブは変えません。"
+                ? $"現在の種類フィルター「{operationLabel}」で安全に中止できる待機中 {cancelableCount:N0}件だけを中止します。実行中の処理は変えません。"
                     + (protectedCount > 0
-                        ? $" future・malformed・read-only等の保護対象 {protectedCount:N0}件は残します。"
+                        ? $" 将来形式・不正・読み取り専用などの保護対象 {protectedCount:N0}件は残します。"
                         : "")
-                : "安全にキャンセルできる待機中Jobはありません。future・malformed・read-only等の保護対象は残します。";
+                : "安全に中止できる待機中の処理はありません。将来形式・不正・読み取り専用などの保護対象は残します。";
             EnhancementJobsClearQueuedButton.IsEnabled =
                 !_enhancementWorkspaceMutationPending
                 && CanCancelAllQueuedEnhancementJobs();
@@ -1696,7 +1696,7 @@ public partial class MainWindow
                 "failed",
                 EnhancementJobsRetryFailedButton,
                 EnhancementJobsClearFailedButton,
-                "失敗を全部消す");
+                "失敗履歴を削除");
         }
 
         if (EnhancementJobsRetryCanceledButton is not null
@@ -1706,7 +1706,7 @@ public partial class MainWindow
                 "canceled",
                 EnhancementJobsRetryCanceledButton,
                 EnhancementJobsClearCanceledButton,
-                "キャンセルを全部消す");
+                "中止履歴を削除");
         }
 
         if (EnhancementJobsFailedBulkPanel is not null)
@@ -6971,18 +6971,20 @@ public partial class MainWindow
         int actionCount,
         int protectedCount)
     {
-        string terminalLabel = terminalStatus == "failed" ? "失敗" : "キャンセル済み";
-        string actionLabel = retry ? "全部リトライ" : "全部消す";
+        string terminalLabel = terminalStatus == "failed" ? "失敗" : "中止済み";
+        string actionLabel = retry ? "すべて再試行" : "すべて削除";
         string detail = retry
-            ? "各Jobに保存されたPrompt・STEP・CFG・Seed等の設定で、新しい待機ジョブを追加します。元画像と出力ファイルは変更しません。"
+            ? "各処理に保存されたPrompt・STEP・CFG・Seed等の設定で、新しい待機処理を追加します。元画像と出力ファイルは変更しません。"
             : "対象の履歴だけを消します。元画像と出力ファイルは削除しません。";
         string operationLabel = EnhancementWorkspaceOperationFilterLabel();
         string message =
             $"現在の種類フィルター「{operationLabel}」に一致する{terminalLabel}の履歴 {actionCount:N0}件を{actionLabel}しますか？\n\n{detail}"
             + (protectedCount > 0
-                ? $"\n\nfuture・malformed・read-only等の保護対象 {protectedCount:N0}件は残します。"
+                ? $"\n\n将来形式・不正・読み取り専用などの保護対象 {protectedCount:N0}件は残します。"
                 : "");
-        string title = $"{terminalLabel}を{actionLabel}";
+        string title = retry
+            ? $"{terminalLabel}を{actionLabel}"
+            : $"{terminalLabel}履歴を{actionLabel}";
         return _confirmEnhancementJobsBulkActionForSmoke?.Invoke(title, message)
             ?? MessageBox.Show(
                 this,
@@ -10950,35 +10952,35 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                 && IsSupportedMutationOperation);
     public string CancelToolTip => CanCancel
         ? Status == "queued"
-            ? "この待機Jobだけをキャンセルします。実行中のJobは変更しません"
+            ? "この待機処理だけを待機列から外します。実行中の処理は変更しません"
             : "この処理へ中断要求を送ります。現在の安全な境界で停止します"
         : CancelRequested
             ? "中断要求を受付済みです"
             : _isBusy
-                ? "このJobの別操作が完了するまで待ってください"
-                : "このJobは安全にキャンセルできないため保護されています";
+                ? "この処理の別操作が完了するまで待ってください"
+                : "この処理は安全に中止できないため保護されています";
     public bool CanRetry =>
         !_isBusy
         && IsSupportedMutationOperation
         && Status is "failed" or "canceled";
     public string RetryLabel => VideoToolsV2Snapshot?.Kind == "edit"
-        ? "同じ設定でAI動画編集をRetry"
+        ? "同じ設定でAI動画編集を再試行"
         : VideoToolsV2Snapshot?.Kind == "finish"
-            ? "同じモードで高画質化をRetry"
+            ? "同じモードで高画質化を再試行"
         : VideoTrimV1Snapshot is not null
-            ? "同じ区間で動画トリムをRetry"
+            ? "同じ区間で動画トリムを再試行"
         : IsVideoOperation
             ? "動画をやり直す"
-        : "元設定でRetry";
+        : "元設定で再試行";
     public string RetryToolTip => VideoToolsV2Snapshot?.Kind == "edit"
-        ? "保存されたEdit snapshot・Seed・Job所有入力を変更せず再試行"
+        ? "保存された編集設定・Seed・処理所有入力を変更せず再試行"
         : VideoToolsV2Snapshot?.Kind == "finish"
-            ? "保存されたモード・倍率・Job所有入力を変更せず再試行"
+            ? "保存されたモード・倍率・処理所有入力を変更せず再試行"
         : VideoTrimV1Snapshot is not null
-            ? "保存されたexact frame区間・音声policy・Job所有入力を変更せず再試行"
+            ? "保存された正確なフレーム区間・音声方針・処理所有入力を変更せず再試行"
         : IsVideoOperation
-            ? "失敗・キャンセルした動画を、保存された長さ・STEP数・Prompt・Seedで再生成"
-        : "失敗・キャンセル時に保存された元の設定で再試行";
+            ? "失敗・中止した動画を、保存された長さ・STEP数・Prompt・Seedで再生成"
+        : "失敗・中止時に保存された元の設定で再試行";
     public bool CanDismiss =>
         !_isBusy
         && IsSupportedMutationOperation
@@ -11160,7 +11162,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? IsVideoToolsReaderOnly && CanUseVideoToolsV2Output
             ? JobAction(
                 "open-output",
-                "Open output",
+                "出力を開く",
                 OpenOutputToolTip,
                 visible: true,
                 enabled: true,
@@ -11301,7 +11303,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             144),
         "succeeded" => JobAction(
             "open-output",
-            "Open output",
+            "出力を開く",
             OpenOutputToolTip,
             CanUseOutput,
             CanUseOutput,
@@ -11314,7 +11316,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : I2iV3Snapshot is not null && Status == "succeeded"
         ? JobAction(
             "open-output",
-            "Open output",
+            "出力を開く",
             OpenOutputToolTip,
             CanUseOutput,
             CanUseOutput,
@@ -11355,15 +11357,15 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         "failed" or "canceled" or "deleted" => JobAction(
             "dismiss",
-            "Remove",
-            "Remove this terminal job from history. Source and output files are not changed.",
+            "履歴を削除",
+            "この終了済み処理を履歴から削除します。元画像と出力ファイルは変更しません。",
             CanDismiss,
             CanDismiss,
             72,
-            "Remove terminal job from history"),
+            "終了済み処理を履歴から削除"),
         "succeeded" => JobAction(
             "delete-output",
-            "Delete output",
+            "出力を削除",
             "",
             CanDeleteOutput,
             CanDeleteOutput,
@@ -11456,7 +11458,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : "このAI処理版をAibosの拡大ビューで開く";
     public string CancelLabel => Status switch
     {
-        "queued" => "待機を削除",
+        "queued" => "待機から外す",
         "running" when Operation == "photoreal" => "実写化を中止",
         "running" when Operation == "i2i" => "AI編集を中止",
         "running" when VideoToolsV2Snapshot?.Kind == "edit" =>
@@ -11468,7 +11470,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         "running" when Operation == "video" => "動画化を中止",
         "running" when !IsImageOperation => "未対応操作",
         "running" => "高画質化を中止",
-        _ => "キャンセル済みにする",
+        _ => "中止済みにする",
     };
     public string SourceName => string.IsNullOrWhiteSpace(SourcePath) ? "元画像不明" : Path.GetFileName(SourcePath);
     public string SourceVersionLabel => VideoToolsV2Snapshot is { } v2Source
@@ -11598,10 +11600,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : !string.IsNullOrWhiteSpace(I2iInstructionSummary)
             ? $"{I2iTargetDisplayLabel}: {I2iInstructionSummary}"
             : $"{I2iTargetDisplayLabel}: 検証済みの公開指示を取得できません。";
-    // Durable jobs already carry a bounded 0..100 progress value. Keep the
-    // bar determinate so the UI never substitutes a connection-style sweep
-    // for the persisted job progress. Queued rows naturally remain at zero.
+    // Durable jobs carry a bounded 0..100 lifecycle value. Only running rows
+    // expose that value as determinate progress; queued and terminal rows use
+    // their status as the clearer authority and do not render a decorative bar.
     public bool IsProgressIndeterminate => false;
+    public bool ShowProgressBar => Status == "running";
     public int DisplayProgress => Status switch
     {
         "queued" => 0,
@@ -11614,15 +11617,16 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? $"中止処理中 {DisplayProgress}%"
         : Status switch
         {
-            "queued" when QueueCount > 0 =>
-                $"待機中 0%・順番 {QueuePosition ?? 0}/{QueueCount}",
-            "queued" => "待機中 0%",
+            "queued" when QueuePosition > 0 => $"待機順 {QueuePosition}番",
+            "queued" => "待機中",
             "running" when DisplayProgress >= 99 => "最終処理中 99%",
             "running" => $"処理中 {DisplayProgress}%",
-            "succeeded" => "完了 100%",
-            "failed" => $"失敗（{DisplayProgress}%で停止）",
-            "canceled" => $"中止済み（{DisplayProgress}%で停止）",
-            "deleted" => "出力削除済み 100%",
+            "succeeded" => "完了",
+            "failed" when DisplayProgress > 0 => $"失敗（{DisplayProgress}%で停止）",
+            "failed" => "失敗",
+            "canceled" when DisplayProgress > 0 => $"中止済み（{DisplayProgress}%で停止）",
+            "canceled" => "中止済み",
+            "deleted" => "出力削除済み",
             _ => "状態不明",
         };
     public string StatusLabel => _isBusy
@@ -11847,6 +11851,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             if (statusChanged)
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsProgressIndeterminate)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowProgressBar)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
             }
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
