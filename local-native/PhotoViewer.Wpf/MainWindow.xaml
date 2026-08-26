@@ -1898,7 +1898,8 @@
                             </TextBlock>
                             <TextBlock Text="{Binding PresetSummary}" Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextTrimming="CharacterEllipsis"/>
                           </DockPanel>
-                          <ProgressBar Grid.Row="2" Height="4" Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}" Margin="0,7,0,0"/>
+                          <ProgressBar Grid.Row="2" Height="4" Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}" IsIndeterminate="{Binding IsProgressIndeterminate, Mode=OneWay}" Margin="0,7,0,0"
+                                       AutomationProperties.Name="{Binding StatusLabel}"/>
                           <TextBlock Grid.Row="3" Text="{Binding DetailText}" Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextWrapping="Wrap" MaxHeight="34" Margin="0,6,0,0"/>
                           <DockPanel Grid.Row="4" Margin="0,8,0,0" LastChildFill="True">
                             <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" VerticalAlignment="Center"/>

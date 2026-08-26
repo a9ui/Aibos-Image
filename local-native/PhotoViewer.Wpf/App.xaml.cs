@@ -21503,13 +21503,31 @@ public partial class App : Application
                         FirstIndex: 200,
                         ItemCount: 5,
                     };
-                bool progressUsesWholePercent =
-                    initial.VisibleStatusLabels.Any(static label =>
-                        label.Contains("Running 42%", StringComparison.Ordinal))
-                    && initial.VisibleStatusLabels.Any(static label =>
-                        label.Contains("Queued 0%", StringComparison.Ordinal))
+                var activeProgressView =
+                    window.EnhancementJobViewIdentityForSmoke("active-job")
+                        as EnhancementWorkspaceJobView;
+                var queuedProgressView =
+                    window.EnhancementJobViewIdentityForSmoke("queue-first-job")
+                        as EnhancementWorkspaceJobView;
+                var completedProgressView =
+                    window.EnhancementJobViewIdentityForSmoke("done-job")
+                        as EnhancementWorkspaceJobView;
+                bool activeProgressIsTruthful = activeProgressView is
+                    {
+                        IsProgressIndeterminate: true,
+                        StatusLabel: "実行中  ·  Running",
+                    }
+                    && queuedProgressView is { IsProgressIndeterminate: true }
+                    && queuedProgressView.StatusLabel.EndsWith(
+                        "  ·  Queued",
+                        StringComparison.Ordinal)
+                    && completedProgressView is
+                    {
+                        IsProgressIndeterminate: false,
+                        StatusLabel: "Completed",
+                    }
                     && initial.VisibleStatusLabels.All(static label =>
-                        !label.Contains(".0%", StringComparison.Ordinal));
+                        !label.Contains('%'));
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
@@ -23468,7 +23486,7 @@ public partial class App : Application
                     && jobsFilterLayoutContract
                     && combinedJobsFiltersContract
                     && jobsFilterPillToggleContract
-                    && progressUsesWholePercent
+                    && activeProgressIsTruthful
                     && mixedRetryCapabilityPartition
                     && initial.Polling
                     && passiveOpen
@@ -23663,7 +23681,7 @@ public partial class App : Application
                     terminalHistoryTargetPlanContract,
                     failedBulkConfirmationContract,
                     canceledBulkConfirmationContract,
-                    progressUsesWholePercent,
+                    activeProgressIsTruthful,
                     mixedRetryCapabilityPartition,
                     legacyHealth,
                     futureHealth,

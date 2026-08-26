@@ -116,6 +116,10 @@ try {
         (($jobsSqliteContract.jobsWorkspaceSurface.historyWindow.allowed -join ",") -eq
             "100,500,1000")
         ($null -ne $jobsSqliteContract.jobsWorkspaceSurface.enhancement_jobs.requiredColumns.updated_at)
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.activeRows.Contains(
+            "render progress as indeterminate"))
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.durableFieldMeaning.Contains(
+            "not a measured percent-complete value"))
         ($jobsSqliteContract.jobsWorkspaceSurface.bulkScope.Contains(
             "display limits never redefine"))
     )
@@ -324,6 +328,7 @@ try {
     } | ConvertTo-Json -Depth 3
     $required = @(
         'passiveOpen',
+        'activeProgressIsTruthful',
         'historyWindowReaderContract',
         'healthVisible',
         'healthProvenance',
