@@ -11617,7 +11617,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? $"中止処理中 {DisplayProgress}%"
         : Status switch
         {
-            "queued" when QueuePosition > 0 => $"待機順 {QueuePosition}番",
+            "queued" when QueuePosition > 0 && QueueCount > 0 =>
+                $"待機中 · {QueuePosition} / {QueueCount}",
             "queued" => "待機中",
             "running" when DisplayProgress >= 99 => "最終処理中 99%",
             "running" => $"処理中 {DisplayProgress}%",
