@@ -597,13 +597,13 @@
                   </UniformGrid>
                 </Grid>
                 <TextBlock x:Name="VideoFavoriteFilterSummary" Visibility="Collapsed"/>
-                <CheckBox x:Name="EnhancedOnlyFilter" Content="AI高画質化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI高画質化の完了画像だけを表示"/>
-                <CheckBox x:Name="UnenhancedOnlyFilter" Content="未高画質化のみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="まだAI高画質化されていない画像だけを表示"/>
-                <CheckBox x:Name="PhotorealOnlyFilter" Content="AI実写化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI実写化の完了画像だけを表示"/>
-                <CheckBox x:Name="UnphotorealOnlyFilter" Content="未実写化のみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="まだAI実写化されていない画像だけを表示"/>
-                <CheckBox x:Name="VideoOnlyFilter" Content="動画化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="動画が完成している元画像だけを表示。この表示中に画像を開くと動画を自動再生します。"/>
-                <CheckBox x:Name="UnseenOnlyFilter" Content="Unseen only" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="Filter_Changed" Unchecked="Filter_Changed"/>
-                <CheckBox x:Name="ShowUnseenDots" Content="Unseen dots" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="ShowUnseenDots_Changed" Unchecked="ShowUnseenDots_Changed" AutomationProperties.Name="Show unseen dots in gallery" AutomationProperties.HelpText="Changes dot visibility only. Seen history is not changed."/>
+                <CheckBox x:Name="EnhancedOnlyFilter" Content="{DynamicResource UiEnhancedOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="{DynamicResource UiEnhancedOnlyHelp}"/>
+                <CheckBox x:Name="UnenhancedOnlyFilter" Content="{DynamicResource UiUnenhancedOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="{DynamicResource UiUnenhancedOnlyHelp}"/>
+                <CheckBox x:Name="PhotorealOnlyFilter" Content="{DynamicResource UiPhotorealOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="{DynamicResource UiPhotorealOnlyHelp}"/>
+                <CheckBox x:Name="UnphotorealOnlyFilter" Content="{DynamicResource UiUnphotorealOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="{DynamicResource UiUnphotorealOnlyHelp}"/>
+                <CheckBox x:Name="VideoOnlyFilter" Content="{DynamicResource UiVideoOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="{DynamicResource UiVideoOnlyHelp}"/>
+                <CheckBox x:Name="UnseenOnlyFilter" Content="{DynamicResource UiUnseenOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="Filter_Changed" Unchecked="Filter_Changed"/>
+                <CheckBox x:Name="ShowUnseenDots" Content="{DynamicResource UiUnseenDots}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="ShowUnseenDots_Changed" Unchecked="ShowUnseenDots_Changed" AutomationProperties.Name="Show unseen dots in gallery" AutomationProperties.HelpText="{DynamicResource UiUnseenDotsHelp}"/>
                 <TextBlock Text="DATE" Foreground="{StaticResource TextTertiary}" FontSize="9.5" FontWeight="Bold" Margin="0,0,0,4"/>
                 <Grid Margin="0,2,0,4">
                   <Grid.RowDefinitions>
@@ -619,7 +619,7 @@
                   <TextBlock Grid.Row="1" Grid.Column="0" Text="To" Foreground="{StaticResource TextTertiary}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,6,0"/>
                   <DatePicker x:Name="DateToInput" Style="{StaticResource DarkDatePicker}" Grid.Row="1" Grid.Column="1" Height="26" SelectedDateFormat="Short" SelectedDateChanged="ManualDateRange_Changed" AutomationProperties.Name="To date"/>
                 </Grid>
-                <TextBlock x:Name="DateFilterSummary" Text="No date filter" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap"/>
+                <TextBlock x:Name="DateFilterSummary" Text="{DynamicResource UiNoDateFilter}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap"/>
               </StackPanel>
             </Border>
 
@@ -684,17 +684,17 @@
                 <TextBlock Text="SORT" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
                 <Border CornerRadius="8" Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="3">
                   <UniformGrid Columns="2">
-                    <RadioButton x:Name="SortModifiedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Modified new" IsChecked="True" Checked="SortModifiedNewest_Checked"/>
-                    <RadioButton x:Name="SortModifiedOldest" Style="{StaticResource Seg}" GroupName="sort" Content="Modified old" Checked="SortModifiedOldest_Checked"/>
-                    <RadioButton x:Name="SortCreatedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Created new" Checked="SortCreatedNewest_Checked"/>
-                    <RadioButton x:Name="SortCreatedOldest" Style="{StaticResource Seg}" GroupName="sort" Content="Created old" Checked="SortCreatedOldest_Checked"/>
-                    <RadioButton x:Name="SortUpscaleNewest" Style="{StaticResource Seg}" GroupName="sort" Content="HQ済み" Checked="SortUpscaleNewest_Checked" ToolTip="高画質化が最近完了した順"/>
-                    <RadioButton x:Name="SortUpscaleQueuedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="HQ追加済み" Checked="SortUpscaleQueuedNewest_Checked" ToolTip="高画質化を最近キューへ追加した順"/>
-                    <RadioButton x:Name="SortPhotorealNewest" Style="{StaticResource Seg}" GroupName="sort" Content="実写化済み" Checked="SortPhotorealNewest_Checked" ToolTip="実写化が最近完了した順"/>
-                    <RadioButton x:Name="SortPhotorealQueuedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="実写追加済み" Checked="SortPhotorealQueuedNewest_Checked" ToolTip="実写化を最近キューへ追加した順"/>
-                    <RadioButton x:Name="SortVideoNewest" Style="{StaticResource Seg}" GroupName="sort" Content="動画化済み" Checked="SortVideoNewest_Checked" ToolTip="動画化が最近完了した順"/>
-                    <RadioButton x:Name="SortVideoQueuedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="動画追加済み" Checked="SortVideoQueuedNewest_Checked" ToolTip="動画化を最近キューへ追加した順"/>
-                    <RadioButton x:Name="SortFavoriteChangedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Fav touched" Checked="SortFavoriteChangedNewest_Checked" ToolTip="Most recently changed favorite first, including clearing a favorite"/>
+                    <RadioButton x:Name="SortModifiedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Modified ↓" IsChecked="True" Checked="SortModifiedNewest_Checked" ToolTip="更新日時が新しい順"/>
+                    <RadioButton x:Name="SortModifiedOldest" Style="{StaticResource Seg}" GroupName="sort" Content="Modified ↑" Checked="SortModifiedOldest_Checked" ToolTip="更新日時が古い順"/>
+                    <RadioButton x:Name="SortCreatedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Created ↓" Checked="SortCreatedNewest_Checked" ToolTip="作成日時が新しい順"/>
+                    <RadioButton x:Name="SortCreatedOldest" Style="{StaticResource Seg}" GroupName="sort" Content="Created ↑" Checked="SortCreatedOldest_Checked" ToolTip="作成日時が古い順"/>
+                    <RadioButton x:Name="SortUpscaleNewest" Style="{StaticResource Seg}" GroupName="sort" Content="HQ Done" Checked="SortUpscaleNewest_Checked" ToolTip="高画質化が最近完了した順"/>
+                    <RadioButton x:Name="SortUpscaleQueuedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="HQ Added" Checked="SortUpscaleQueuedNewest_Checked" ToolTip="高画質化を最近Jobsへ追加した順"/>
+                    <RadioButton x:Name="SortPhotorealNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Real Done" Checked="SortPhotorealNewest_Checked" ToolTip="実写化が最近完了した順"/>
+                    <RadioButton x:Name="SortPhotorealQueuedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Real Added" Checked="SortPhotorealQueuedNewest_Checked" ToolTip="実写化を最近Jobsへ追加した順"/>
+                    <RadioButton x:Name="SortVideoNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Video Done" Checked="SortVideoNewest_Checked" ToolTip="動画化が最近完了した順"/>
+                    <RadioButton x:Name="SortVideoQueuedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Video Added" Checked="SortVideoQueuedNewest_Checked" ToolTip="動画化を最近Jobsへ追加した順"/>
+                    <RadioButton x:Name="SortFavoriteChangedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Fav Changed" Checked="SortFavoriteChangedNewest_Checked" ToolTip="Favoriteを最近変更した順（解除も含む）"/>
                     <RadioButton x:Name="SortName" Style="{StaticResource Seg}" GroupName="sort" Content="Name" Checked="SortName_Checked"/>
                     <RadioButton x:Name="SortRandom" Style="{StaticResource Seg}" GroupName="sort" Content="Random" Checked="SortRandom_Checked"/>
                   </UniformGrid>
@@ -766,7 +766,7 @@
         </ScrollViewer>
         <Border Grid.Row="1" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,0,0" Padding="10,8" Background="{StaticResource BgSecondary}">
           <Button x:Name="SidebarAppSettingsButton" Style="{StaticResource GhostButton}" HorizontalAlignment="Stretch" Height="36"
-                  Content="{DynamicResource UiAppSettings}" Click="OpenAppSettings_Click" ToolTip="Open App Settings and shared preferences" AutomationProperties.Name="Open app settings from sidebar"/>
+                  Content="{DynamicResource UiSettings}" Click="OpenAppSettings_Click" ToolTip="{DynamicResource UiSettingsToolTip}" AutomationProperties.Name="Open app settings from sidebar"/>
         </Border>
         </Grid>
       </Border>
@@ -970,7 +970,7 @@
                   <TextBlock x:Name="BulkSelectionText" Text="2 images selected" Foreground="{StaticResource TextPrimary}"
                              AutomationProperties.LiveSetting="Polite"
                              FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                  <TextBlock Text="Set favorite level for every selected image" Foreground="{StaticResource TextTertiary}"
+                  <TextBlock Text="{DynamicResource UiBulkFavoriteHelp}" Foreground="{StaticResource TextTertiary}"
                              FontSize="11.5" Margin="0,0,0,7"/>
                   <UniformGrid Columns="6">
                     <Button Style="{StaticResource GhostButton}" Content="0" Tag="0" Click="BulkFavoriteLevel_Click" ToolTip="Clear favorite for selected images" AutomationProperties.Name="Set selected images to favorite level 0" Margin="0,0,4,0"/>
@@ -981,7 +981,7 @@
                     <Button Style="{StaticResource GhostButton}" Content="5" Tag="5" Click="BulkFavoriteLevel_Click" ToolTip="Set selected images to favorite level 5" AutomationProperties.Name="Set selected images to favorite level 5"/>
                   </UniformGrid>
                   <UniformGrid Columns="1" Margin="0,8,0,0">
-                    <Button x:Name="BulkFavoriteIncreaseButton" Style="{StaticResource GhostButton}" Content="Increase all" Click="FavoriteIncrease_Click"
+                    <Button x:Name="BulkFavoriteIncreaseButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiBulkFavoriteIncrease}" Click="FavoriteIncrease_Click"
                             ToolTip="Increase favorite level for selected images" AutomationProperties.Name="Increase favorite level for selected images"/>
                   </UniformGrid>
                   <Button x:Name="BulkEnhanceSelectedButton" Style="{StaticResource GhostButton}" Content="Batch Enhance" Click="OpenBatchEnhancement_Click"
@@ -989,8 +989,8 @@
                           AutomationProperties.Name="Batch Enhanceを開く"
                           AutomationProperties.HelpText="確認画面を開きます。明示的に追加するまでJobは作成しません。"
                           Margin="0,8,0,0"/>
-                  <Button x:Name="BulkDeleteButton" Style="{StaticResource DangerButton}" Content="Move selected to Recycle Bin" Click="BulkDeleteSelected_Click"
-                          ToolTip="Move every selected source image to the Windows Recycle Bin" AutomationProperties.Name="Move selected images to Recycle Bin" Margin="0,8,0,0"/>
+                  <Button x:Name="BulkDeleteButton" Style="{StaticResource DangerButton}" Content="{DynamicResource UiBulkRecycle}" Click="BulkDeleteSelected_Click"
+                          ToolTip="{DynamicResource UiBulkRecycleHelp}" AutomationProperties.Name="Move selected images to Recycle Bin" Margin="0,8,0,0"/>
                 </StackPanel>
               </Border>
 
@@ -1040,17 +1040,17 @@
                             AutomationProperties.Name="More selected image actions menu">
                       <StackPanel Width="160">
                         <Button x:Name="RightPreviewRevealButton" Style="{StaticResource GhostButton}" Margin="0,0,0,4"
-                                HorizontalContentAlignment="Left" Content="Show in folder"
+                                HorizontalContentAlignment="Left" Content="{DynamicResource UiShowSourceFolder}"
                                 ToolTip="Show selected source in folder"
                                 AutomationProperties.Name="Show selected source in folder"
                                 Click="RightPreviewRevealOverflow_Click"/>
                         <Button x:Name="RightPreviewTabButton" Style="{StaticResource GhostButton}" Margin="0,0,0,4"
-                                HorizontalContentAlignment="Left" Content="Open preview tab"
+                                HorizontalContentAlignment="Left" Content="{DynamicResource UiOpenPreviewTab}"
                                 ToolTip="Open selected preview tab"
                                 AutomationProperties.Name="Open selected preview tab"
                                 Click="RightPreviewTabOverflow_Click"/>
                         <Button x:Name="RightPreviewDeleteButton" Style="{StaticResource DangerButton}"
-                                HorizontalContentAlignment="Left" Content="Move to Recycle Bin"
+                                HorizontalContentAlignment="Left" Content="{DynamicResource UiMoveToRecycleBin}"
                                 ToolTip="Move selected source to Recycle Bin (Delete)"
                                 AutomationProperties.Name="Move selected source to Recycle Bin"
                                 Click="RightPreviewDeleteOverflow_Click"/>
@@ -1090,16 +1090,16 @@
               </Grid>
 
               <DockPanel Margin="0,12,0,4" LastChildFill="True">
-                <Button x:Name="CopyPreviewPromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" MinWidth="52" Padding="8,2" Margin="6,0,0,0" Content="Copy" IsEnabled="False" ToolTip="No prompt metadata loaded" Click="CopyPreviewPrompt_Click"/>
-                <Button x:Name="CopyPreviewMetadataButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" MinWidth="52" Padding="8,2" Content="Copy" IsEnabled="False" ToolTip="No PNG metadata loaded" Click="CopyPreviewMetadata_Click"/>
+                <Button x:Name="CopyPreviewPromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" MinWidth="88" Padding="8,2" Margin="6,0,0,0" Content="Copy Prompt" Visibility="Collapsed" IsEnabled="False" ToolTip="{DynamicResource UiNoPromptMetadata}" Click="CopyPreviewPrompt_Click"/>
+                <Button x:Name="CopyPreviewMetadataButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" MinWidth="76" Padding="8,2" Content="Copy Meta" Visibility="Collapsed" IsEnabled="False" ToolTip="{DynamicResource UiNoPngMetadata}" Click="CopyPreviewMetadata_Click"/>
                 <TextBlock x:Name="PreviewPromptLabel" Text="PROMPT" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
               </DockPanel>
               <Border CornerRadius="8" Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="10,8">
                 <TextBlock x:Name="PreviewPromptText" Text="masterpiece, best quality, 1girl, portrait, silver hair, intricate detail, soft rim lighting, cinematic, depth of field, looking at viewer, ornate jacket, snowy background" Foreground="{StaticResource TextSecondary}" FontSize="12" TextWrapping="Wrap" LineHeight="18"/>
               </Border>
 
-              <DockPanel Margin="0,10,0,4" LastChildFill="True">
-                <Button x:Name="CopyPreviewNegativeButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" MinWidth="52" Padding="8,2" Content="Copy" IsEnabled="False" ToolTip="No negative prompt metadata loaded" Click="CopyPreviewNegative_Click"/>
+              <DockPanel x:Name="PreviewNegativeHeader" Margin="0,10,0,4" LastChildFill="True" Visibility="Collapsed">
+                <Button x:Name="CopyPreviewNegativeButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" MinWidth="96" Padding="8,2" Content="Copy Negative" IsEnabled="False" ToolTip="{DynamicResource UiNoNegativeMetadata}" Click="CopyPreviewNegative_Click"/>
                 <TextBlock x:Name="PreviewNegativeLabel" Text="NEGATIVE" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
               </DockPanel>
               <Border x:Name="PreviewNegativeCard" CornerRadius="8" Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="10,8">
@@ -1108,10 +1108,10 @@
             </StackPanel>
           </ScrollViewer>
           <Grid x:Name="RightPreviewEmptyState" Grid.Row="1" Visibility="Collapsed" Background="{StaticResource BgSecondary}" Panel.ZIndex="2"
-                AutomationProperties.Name="No image selected">
+                AutomationProperties.Name="{DynamicResource UiNoImageSelected}">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20">
-              <TextBlock Text="Click an image to open preview." Foreground="{StaticResource TextSecondary}" FontSize="12.5" HorizontalAlignment="Center"/>
-              <TextBlock Text="Use Ctrl/Shift for multi-select." Foreground="{StaticResource TextTertiary}" FontSize="12" Margin="0,6,0,0" HorizontalAlignment="Center"/>
+              <TextBlock Text="{DynamicResource UiPreviewEmptyTitle}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" HorizontalAlignment="Center"/>
+              <TextBlock Text="{DynamicResource UiPreviewEmptyHelp}" Foreground="{StaticResource TextTertiary}" FontSize="12" Margin="0,6,0,0" HorizontalAlignment="Center"/>
             </StackPanel>
           </Grid>
         </Grid>
@@ -1145,7 +1145,7 @@
           </Grid>
         </Border>
         <Grid>
-          <TextBlock x:Name="PreviewTabsEmptyText" Text="No preview tabs" Foreground="{StaticResource TextTertiary}" FontSize="12" VerticalAlignment="Center" Margin="8,0"/>
+          <TextBlock x:Name="PreviewTabsEmptyText" Text="{DynamicResource UiNoPreviewTabs}" Foreground="{StaticResource TextTertiary}" FontSize="12" VerticalAlignment="Center" Margin="8,0"/>
           <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
             <ItemsControl x:Name="PreviewTabList" AutomationProperties.Name="Preview tabs" AutomationProperties.HelpText="Drag a tab to reorder it. Alt+Shift+Left or Right moves the focused tab.">
               <ItemsControl.ItemsPanel>

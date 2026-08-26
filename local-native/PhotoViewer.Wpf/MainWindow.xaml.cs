@@ -512,6 +512,8 @@ public partial class MainWindow : Window
     private int _metadataIndexTotal;
     private int _metadataIndexCacheHits;
     private int _metadataIndexCacheMisses;
+    private string? _metadataIndexPresentationKey;
+    private object[] _metadataIndexPresentationArguments = [];
     private int _catalogPreparationBatchSizeForSmoke = 256;
     private Action<string, int>? _catalogPreparationBatchHookForSmoke;
     private Action? _beforeMaterializeFilesForSmoke;
@@ -2802,7 +2804,7 @@ public partial class MainWindow : Window
         {
             _metadataIndexStatus = "canceled";
             RenderMetadataIndexProgress(
-                "Prompt metadata canceled - the last complete index was kept.",
+                "UiMetadataCanceledIndexKept",
                 _metadataIndexProgress,
                 showProgress: false);
         }
@@ -9430,9 +9432,10 @@ public partial class MainWindow : Window
         _metadataIndexCacheHits = 0;
         _metadataIndexCacheMisses = 0;
         RenderMetadataIndexProgress(
-            $"Prompt metadata: checking saved index for {total:N0} images...",
+            "UiMetadataCheckingFormat",
             0,
-            showProgress: true);
+            showProgress: true,
+            total);
     }
 
     private void UpdateMetadataIndexProgress(int completed, int total, int cacheHits, int cacheMisses, bool saving = false)
@@ -9444,10 +9447,26 @@ public partial class MainWindow : Window
         _metadataIndexTotal = total;
         _metadataIndexCacheHits = cacheHits;
         _metadataIndexCacheMisses = cacheMisses;
-        string text = saving
-            ? $"Prompt metadata: saving safe index ({completed:N0} / {total:N0})..."
-            : $"Prompt metadata: {completed:N0} / {total:N0} ({percent}%) - {cacheHits:N0} reused";
-        RenderMetadataIndexProgress(text, percent, showProgress: true);
+        if (saving)
+        {
+            RenderMetadataIndexProgress(
+                "UiMetadataSavingFormat",
+                percent,
+                showProgress: true,
+                completed,
+                total);
+        }
+        else
+        {
+            RenderMetadataIndexProgress(
+                "UiMetadataProgressFormat",
+                percent,
+                showProgress: true,
+                completed,
+                total,
+                percent,
+                cacheHits);
+        }
     }
 
     private void CompleteMetadataIndexProgress(
@@ -9470,24 +9489,50 @@ public partial class MainWindow : Window
         _metadataIndexTotal = total;
         _metadataIndexCacheHits = cacheHits;
         _metadataIndexCacheMisses = cacheMisses;
-        string rebuilt = loadState == MetadataIndexLoadState.Invalid ? " - damaged index rebuilt safely" : "";
         bool hadCompleteIndex = loadState == MetadataIndexLoadState.Loaded;
-        string text = save.Disposition == MetadataIndexSaveDisposition.Protected
-            ? $"Prompt metadata ready - newer saved index preserved - {cacheMisses:N0} read from source"
-            : save.Disposition == MetadataIndexSaveDisposition.Incomplete
-                ? hadCompleteIndex
-                    ? $"Prompt metadata incomplete - {cacheMisses:N0} refreshed, unread files will retry - last complete index kept"
-                    : $"Prompt metadata incomplete - {cacheMisses:N0} refreshed, index not written - unread files will retry"
-            : save.Disposition == MetadataIndexSaveDisposition.CatalogChanged
-                ? "Prompt metadata changed during indexing - saved index update skipped; refreshing current catalog"
-            : save.Ok
-                ? $"Prompt metadata ready - {total:N0} indexed - {cacheHits:N0} reused, {cacheMisses:N0} refreshed{rebuilt}"
-                : $"Prompt metadata ready - cache save failed - {cacheMisses:N0} read from source";
-        RenderMetadataIndexProgress(text, 100, showProgress: false);
+        string resourceKey;
+        object[] arguments;
+        if (save.Disposition == MetadataIndexSaveDisposition.Protected)
+        {
+            resourceKey = "UiMetadataReadyProtectedFormat";
+            arguments = [cacheMisses];
+        }
+        else if (save.Disposition == MetadataIndexSaveDisposition.Incomplete)
+        {
+            resourceKey = hadCompleteIndex
+                ? "UiMetadataIncompleteKeptFormat"
+                : "UiMetadataIncompleteUnsavedFormat";
+            arguments = [cacheMisses];
+        }
+        else if (save.Disposition == MetadataIndexSaveDisposition.CatalogChanged)
+        {
+            resourceKey = "UiMetadataCatalogChanged";
+            arguments = [];
+        }
+        else if (save.Ok)
+        {
+            resourceKey = loadState == MetadataIndexLoadState.Invalid
+                ? "UiMetadataReadyRebuiltFormat"
+                : "UiMetadataReadyFormat";
+            arguments = [total, cacheHits, cacheMisses];
+        }
+        else
+        {
+            resourceKey = "UiMetadataReadySaveFailedFormat";
+            arguments = [cacheMisses];
+        }
+        RenderMetadataIndexProgress(resourceKey, 100, showProgress: false, arguments);
     }
 
-    private void RenderMetadataIndexProgress(string text, int percent, bool showProgress)
+    private void RenderMetadataIndexProgress(
+        string resourceKey,
+        int percent,
+        bool showProgress,
+        params object[] arguments)
     {
+        _metadataIndexPresentationKey = resourceKey;
+        _metadataIndexPresentationArguments = arguments.ToArray();
+        string text = UiLanguageResources.Format(resourceKey, arguments);
         MetadataIndexStatusText.Text = text;
         MetadataIndexStatusText.Visibility = Visibility.Visible;
         MetadataIndexProgressBar.Value = percent;
@@ -9496,6 +9541,17 @@ public partial class MainWindow : Window
         MetadataIndexFooterProgressBar.Value = percent;
         MetadataIndexFooterProgressBar.Visibility = showProgress ? Visibility.Visible : Visibility.Collapsed;
         MetadataIndexFooterPanel.Visibility = Visibility.Visible;
+    }
+
+    private void RefreshMetadataIndexPresentationForLanguage()
+    {
+        if (string.IsNullOrWhiteSpace(_metadataIndexPresentationKey))
+            return;
+        string text = UiLanguageResources.Format(
+            _metadataIndexPresentationKey,
+            _metadataIndexPresentationArguments);
+        MetadataIndexStatusText.Text = text;
+        MetadataIndexFooterStatusText.Text = text;
     }
 
     private static bool TryReadCatalogImageMetadata(
@@ -10957,8 +11013,10 @@ public partial class MainWindow : Window
         PreviewCfgText.Visibility = generatedMetadataVisibility;
         PreviewSeedLabel.Visibility = generatedMetadataVisibility;
         PreviewSeedText.Visibility = generatedMetadataVisibility;
+        PreviewNegativeHeader.Visibility = generatedMetadataVisibility;
         PreviewNegativeLabel.Visibility = generatedMetadataVisibility;
         PreviewNegativeCard.Visibility = generatedMetadataVisibility;
+        CopyPreviewNegativeButton.Visibility = Visibility.Collapsed;
         if (hasRealFile)
             PreviewNegativeText.Text = "";
         PreviewDateText.Text = t.ModifiedText;
@@ -11145,25 +11203,30 @@ public partial class MainWindow : Window
         _currentPreviewMetadata = metadata;
         _currentPreviewMetadataPath = selected.Path;
         CopyPreviewMetadataButton.IsEnabled = true;
-        CopyPreviewMetadataButton.Content = "Copy";
-        CopyPreviewMetadataButton.ToolTip = "Copy PNG metadata";
-        CopyPreviewPromptButton.IsEnabled = !string.IsNullOrWhiteSpace(metadata.Prompt);
-        CopyPreviewPromptButton.ToolTip = CopyPreviewPromptButton.IsEnabled ? "Copy prompt" : "No prompt metadata loaded";
-        CopyPreviewNegativeButton.IsEnabled = !string.IsNullOrWhiteSpace(metadata.NegativePrompt);
-        CopyPreviewNegativeButton.ToolTip = CopyPreviewNegativeButton.IsEnabled ? "Copy negative prompt" : "No negative prompt metadata loaded";
-        PreviewPromptLabel.Text = "PROMPT";
-        PreviewPromptText.Text = string.IsNullOrWhiteSpace(metadata.Prompt)
-            ? PreviewPromptText.Text
-            : FormatPromptTagsForDisplay(metadata.Prompt);
+        CopyPreviewMetadataButton.Content = "Copy Meta";
+        CopyPreviewMetadataButton.Visibility = Visibility.Visible;
+        bool hasPrompt = !string.IsNullOrWhiteSpace(metadata.Prompt);
+        CopyPreviewPromptButton.IsEnabled = hasPrompt;
+        CopyPreviewPromptButton.Content = "Copy Prompt";
+        CopyPreviewPromptButton.Visibility = hasPrompt ? Visibility.Visible : Visibility.Collapsed;
+        bool hasNegative = !string.IsNullOrWhiteSpace(metadata.NegativePrompt);
+        CopyPreviewNegativeButton.IsEnabled = hasNegative;
+        CopyPreviewNegativeButton.Content = "Copy Negative";
+        CopyPreviewNegativeButton.Visibility = hasNegative ? Visibility.Visible : Visibility.Collapsed;
+        PreviewPromptLabel.Text = hasPrompt ? "PROMPT" : "PATH";
+        PreviewPromptText.Text = hasPrompt
+            ? FormatPromptTagsForDisplay(metadata.Prompt)
+            : selected.Path;
         SetPreviewMetadataRow(PreviewSamplerLabel, PreviewSamplerText, "SAMPLER", metadata.Setting("Sampler"));
         SetPreviewMetadataRow(PreviewStepsLabel, PreviewStepsText, "STEPS", metadata.Setting("Steps"));
         SetPreviewMetadataRow(PreviewCfgLabel, PreviewCfgText, "CFG", metadata.Setting("CFG scale"));
         SetPreviewMetadataRow(PreviewSeedLabel, PreviewSeedText, "SEED", metadata.Setting("Seed"));
 
-        bool hasNegative = !string.IsNullOrWhiteSpace(metadata.NegativePrompt);
+        PreviewNegativeHeader.Visibility = hasNegative ? Visibility.Visible : Visibility.Collapsed;
         PreviewNegativeLabel.Visibility = hasNegative ? Visibility.Visible : Visibility.Collapsed;
         PreviewNegativeCard.Visibility = hasNegative ? Visibility.Visible : Visibility.Collapsed;
         PreviewNegativeText.Text = hasNegative ? metadata.NegativePrompt : "";
+        RefreshPreviewCopyToolTips();
         SyncModalMetadataSidebar();
     }
 
@@ -11369,16 +11432,36 @@ public partial class MainWindow : Window
         if (CopyPreviewMetadataButton is null)
             return;
         CopyPreviewMetadataButton.IsEnabled = false;
-        CopyPreviewMetadataButton.Content = "Copy";
-        CopyPreviewMetadataButton.ToolTip = "No PNG metadata loaded";
+        CopyPreviewMetadataButton.Content = "Copy Meta";
+        CopyPreviewMetadataButton.Visibility = Visibility.Collapsed;
         CopyPreviewPromptButton.IsEnabled = false;
-        CopyPreviewPromptButton.Content = "Copy";
-        CopyPreviewPromptButton.ToolTip = "No prompt metadata loaded";
+        CopyPreviewPromptButton.Content = "Copy Prompt";
+        CopyPreviewPromptButton.Visibility = Visibility.Collapsed;
         CopyPreviewNegativeButton.IsEnabled = false;
-        CopyPreviewNegativeButton.Content = "Copy";
-        CopyPreviewNegativeButton.ToolTip = "No negative prompt metadata loaded";
+        CopyPreviewNegativeButton.Content = "Copy Negative";
+        CopyPreviewNegativeButton.Visibility = Visibility.Collapsed;
+        PreviewNegativeHeader.Visibility = Visibility.Collapsed;
+        RefreshPreviewCopyToolTips();
         if (ModalMetadataStatusText is not null)
             SyncModalMetadataSidebar();
+    }
+
+    private void RefreshPreviewCopyToolTips()
+    {
+        if (CopyPreviewMetadataButton is null)
+            return;
+        CopyPreviewMetadataButton.ToolTip = UiLanguageResources.Text(
+            CopyPreviewMetadataButton.IsEnabled
+                ? "UiCopyPngMetadata"
+                : "UiNoPngMetadata");
+        CopyPreviewPromptButton.ToolTip = UiLanguageResources.Text(
+            CopyPreviewPromptButton.IsEnabled
+                ? "UiCopyPrompt"
+                : "UiNoPromptMetadata");
+        CopyPreviewNegativeButton.ToolTip = UiLanguageResources.Text(
+            CopyPreviewNegativeButton.IsEnabled
+                ? "UiCopyNegative"
+                : "UiNoNegativeMetadata");
     }
 
     private void CopyPreviewPrompt_Click(object sender, RoutedEventArgs e)
@@ -11410,7 +11493,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is ExternalException or InvalidOperationException)
         {
-            button.ToolTip = $"Copy failed: {ex.Message}";
+            button.Content = negative ? "Copy Negative" : "Copy Prompt";
+            button.ToolTip = UiLanguageResources.Format("UiCopyFailedFormat", ex.Message);
             return false;
         }
     }
@@ -11438,13 +11522,13 @@ public partial class MainWindow : Window
         {
             Clipboard.SetText(text);
             CopyPreviewMetadataButton.Content = "Copied";
-            CopyPreviewMetadataButton.ToolTip = "PNG metadata copied";
+            CopyPreviewMetadataButton.ToolTip = UiLanguageResources.Text("UiPngMetadataCopied");
             return true;
         }
         catch (Exception ex) when (ex is ExternalException or InvalidOperationException)
         {
-            CopyPreviewMetadataButton.Content = "Copy";
-            CopyPreviewMetadataButton.ToolTip = $"Copy failed: {ex.Message}";
+            CopyPreviewMetadataButton.Content = "Copy Meta";
+            CopyPreviewMetadataButton.ToolTip = UiLanguageResources.Format("UiCopyFailedFormat", ex.Message);
             return false;
         }
     }
@@ -12595,6 +12679,11 @@ public partial class MainWindow : Window
         ApplyKeyBindingTooltips();
         SyncAccessibilityPreferenceControls();
         UpdateLoadTimingPresentation();
+        UpdateFolderStats();
+        UpdateDateFilterSummary();
+        RefreshMetadataIndexPresentationForLanguage();
+        SyncSelectionActionSurface();
+        RefreshPreviewCopyToolTips();
         if (changed && persist)
             SaveState();
         return changed;
@@ -13612,8 +13701,13 @@ public partial class MainWindow : Window
             materializedSelectedCount++;
         }
 
-        string levelSummary = mixedLevels ? "mixed levels" : $"Lv {firstLevel}";
-        BulkSelectionText.Text = $"{selectedCount:N0} images selected · {levelSummary}";
+        string levelSummary = mixedLevels
+            ? UiLanguageResources.Text("UiMixedFavoriteLevels")
+            : $"Lv {firstLevel}";
+        BulkSelectionText.Text = UiLanguageResources.Format(
+            "UiBulkSelectionFormat",
+            selectedCount,
+            levelSummary);
     }
 
     private bool SetFavoriteLevel(Tile tile, int level)
@@ -16357,8 +16451,9 @@ public partial class MainWindow : Window
 
         int total = _allTiles.Count;
         int visible = _tiles.Count;
-        string loaded = $"{total:N0} images indexed";
-        FolderCountText.Text = visible == total ? loaded : $"{visible:N0} shown / {loaded}";
+        FolderCountText.Text = visible == total
+            ? UiLanguageResources.Format("UiFolderImagesIndexedFormat", total)
+            : UiLanguageResources.Format("UiFolderImagesShownFormat", visible, total);
         UpdateHeaderStats();
     }
 
@@ -16369,11 +16464,22 @@ public partial class MainWindow : Window
         int selected = _selectedPaths.Count;
         int visible = _tiles.Count;
         int total = _allTiles.Count;
-        string imageText = visible == total ? $"{total:N0} images" : $"{visible:N0} / {total:N0} images";
-        string folderText = _currentFolderSet.Count == 0 ? "sample" : $"{_currentFolderSet.Count:N0} folder(s)";
+        string imageText = visible == total
+            ? UiLanguageResources.Format("UiHeaderImageCountFormat", total)
+            : UiLanguageResources.Format("UiHeaderVisibleImageCountFormat", visible, total);
+        string folderText = _currentFolderSet.Count == 0
+            ? UiLanguageResources.Text("UiHeaderSample")
+            : UiLanguageResources.Format("UiHeaderFolderCountFormat", _currentFolderSet.Count);
         HeaderStats.Text = _activeAlbumId is null
-            ? $"{selected:N0} selected - {imageText} - {folderText}"
-            : $"{selected:N0} selected - {visible:N0}/{_activeAlbumMemberCount:N0} in {_activeAlbumName} - {_activeAlbumOutsideCount:N0} outside unavailable - {_activeAlbumMissingCount:N0} missing";
+            ? UiLanguageResources.Format("UiHeaderStatsFormat", selected, imageText, folderText)
+            : UiLanguageResources.Format(
+                "UiHeaderAlbumStatsFormat",
+                selected,
+                visible,
+                _activeAlbumMemberCount,
+                _activeAlbumName ?? "",
+                _activeAlbumOutsideCount,
+                _activeAlbumMissingCount);
     }
 
     private void UpdateGridMetrics(LoadMetrics metrics)
@@ -17448,11 +17554,14 @@ public partial class MainWindow : Window
 
         if (!_dateFromLocal.HasValue && !_dateToLocal.HasValue)
         {
-            DateFilterSummary.Text = "No date filter";
+            DateFilterSummary.Text = UiLanguageResources.Text("UiNoDateFilter");
             return;
         }
 
-        DateFilterSummary.Text = $"Manual: {FormatStateDate(_dateFromLocal) ?? "..."} – {FormatStateDate(_dateToLocal) ?? "..."}";
+        DateFilterSummary.Text = UiLanguageResources.Format(
+            "UiManualDateRangeFormat",
+            FormatStateDate(_dateFromLocal) ?? "...",
+            FormatStateDate(_dateToLocal) ?? "...");
     }
 
     private bool IsZoomModifierActive()
@@ -26557,6 +26666,31 @@ public partial class MainWindow : Window
     public string UiSearchPlaceholderForSmoke => SearchWatermark.Text;
     public string UiGeneralNavigationForSmoke => SettingsGeneralNav.Content?.ToString() ?? "";
     public string UiModalShortcutHintForSmoke => ModalShortcutHintText.Text;
+    public string EnhancedOnlyLabelForSmoke => EnhancedOnlyFilter.Content?.ToString() ?? "";
+    public string UnseenOnlyLabelForSmoke => UnseenOnlyFilter.Content?.ToString() ?? "";
+    public string DateFilterLabelForSmoke => DateFilterSummary.Text;
+    public string FolderCountLabelForSmoke => FolderCountText.Text;
+    public string SidebarSettingsLabelForSmoke => SidebarAppSettingsButton.Content?.ToString() ?? "";
+    public string PreviewTabsEmptyLabelForSmoke => PreviewTabsEmptyText.Text;
+    public IReadOnlyList<string> GallerySortLabelsForSmoke
+        =>
+        [
+            SortModifiedNewest.Content?.ToString() ?? "",
+            SortModifiedOldest.Content?.ToString() ?? "",
+            SortCreatedNewest.Content?.ToString() ?? "",
+            SortCreatedOldest.Content?.ToString() ?? "",
+            SortUpscaleNewest.Content?.ToString() ?? "",
+            SortUpscaleQueuedNewest.Content?.ToString() ?? "",
+            SortPhotorealNewest.Content?.ToString() ?? "",
+            SortPhotorealQueuedNewest.Content?.ToString() ?? "",
+            SortVideoNewest.Content?.ToString() ?? "",
+            SortVideoQueuedNewest.Content?.ToString() ?? "",
+            SortFavoriteChangedNewest.Content?.ToString() ?? "",
+        ];
+    public void SetMetadataIndexPresentationForSmoke(
+        string resourceKey,
+        params object[] arguments)
+        => RenderMetadataIndexProgress(resourceKey, 100, showProgress: false, arguments);
     public bool SetUiLanguageForSmoke(string language)
     {
         SetUiLanguage(language, persist: true);
@@ -26777,7 +26911,7 @@ public partial class MainWindow : Window
         canceled.Cancel();
         _metadataIndexStatus = "canceled";
         RenderMetadataIndexProgress(
-            "Prompt metadata canceled - the Viewer and last complete index were kept.",
+            "UiMetadataCanceledViewerKept",
             _metadataIndexProgress,
             showProgress: false);
         return true;
@@ -31239,6 +31373,30 @@ public partial class MainWindow : Window
         Button button = negative ? CopyPreviewNegativeButton : CopyPreviewPromptButton;
         return new MetadataCopySmokeSnapshot(copied, button.IsEnabled, SelectedTile()?.Path, _currentPreviewMetadataPath, _lastMetadataCopyText);
     }
+
+    public bool PreviewCopySurfaceMatchesMetadataForSmoke
+        => CopyPreviewMetadataButton.Visibility == Visibility.Visible
+            && CopyPreviewMetadataButton.IsEnabled
+            && string.Equals(CopyPreviewMetadataButton.Content?.ToString(), "Copy Meta", StringComparison.Ordinal)
+            && CopyPreviewPromptButton.Visibility == Visibility.Visible
+            && CopyPreviewPromptButton.IsEnabled
+            && string.Equals(CopyPreviewPromptButton.Content?.ToString(), "Copy Prompt", StringComparison.Ordinal)
+            && PreviewNegativeHeader.Visibility == Visibility.Visible
+            && CopyPreviewNegativeButton.Visibility == Visibility.Visible
+            && CopyPreviewNegativeButton.IsEnabled
+            && string.Equals(CopyPreviewNegativeButton.Content?.ToString(), "Copy Negative", StringComparison.Ordinal);
+
+    public bool PreviewCopySurfaceHiddenForPathForSmoke
+        => string.Equals(PreviewPromptLabel.Text, "PATH", StringComparison.Ordinal)
+            && CopyPreviewMetadataButton.Visibility == Visibility.Collapsed
+            && CopyPreviewPromptButton.Visibility == Visibility.Collapsed
+            && PreviewNegativeHeader.Visibility == Visibility.Collapsed
+            && CopyPreviewNegativeButton.Visibility == Visibility.Collapsed;
+
+    public bool PreviewCopyActionsHiddenForSmoke
+        => CopyPreviewMetadataButton.Visibility == Visibility.Collapsed
+            && CopyPreviewPromptButton.Visibility == Visibility.Collapsed
+            && CopyPreviewNegativeButton.Visibility == Visibility.Collapsed;
 
     public ModalMetadataSmokeSnapshot OpenModalMetadataForSmoke()
     {
