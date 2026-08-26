@@ -1,14 +1,27 @@
 param(
     [string]$Configuration = "Release",
     [string]$OutputPath = (Join-Path $env:TEMP "aibos-wpf-selected-batch-enhancement.json"),
+    [string]$DotnetPath = "",
     [ValidateRange(1, 300)]
     [int]$OverallTimeoutSeconds = 120,
+    [switch]$NoRestore,
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
+$mainWindowXamlPath = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\MainWindow.xaml"
+$localDotnet10 = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+if ([string]::IsNullOrWhiteSpace($DotnetPath)) {
+    $DotnetPath = if (Test-Path -LiteralPath $localDotnet10 -PathType Leaf) {
+        $localDotnet10
+    }
+    else {
+        'dotnet.exe'
+    }
+}
+$DotnetPath = (Get-Command $DotnetPath -ErrorAction Stop).Source
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-selected-batch-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -22,19 +35,42 @@ if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
 try {
+    $mainWindowXaml = Get-Content -LiteralPath $mainWindowXamlPath -Raw
+    $presentationChecks = @(
+        $mainWindowXaml.Contains('<TextBlock Text="Batch Enhance" Foreground="{StaticResource TextPrimary}"')
+        $mainWindowXaml.Contains('<TextBlock Text="Jobs · 1 per image" Foreground="{StaticResource TextSecondary}"')
+        $mainWindowXaml.Contains('Visibility="{Binding ShowDetailText, Converter={StaticResource BoolToVis}}"')
+        (-not $mainWindowXaml.Contains('Requests  up to 4 at once'))
+        (-not $mainWindowXaml.Contains('Review first; jobs start only after the explicit action below.'))
+    )
+    if ($presentationChecks -contains $false) {
+        throw "Batch Enhance presentation checks failed."
+    }
     if ($SkipBuild) {
-        $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+        $assembly = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.dll"
     }
     else {
         New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
         $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-        & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+        $buildArguments = @(
+            'build',
+            $project,
+            '-c',
+            $Configuration,
+            "-p:OutputPath=$buildOutput",
+            '-p:UseSharedCompilation=false',
+            '--nologo',
+            '--disable-build-servers',
+            '-v:minimal'
+        )
+        if ($NoRestore) { $buildArguments += '--no-restore' }
+        & $DotnetPath @buildArguments
         if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
-        $exe = Join-Path $buildRoot 'PhotoViewer.Wpf.exe'
+        $assembly = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
     }
 
-    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
-        throw "WPF executable was not found: $exe"
+    if (-not (Test-Path -LiteralPath $assembly -PathType Leaf)) {
+        throw "WPF assembly was not found: $assembly"
     }
     if (Test-Path -LiteralPath $fullOutputPath) {
         Remove-Item -LiteralPath $fullOutputPath -Force
@@ -43,8 +79,11 @@ try {
         Remove-Item -LiteralPath $progressPath -Force
     }
 
-    $process = Start-Process -FilePath $exe `
-        -ArgumentList @('--selected-batch-enhancement-smoke', ('"{0}"' -f $fullOutputPath)) `
+    $process = Start-Process -FilePath $DotnetPath `
+        -ArgumentList @(
+            ('"{0}"' -f $assembly),
+            '--selected-batch-enhancement-smoke',
+            ('"{0}"' -f $fullOutputPath)) `
         -WindowStyle Hidden `
         -PassThru
 
@@ -65,6 +104,8 @@ try {
     $result | ConvertTo-Json -Depth 12
     $required = @(
         'ordinaryBrowsingPassive',
+        'presentationContract',
+        'rowDensityContract',
         'preflightPostZero',
         'reviewCancelPostZero',
         'escapeClosedReview',

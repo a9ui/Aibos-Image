@@ -71,7 +71,7 @@ public partial class MainWindow
             .ToArray();
         if (selected.Length == 0)
         {
-            SetStatusToast("Select one or more source images first.");
+            SetStatusToast("AI処理する画像を1件以上選択してください。");
             return;
         }
 
@@ -95,15 +95,15 @@ public partial class MainWindow
         BatchEnhancementAllowLargeCheckBox.IsChecked = false;
         BatchEnhancementItemsList.ItemsSource = _batchEnhancementItems.ToArray();
         BatchEnhancementDialog.Visibility = Visibility.Visible;
-        BatchEnhancementCompanionStatusText.Text = "Checking the local companion and selected sources...";
+        BatchEnhancementCompanionStatusText.Text = "LOCAL AIと対象画像を確認中…";
         string adapterId = _modalEnhancementAdapterId;
         BatchEnhancementAdapterStatusText.Text = string.Equals(
             adapterId,
             "comfyui",
             StringComparison.Ordinal)
-                ? "ComfyUI AI upscale · checking companion availability"
-                : "Real-ESRGAN fast GPU · checking local installation";
-        BatchEnhancementStatusText.Text = "Review only. No enhancement jobs have been created.";
+                ? "ComfyUI · LOCAL AIを確認中…"
+                : "Real-ESRGAN · ローカルGPUを確認中…";
+        BatchEnhancementStatusText.Text = "まだJobsへ追加していません";
         RefreshBatchEnhancementSurface();
         long generation = ++_batchEnhancementGeneration;
         _ = Dispatcher.BeginInvoke(FocusFirstAvailableBatchEnhancementControl, DispatcherPriority.Input);
@@ -140,15 +140,16 @@ public partial class MainWindow
                          static item => item.State == BatchEnhancementItemState.Ready))
             {
                 if (activeSources.Contains(item.SourceIdentity))
-                    item.MarkSkipped("Already queued or running.");
+                    item.MarkSkipped("すでに待機中または処理中です。");
             }
-            BatchEnhancementCompanionStatusText.Text = "Local companion connected. Starting the batch will create one job per eligible source.";
+            BatchEnhancementCompanionStatusText.Text =
+                "LOCAL AI · 接続済み · 対象画像ごとに1 Jobを作成します";
         }
         else
         {
             _batchEnhancementCompanionReady = false;
             BatchEnhancementCompanionStatusText.Text = response.Ok
-                ? "The local companion returned an invalid jobs response."
+                ? "LOCAL AIから正しい応答が返されませんでした。"
                 : response.Error;
         }
 
@@ -168,27 +169,27 @@ public partial class MainWindow
         {
             if (!source.IsRealFile)
             {
-                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "Not a source file."));
+                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "元画像ではありません。"));
                 continue;
             }
             if (!SupportedImageExtensions.Contains(Path.GetExtension(source.Path)))
             {
-                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "Unsupported image format."));
+                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "未対応の画像形式です。"));
                 continue;
             }
             if (!TryResolveEnhancementSourceIdentity(source.Path, out string sourceIdentity))
             {
-                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "Source path could not be resolved."));
+                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "元画像の場所を確認できません。"));
                 continue;
             }
             if (!File.Exists(sourceIdentity))
             {
-                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "Source file is missing."));
+                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "元画像が見つかりません。"));
                 continue;
             }
             if (!canonicalSources.Add(sourceIdentity))
             {
-                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "Duplicate source in this selection."));
+                result.Add(BatchEnhancementItemView.Skipped(source.DisplayName, source.Path, "同じ元画像が重複しています。"));
                 continue;
             }
 
@@ -211,7 +212,7 @@ public partial class MainWindow
         {
             return new BatchEnhancementAdapterAvailability(
                 false,
-                "ComfyUI AI upscale · the companion will validate its workflow and models when submitting");
+                "ComfyUI · Workflow / Modelは追加時にLOCAL AIが検証");
         }
 
         try
@@ -225,7 +226,7 @@ public partial class MainWindow
             {
                 return new BatchEnhancementAdapterAvailability(
                     false,
-                    "Real-ESRGAN fast GPU · custom configuration present; the companion will validate it when submitting");
+                    "Real-ESRGAN · Custom pathは追加時にLOCAL AIが検証");
             }
 
             const string root = @"C:\AI\RealESRGAN-ncnn-vulkan";
@@ -241,16 +242,16 @@ public partial class MainWindow
             return missing == 0
                 ? new BatchEnhancementAdapterAvailability(
                     true,
-                    "Real-ESRGAN fast GPU · local executable and required models detected")
+                    "Real-ESRGAN · Local GPU ready")
                 : new BatchEnhancementAdapterAvailability(
                     false,
-                    $"Real-ESRGAN fast GPU · {missing:N0} required local item{(missing == 1 ? "" : "s")} not detected; the companion will verify again when submitting");
+                    $"Real-ESRGAN · Local assetsが{missing:N0}件不足 · 追加時に再確認");
         }
         catch
         {
             return new BatchEnhancementAdapterAvailability(
                 false,
-                "Real-ESRGAN fast GPU · local installation could not be inspected; the companion will verify when submitting");
+                "Real-ESRGAN · Local GPUの状態不明 · 追加時に再確認");
         }
     }
 
@@ -320,8 +321,8 @@ public partial class MainWindow
         _batchEnhancementDurablePublishCommitted = false;
         _batchEnhancementCompleted = false;
         BatchEnhancementStatusText.Text = retry
-            ? $"Retrying {items.Count:N0} failed source{(items.Count == 1 ? "" : "s")}..."
-            : $"Submitting {items.Count:N0} eligible source{(items.Count == 1 ? "" : "s")}...";
+            ? $"失敗した{items.Count:N0}件を再試行中…"
+            : $"対象{items.Count:N0}件をJobsへ追加中…";
         RefreshBatchEnhancementSurface();
         bool confirmLarge = BatchEnhancementAllowLargeCheckBox.IsChecked == true;
         DurableEnhancementBatchResponse durableBatch =
@@ -357,13 +358,13 @@ public partial class MainWindow
             else
             {
                 item.MarkFailed(string.IsNullOrWhiteSpace(response.Error)
-                    ? "The durable queue reservation could not be confirmed."
+                    ? "Jobsへの追加予約を確認できませんでした。"
                     : response.Error);
             }
         }
 
         foreach (BatchEnhancementItemView item in items.Where(static item => item.State == BatchEnhancementItemState.Ready))
-            item.MarkStopped("Not sent because batch submission was stopped.");
+            item.MarkStopped("一括追加を停止したため送信していません。");
 
         _batchEnhancementRequestPending = false;
         _batchEnhancementCompleted = true;
@@ -375,8 +376,8 @@ public partial class MainWindow
             static item => item.State == BatchEnhancementItemState.OutcomeUnknown);
         int stopped = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Stopped);
         BatchEnhancementStatusText.Text = _batchEnhancementStopRequested
-            ? $"Stopped. {queued:N0} created · {saved:N0} saved for delivery · {failed:N0} failed · {outcomeUnknown:N0} receipt unknown · {stopped:N0} not sent. Created jobs were not canceled."
-            : $"{queued:N0} created · {saved:N0} saved for delivery · {failed:N0} failed · {outcomeUnknown:N0} receipt unknown. Original sources were not changed.";
+            ? $"停止 · 追加 {queued:N0} · 保存 {saved:N0} · 失敗 {failed:N0} · 要確認 {outcomeUnknown:N0} · 未送信 {stopped:N0}"
+            : $"追加 {queued:N0} · 保存 {saved:N0} · 失敗 {failed:N0} · 要確認 {outcomeUnknown:N0}";
         RefreshBatchEnhancementSurface();
         BatchEnhancementItemsList.Items.Refresh();
         _ = Dispatcher.BeginInvoke(FocusFirstAvailableBatchEnhancementControl, DispatcherPriority.Input);
@@ -425,7 +426,7 @@ public partial class MainWindow
                     && TryGetStringProperty(conflict, "code", out string? code)
                     && string.Equals(code, "UPSCALE_REQUIRES_CONFIRMATION", StringComparison.Ordinal))
                 {
-                    item.MarkFailed("Large image needs confirmation. Enable the large-image option, then retry failed.");
+                    item.MarkFailed("大きな画像の許可が必要です。許可してから失敗分を再試行してください。");
                 }
                 else if (!IsDefinitiveNoCreateResponse(response))
                 {
@@ -433,13 +434,13 @@ public partial class MainWindow
                     if (!reconciled)
                     {
                         item.MarkOutcomeUnknown(
-                            "The request may have reached the companion, but no receipt was returned. Check Jobs before trying again; Aibos will not resend it automatically.");
+                            "受付結果を確認できません。自動再送はせず、Jobsで確認が必要です。");
                     }
                 }
                 else
                 {
                     item.MarkFailed(string.IsNullOrWhiteSpace(response.Error)
-                        ? "The companion did not return a created job."
+                        ? "LOCAL AIから作成済みJobが返されませんでした。"
                         : response.Error);
                 }
             }
@@ -581,7 +582,7 @@ public partial class MainWindow
             return;
         _batchEnhancementDurablePublishCommitted = true;
         BatchEnhancementStatusText.Text =
-            "Queue reservations are saved locally. Delivery to Jobs will continue; saved reservations can no longer be stopped here.";
+            "追加予約をこのPCに保存済み · Jobsへの登録を継続します";
         RefreshBatchEnhancementSurface();
     }
 
@@ -592,12 +593,12 @@ public partial class MainWindow
         if (_batchEnhancementDurablePublishCommitted)
         {
             BatchEnhancementStatusText.Text =
-                "Queue reservations are already saved locally. Delivery to Jobs will continue.";
+                "追加予約はこのPCに保存済み · Jobsへの登録を継続します";
             RefreshBatchEnhancementSurface();
             return;
         }
         _batchEnhancementStopRequested = true;
-        BatchEnhancementStatusText.Text = "Stopping after the current requests finish. Created jobs will keep running.";
+        BatchEnhancementStatusText.Text = "現在の送信が終わり次第、未送信分を停止します";
         RefreshBatchEnhancementSurface();
     }
 
@@ -660,8 +661,8 @@ public partial class MainWindow
         int savedForDelivery = _batchEnhancementItems.Count(
             static item => item.State == BatchEnhancementItemState.SavedForDelivery);
         BatchEnhancementCountsText.Text = _batchEnhancementChecking
-            ? $"{_batchEnhancementSelectedCount:N0} selected · checking eligibility"
-            : $"{_batchEnhancementSelectedCount:N0} selected · {eligible:N0} eligible · {skipped:N0} skipped";
+            ? $"{_batchEnhancementSelectedCount:N0}件 · 対象を確認中"
+            : $"{_batchEnhancementSelectedCount:N0}件 · 対象 {eligible:N0} · 対象外 {skipped:N0}";
         BatchEnhancementEmptyText.Visibility = _batchEnhancementItems.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -669,7 +670,7 @@ public partial class MainWindow
             _batchEnhancementSelectedCount >= BatchEnhancementLargeSelectionThreshold
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-        BatchEnhancementStartButton.Content = $"Enhance {eligible:N0} selected";
+        BatchEnhancementStartButton.Content = $"Jobsへ追加（{eligible:N0}）";
         BatchEnhancementStartButton.IsEnabled = !_batchEnhancementChecking
             && !_batchEnhancementRequestPending
             && !_batchEnhancementCompleted
@@ -677,7 +678,7 @@ public partial class MainWindow
         BatchEnhancementStartButton.Visibility = _batchEnhancementCompleted
             ? Visibility.Collapsed
             : Visibility.Visible;
-        BatchEnhancementRetryFailedButton.Content = $"Retry failed ({failed:N0})";
+        BatchEnhancementRetryFailedButton.Content = $"失敗を再試行（{failed:N0}）";
         BatchEnhancementRetryFailedButton.Visibility = !_batchEnhancementRequestPending
             && _batchEnhancementCompleted
             && failed > 0
@@ -692,9 +693,9 @@ public partial class MainWindow
                 : Visibility.Collapsed;
         BatchEnhancementCancelButton.Content = _batchEnhancementRequestPending
             ? (_batchEnhancementDurablePublishCommitted
-                ? "Saved"
-                : _batchEnhancementStopRequested ? "Stopping..." : "Stop unsent")
-            : "Close";
+                ? "保存済み"
+                : _batchEnhancementStopRequested ? "停止中…" : "未送信を停止")
+            : "閉じる";
         BatchEnhancementCancelButton.IsEnabled = !_batchEnhancementStopRequested
             && !(_batchEnhancementRequestPending
                 && _batchEnhancementDurablePublishCommitted);
@@ -702,7 +703,7 @@ public partial class MainWindow
         BatchEnhancementAllowLargeCheckBox.IsEnabled = !_batchEnhancementRequestPending;
         AutomationProperties.SetHelpText(
             BatchEnhancementStartButton,
-            "Saves every explicit queue reservation locally. Only an inbox-capable companion receives an immediate delivery nudge. Opening or closing this review creates no jobs and starts no background process.");
+            "Jobsへの追加予約をこのPCに保存し、LOCAL AIへ登録を通知します。この確認画面を開閉するだけではJobを作成しません。起動中の処理も開始しません。");
     }
 
     public async Task OpenBatchEnhancementForSmokeAsync()
@@ -786,13 +787,21 @@ public partial class MainWindow
             _batchEnhancementPostCount,
             _batchEnhancementMaxInFlight,
             _batchEnhancementSynchronousOpenMilliseconds,
+            BatchEnhancementCountsText.Text,
+            BatchEnhancementCompanionStatusText.Text,
             BatchEnhancementAdapterStatusText.Text,
+            BatchEnhancementStatusText.Text,
+            Convert.ToString(BatchEnhancementStartButton.Content) ?? "",
+            Convert.ToString(BatchEnhancementCancelButton.Content) ?? "",
+            Convert.ToString(BatchEnhancementViewJobsButton.Content) ?? "",
             _batchEnhancementCreatedJobIds.ToArray(),
             _batchEnhancementItems.Select(static item => new BatchEnhancementItemSmokeSnapshot(
                 item.DisplayName,
                 item.State.ToString(),
+                item.StatusLabel,
                 item.JobId,
-                item.DetailText)).ToArray());
+                item.DetailText,
+                item.ShowDetailText)).ToArray());
 
     private async Task WaitForBatchEnhancementIdleForSmokeAsync()
     {
@@ -830,18 +839,19 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
     public BatchEnhancementItemState State => _state;
     public string StatusLabel => _state switch
     {
-        BatchEnhancementItemState.Checking => "Checking",
-        BatchEnhancementItemState.Ready => "Ready",
-        BatchEnhancementItemState.Skipped => "Skipped",
-        BatchEnhancementItemState.Submitting => "Submitting",
-        BatchEnhancementItemState.Queued => "Created",
-        BatchEnhancementItemState.SavedForDelivery => "Saved",
-        BatchEnhancementItemState.Failed => "Failed",
-        BatchEnhancementItemState.OutcomeUnknown => "Check Jobs",
-        BatchEnhancementItemState.Stopped => "Not sent",
+        BatchEnhancementItemState.Checking => "確認中",
+        BatchEnhancementItemState.Ready => "対象",
+        BatchEnhancementItemState.Skipped => "対象外",
+        BatchEnhancementItemState.Submitting => "送信中",
+        BatchEnhancementItemState.Queued => "追加済み",
+        BatchEnhancementItemState.SavedForDelivery => "保存済み",
+        BatchEnhancementItemState.Failed => "失敗",
+        BatchEnhancementItemState.OutcomeUnknown => "要確認",
+        BatchEnhancementItemState.Stopped => "未送信",
         _ => _state.ToString(),
     };
     public string DetailText => _detailText;
+    public bool ShowDetailText => !string.IsNullOrWhiteSpace(DetailText);
     public string? JobId => _jobId;
     public bool IsEligible => _state is BatchEnhancementItemState.Ready
         or BatchEnhancementItemState.Submitting
@@ -850,30 +860,32 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
         or BatchEnhancementItemState.Failed
         or BatchEnhancementItemState.Stopped;
     public bool CanRetry => _state == BatchEnhancementItemState.Failed;
-    public string AccessibleName => $"{DisplayName}, {StatusLabel}, {DetailText}";
+    public string AccessibleName => ShowDetailText
+        ? $"{DisplayName}, {StatusLabel}, {DetailText}"
+        : $"{DisplayName}, {StatusLabel}";
 
     public static BatchEnhancementItemView Checking(string displayName, string sourcePath)
-        => new(displayName, sourcePath, "", null, BatchEnhancementItemState.Checking, "Checking source eligibility.");
+        => new(displayName, sourcePath, "", null, BatchEnhancementItemState.Checking, "");
 
     public static BatchEnhancementItemView Ready(
         string displayName,
         string sourcePath,
         string sourceIdentity,
         string? prompt)
-        => new(displayName, sourcePath, sourceIdentity, prompt, BatchEnhancementItemState.Ready, "Ready to create one enhancement job.");
+        => new(displayName, sourcePath, sourceIdentity, prompt, BatchEnhancementItemState.Ready, "");
 
     public static BatchEnhancementItemView Skipped(string displayName, string sourcePath, string reason)
         => new(displayName, sourcePath, "", null, BatchEnhancementItemState.Skipped, reason);
 
     public void MarkSkipped(string reason) => SetState(BatchEnhancementItemState.Skipped, reason, null);
 
-    public void MarkSubmitting() => SetState(BatchEnhancementItemState.Submitting, "Creating job...", null);
+    public void MarkSubmitting() => SetState(BatchEnhancementItemState.Submitting, "", null);
 
-    public void MarkQueued(string jobId) => SetState(BatchEnhancementItemState.Queued, $"Job {jobId} created.", jobId);
+    public void MarkQueued(string jobId) => SetState(BatchEnhancementItemState.Queued, "", jobId);
 
     public void MarkSavedForDelivery() => SetState(
         BatchEnhancementItemState.SavedForDelivery,
-        "予約を保存しました。Jobsへの登録を継続しています。",
+        "追加予約をこのPCに保存済み · Jobsへの登録を継続中",
         null);
 
     public void MarkFailed(string reason) => SetState(BatchEnhancementItemState.Failed, reason, null);
@@ -882,7 +894,7 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
 
     public void MarkStopped(string reason) => SetState(BatchEnhancementItemState.Stopped, reason, null);
 
-    public void ResetForRetry() => SetState(BatchEnhancementItemState.Ready, "Ready to retry this failed source.", null);
+    public void ResetForRetry() => SetState(BatchEnhancementItemState.Ready, "", null);
 
     private void SetState(BatchEnhancementItemState state, string detailText, string? jobId)
     {
@@ -892,6 +904,7 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(State)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowDetailText)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(JobId)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEligible)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRetry)));
@@ -939,12 +952,20 @@ public sealed record BatchEnhancementSmokeSnapshot(
     int PostRequests,
     int MaxInFlight,
     long SynchronousOpenMilliseconds,
+    string CountsText,
+    string CompanionStatus,
     string AdapterStatus,
+    string StatusText,
+    string StartLabel,
+    string CancelLabel,
+    string ViewJobsLabel,
     string[] CreatedJobIds,
     BatchEnhancementItemSmokeSnapshot[] Items);
 
 public sealed record BatchEnhancementItemSmokeSnapshot(
     string Name,
     string State,
+    string StatusLabel,
     string? JobId,
-    string Detail);
+    string Detail,
+    bool ShowDetailText);

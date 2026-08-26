@@ -984,10 +984,10 @@
                     <Button x:Name="BulkFavoriteIncreaseButton" Style="{StaticResource GhostButton}" Content="Increase all" Click="FavoriteIncrease_Click"
                             ToolTip="Increase favorite level for selected images" AutomationProperties.Name="Increase favorite level for selected images"/>
                   </UniformGrid>
-                  <Button x:Name="BulkEnhanceSelectedButton" Style="{StaticResource GhostButton}" Content="Enhance selected" Click="OpenBatchEnhancement_Click"
-                          ToolTip="Review and create one optional local enhancement job per selected image"
-                          AutomationProperties.Name="Enhance selected images"
-                          AutomationProperties.HelpText="Opens a review first. Opening or closing the review creates no enhancement jobs."
+                  <Button x:Name="BulkEnhanceSelectedButton" Style="{StaticResource GhostButton}" Content="Batch Enhance" Click="OpenBatchEnhancement_Click"
+                          ToolTip="選択画像を確認してJobsへ追加"
+                          AutomationProperties.Name="Batch Enhanceを開く"
+                          AutomationProperties.HelpText="確認画面を開きます。明示的に追加するまでJobは作成しません。"
                           Margin="0,8,0,0"/>
                   <Button x:Name="BulkDeleteButton" Style="{StaticResource DangerButton}" Content="Move selected to Recycle Bin" Click="BulkDeleteSelected_Click"
                           ToolTip="Move every selected source image to the Windows Recycle Bin" AutomationProperties.Name="Move selected images to Recycle Bin" Margin="0,8,0,0"/>
@@ -1011,9 +1011,9 @@
                 </Border>
                 <Button x:Name="RightPreviewEnhanceButton" Style="{StaticResource GhostButton}" Width="38" Margin="0,0,3,8"
                         Content="AI" Click="OpenBatchEnhancement_Click"
-                        ToolTip="Review AI enhancement for the selected image"
-                        AutomationProperties.Name="Review AI enhancement for selected image"
-                        AutomationProperties.HelpText="Opens a review first. No enhancement job is created until Start is chosen."/>
+                         ToolTip="選択画像のAI処理を確認"
+                         AutomationProperties.Name="選択画像のBatch Enhanceを開く"
+                         AutomationProperties.HelpText="確認画面を開きます。明示的に追加するまでJobは作成しません。"/>
                 <Button x:Name="RightPreviewOpenButton" Style="{StaticResource GhostButton}" Width="72" Margin="0,0,3,8" Click="OpenSelectedExternally_Click" AutomationProperties.Name="Open selected image externally">
                   <StackPanel Orientation="Horizontal">
                     <Path Data="M18,13 v6 a2,2 0 0 1 -2,2 H5 a2,2 0 0 1 -2,-2 V8 a2,2 0 0 1 2,-2 h6 M15,3 h6 v6 M10,14 L21,3" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="14" Height="14" Margin="0,0,5,0"/>
@@ -1488,8 +1488,8 @@
     <!-- Explicit selected-image enhancement review. Opening and closing this overlay never enqueue work. -->
     <Grid x:Name="BatchEnhancementDialog" Grid.RowSpan="3" Panel.ZIndex="530" Visibility="Collapsed" Background="{DynamicResource OverlayStrongBrush}"
           MouseLeftButtonDown="BatchEnhancementBackdrop_MouseLeftButtonDown"
-          AutomationProperties.Name="Enhance selected images review"
-          AutomationProperties.HelpText="Review eligible and skipped images before creating enhancement jobs. Escape closes this review when submission is idle.">
+          AutomationProperties.Name="Batch Enhance"
+          AutomationProperties.HelpText="対象画像を確認してJobsへ追加します。送信中でなければEscキーで閉じられます。">
       <Border x:Name="BatchEnhancementDialogSurface" MaxWidth="920" MaxHeight="700" Margin="28" CornerRadius="6"
               Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
               HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
@@ -1505,60 +1505,60 @@
 
           <DockPanel Grid.Row="0" Margin="16,0,10,0" LastChildFill="True">
             <Button x:Name="BatchEnhancementCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
-                    Click="CancelBatchEnhancement_Click" ToolTip="Close review" AutomationProperties.Name="Close enhancement review">
+                    Click="CancelBatchEnhancement_Click" ToolTip="Batch Enhanceを閉じる" AutomationProperties.Name="Batch Enhanceを閉じる">
               <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
             </Button>
             <StackPanel VerticalAlignment="Center">
-              <TextBlock Text="Enhance selected" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold"/>
-              <TextBlock Text="Review first; jobs start only after the explicit action below." Foreground="{StaticResource TextTertiary}" FontSize="10.8" Margin="0,2,0,0"/>
+              <TextBlock Text="Batch Enhance" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold"/>
+              <TextBlock Text="対象を確認してからJobsへ追加します" Foreground="{StaticResource TextTertiary}" FontSize="10.8" Margin="0,2,0,0"/>
             </StackPanel>
           </DockPanel>
 
           <Border Grid.Row="1" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,0,1" Padding="16,12">
             <StackPanel>
-              <TextBlock x:Name="BatchEnhancementCountsText" Text="0 selected · checking eligibility"
+               <TextBlock x:Name="BatchEnhancementCountsText" Text="0件 · 対象を確認中"
                          Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold"
-                         AutomationProperties.Name="Batch enhancement selection summary" AutomationProperties.LiveSetting="Polite"/>
+                         AutomationProperties.Name="Batch Enhanceの対象件数" AutomationProperties.LiveSetting="Polite"/>
               <WrapPanel Margin="0,9,0,0">
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,7,6">
-                  <TextBlock Text="Preset  Anime clean x2" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+                   <TextBlock Text="Preset · Anime Sharp 2x" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
                 </Border>
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,7,6">
-                  <TextBlock Text="Scale  2×" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+                   <TextBlock Text="Scale · 2x" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
                 </Border>
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,7,6">
-                  <TextBlock Text="Format  WebP" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+                   <TextBlock Text="Format · WebP" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
                 </Border>
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,0,6">
-                  <TextBlock Text="Requests  up to 4 at once" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+                   <TextBlock Text="Jobs · 1 per image" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
                 </Border>
               </WrapPanel>
-              <TextBlock x:Name="BatchEnhancementCompanionStatusText" Text="Checking the local companion..."
+               <TextBlock x:Name="BatchEnhancementCompanionStatusText" Text="LOCAL AIを確認中…"
                          Foreground="{StaticResource TextSecondary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,3,0,0"
-                         AutomationProperties.Name="Local enhancement companion availability" AutomationProperties.LiveSetting="Polite"/>
-              <TextBlock x:Name="BatchEnhancementAdapterStatusText" Text="Real-ESRGAN fast GPU · checking local installation"
+                          AutomationProperties.Name="LOCAL AIの接続状態" AutomationProperties.LiveSetting="Polite"/>
+               <TextBlock x:Name="BatchEnhancementAdapterStatusText" Text="Real-ESRGAN · ローカルGPUを確認中…"
                          Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextWrapping="Wrap" Margin="0,3,0,0"
-                         AutomationProperties.Name="Enhancement adapter availability"/>
+                          AutomationProperties.Name="Adapterの状態"/>
               <Border x:Name="BatchEnhancementWarningBorder" Visibility="Collapsed" Background="{StaticResource BgTertiary}"
                       BorderBrush="{StaticResource Warning}" BorderThickness="1" CornerRadius="4" Padding="9,7" Margin="0,9,0,0">
-                <TextBlock Text="Large batch: jobs are created individually. Stop affects only images not yet sent; already created jobs keep running."
+                 <TextBlock Text="大量処理は画像ごとにJobsへ追加します。停止できるのは未送信分だけで、追加済みJobは続行します。"
                            Foreground="{StaticResource Warning}" FontSize="11" TextWrapping="Wrap"/>
               </Border>
               <CheckBox x:Name="BatchEnhancementAllowLargeCheckBox"
-                        Content="Allow image-specific large jobs when the companion warns"
+                         Content="大きな画像のJob作成を許可"
                         Foreground="{StaticResource TextSecondary}" FontSize="11.5" Margin="0,9,0,0"
-                        AutomationProperties.Name="Allow large enhancement jobs"
-                        AutomationProperties.HelpText="When off, sources that require large-job confirmation fail without creating a job and can be retried after enabling this option."/>
+                         AutomationProperties.Name="大きな画像のJob作成を許可"
+                         AutomationProperties.HelpText="無効時は確認が必要な大きな画像を追加せず、許可後に失敗分だけ再試行できます。"/>
             </StackPanel>
           </Border>
 
           <Grid Grid.Row="2" Margin="12,10">
-            <TextBlock x:Name="BatchEnhancementEmptyText" Text="No selected images to review." Foreground="{StaticResource TextTertiary}" FontSize="13"
+             <TextBlock x:Name="BatchEnhancementEmptyText" Text="確認する画像がありません。" Foreground="{StaticResource TextTertiary}" FontSize="13"
                        HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
             <ListBox x:Name="BatchEnhancementItemsList" Background="Transparent" BorderThickness="0" Padding="0"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"
-                     AutomationProperties.Name="Selected images enhancement review list">
+                     AutomationProperties.Name="Batch Enhanceの対象一覧">
               <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
               <ListBox.ItemContainerStyle>
                 <Style TargetType="ListBoxItem">
@@ -1579,10 +1579,28 @@
                       <StackPanel>
                         <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource TextPrimary}" FontSize="12.5" FontWeight="SemiBold"
                                    TextTrimming="CharacterEllipsis" ToolTip="{Binding SourcePath}"/>
-                        <TextBlock Text="{Binding DetailText}" Foreground="{StaticResource TextTertiary}" FontSize="10.8"
-                                   TextTrimming="CharacterEllipsis" Margin="0,3,10,0"/>
+                         <TextBlock Text="{Binding DetailText}" Foreground="{StaticResource TextTertiary}" FontSize="10.8"
+                                    TextTrimming="CharacterEllipsis" Margin="0,3,10,0"
+                                    Visibility="{Binding ShowDetailText, Converter={StaticResource BoolToVis}}"/>
                       </StackPanel>
-                      <TextBlock Grid.Column="1" Text="{Binding StatusLabel}" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                       <TextBlock Grid.Column="1" Text="{Binding StatusLabel}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center">
+                         <TextBlock.Style>
+                           <Style TargetType="TextBlock">
+                             <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+                             <Style.Triggers>
+                               <DataTrigger Binding="{Binding State}" Value="Checking"><Setter Property="Foreground" Value="{StaticResource TextTertiary}"/></DataTrigger>
+                               <DataTrigger Binding="{Binding State}" Value="Ready"><Setter Property="Foreground" Value="{StaticResource Success}"/></DataTrigger>
+                               <DataTrigger Binding="{Binding State}" Value="Skipped"><Setter Property="Foreground" Value="{StaticResource TextTertiary}"/></DataTrigger>
+                               <DataTrigger Binding="{Binding State}" Value="Submitting"><Setter Property="Foreground" Value="{StaticResource AccentLight}"/></DataTrigger>
+                               <DataTrigger Binding="{Binding State}" Value="Queued"><Setter Property="Foreground" Value="{StaticResource Success}"/></DataTrigger>
+                               <DataTrigger Binding="{Binding State}" Value="SavedForDelivery"><Setter Property="Foreground" Value="{StaticResource Warning}"/></DataTrigger>
+                               <DataTrigger Binding="{Binding State}" Value="Failed"><Setter Property="Foreground" Value="{StaticResource DangerText}"/></DataTrigger>
+                               <DataTrigger Binding="{Binding State}" Value="OutcomeUnknown"><Setter Property="Foreground" Value="{StaticResource Warning}"/></DataTrigger>
+                               <DataTrigger Binding="{Binding State}" Value="Stopped"><Setter Property="Foreground" Value="{StaticResource TextTertiary}"/></DataTrigger>
+                             </Style.Triggers>
+                           </Style>
+                         </TextBlock.Style>
+                       </TextBlock>
                     </Grid>
                   </Border>
                 </DataTemplate>
@@ -1591,24 +1609,24 @@
           </Grid>
 
           <Border Grid.Row="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,0,0" Padding="14,0">
-            <TextBlock x:Name="BatchEnhancementStatusText" Text="Review only. No enhancement jobs have been created."
+             <TextBlock x:Name="BatchEnhancementStatusText" Text="まだJobsへ追加していません"
                        Foreground="{StaticResource TextTertiary}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                       AutomationProperties.Name="Batch enhancement status" AutomationProperties.LiveSetting="Polite"/>
+                       AutomationProperties.Name="Batch Enhanceの状態" AutomationProperties.LiveSetting="Polite"/>
           </Border>
 
           <DockPanel Grid.Row="4" Margin="12,9" LastChildFill="False">
-            <Button x:Name="BatchEnhancementCancelButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Close"
+             <Button x:Name="BatchEnhancementCancelButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="閉じる"
                     Click="CancelBatchEnhancement_Click" Height="32" MinWidth="82" Margin="7,0,0,0"
-                    AutomationProperties.Name="Close or stop batch enhancement"/>
-            <Button x:Name="BatchEnhancementStartButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Enhance selected"
+                     AutomationProperties.Name="Batch Enhanceを閉じる、または未送信分を停止"/>
+             <Button x:Name="BatchEnhancementStartButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Jobsへ追加"
                     Click="StartBatchEnhancement_Click" Height="32" MinWidth="132" Margin="7,0,0,0"
-                    AutomationProperties.Name="Start enhancement for eligible selected images"/>
-            <Button x:Name="BatchEnhancementRetryFailedButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Retry failed"
+                     AutomationProperties.Name="対象画像をJobsへ追加"/>
+             <Button x:Name="BatchEnhancementRetryFailedButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="失敗を再試行"
                     Click="RetryFailedBatchEnhancement_Click" Height="32" MinWidth="108" Margin="7,0,0,0" Visibility="Collapsed"
-                    AutomationProperties.Name="Retry failed batch enhancement sources"/>
-            <Button x:Name="BatchEnhancementViewJobsButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="View active jobs"
+                     AutomationProperties.Name="失敗した画像を再試行"/>
+             <Button x:Name="BatchEnhancementViewJobsButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Jobsを見る"
                     Click="ViewBatchEnhancementJobs_Click" Height="32" MinWidth="112" Visibility="Collapsed"
-                    AutomationProperties.Name="View newly created enhancement jobs"/>
+                     AutomationProperties.Name="追加したJobをJobsで確認"/>
           </DockPanel>
         </Grid>
       </Border>
