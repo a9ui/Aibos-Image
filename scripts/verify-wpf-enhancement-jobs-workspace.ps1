@@ -131,9 +131,11 @@ try {
             "100,500,1000")
         ($null -ne $jobsSqliteContract.jobsWorkspaceSurface.enhancement_jobs.requiredColumns.updated_at)
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.activeRows.Contains(
-            "render progress as indeterminate"))
+            "render a determinate value"))
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.durableFieldMeaning.Contains(
-            "not a measured percent-complete value"))
+            "completed adapter execution stages"))
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.terminalRows.Contains(
+            "only succeeded and deleted rows render 100"))
         ($jobsSqliteContract.jobsWorkspaceSurface.bulkScope.Contains(
             "display limits never redefine"))
     )
