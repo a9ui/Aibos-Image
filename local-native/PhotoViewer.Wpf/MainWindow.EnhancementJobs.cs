@@ -11598,14 +11598,13 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : !string.IsNullOrWhiteSpace(I2iInstructionSummary)
             ? $"{I2iTargetDisplayLabel}: {I2iInstructionSummary}"
             : $"{I2iTargetDisplayLabel}: verified public instruction is unavailable.";
-    private string ProgressPercentText =>
-        $"{Progress.ToString("0", CultureInfo.InvariantCulture)}%";
+    public bool IsProgressIndeterminate => Status is "queued" or "running";
     private string PersistedStatusLabel => CancelRequested && Status == "running"
-        ? $"中止処理中  ·  Running {ProgressPercentText}"
+        ? "中止処理中  ·  Canceling"
         : Status switch
         {
-            "queued" => $"待ち順 {QueuePosition ?? 0}  ·  Queued {ProgressPercentText}",
-            "running" => $"実行中  ·  Running {ProgressPercentText}",
+            "queued" => $"待ち順 {QueuePosition ?? 0}  ·  Queued",
+            "running" => "実行中  ·  Running",
             "succeeded" => "Completed",
             "failed" => "Failed",
             "canceled" => "Canceled",
@@ -11828,6 +11827,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             || queueMutationScopeChanged)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
+            if (statusChanged)
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsProgressIndeterminate)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCancel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRetry)));

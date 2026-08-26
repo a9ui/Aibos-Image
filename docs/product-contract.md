@@ -231,6 +231,10 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   a partial reorder or worker wake.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
   ComfyUI, or GPU side effect.
+- The durable `progress` field is a companion-owned internal milestone, not a
+  measured percent complete, remaining-work estimate, or ETA. Jobs renders
+  queued and running rows as indeterminate and never labels that field as a
+  percentage. Terminal status is the completion authority.
 - If passive health is unavailable because the default authenticated Companion
   is not running, the explicit Connect and Resume control may start the exact
   WPF-owned child, prove identity, perform authenticated recovery, and reread
