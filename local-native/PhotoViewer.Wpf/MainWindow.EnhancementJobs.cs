@@ -3118,19 +3118,19 @@ public partial class MainWindow
         AutomationProperties.SetName(
             EnhancementJobsPauseResumeButton,
             connectToResume
-                ? "Connect local AI service and resume enhancement queue"
+                ? "ローカルAIサービスへ接続して処理待ち列を再開"
                 : resume
-                    ? "Resume enhancement queue"
-                    : "Pause enhancement queue");
+                    ? "AI処理待ち列を再開"
+                    : "AI処理待ち列を一時停止");
         EnhancementJobsPauseResumeButton.ToolTip = _enhancementWorkspaceQueuePaused.HasValue
             ? resume
                 ? _enhancementWorkspaceQueueRecoveryRequired
-                    ? "停止したqueue pumpを復旧し、待機順を保ったまま処理を再開します"
+                    ? "停止した処理役を復旧し、待機順を保ったまま処理を再開します"
                     : "待機順を保ったままキュー処理を再開します"
                 : "処理中の1件は完了させ、次の待機ジョブから止めます"
             : connectToResume
                 ? "明示操作としてローカルAIサービスを開始し、状態を確認して必要ならキューを再開します"
-                : "キュー停止に対応したローカルcompanionが必要です";
+                : "キュー停止に対応したローカルAIサービスが必要です";
     }
 
     private void ApplyEnhancementWorkspaceHighlights(IReadOnlyList<EnhancementWorkspaceJobView> jobs)
@@ -10292,7 +10292,7 @@ public partial class MainWindow
                 AutomationProperties.GetName(EnhancementJobsLastJobButton))
             && string.Equals(
                 AutomationProperties.GetName(EnhancementJobsVideoFilter),
-                "Show video generation jobs",
+                "動画化のAI処理だけを表示",
                 StringComparison.Ordinal);
 
     public bool ActivateEnhancementJobsScrollTopForSmoke()

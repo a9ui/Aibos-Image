@@ -467,7 +467,7 @@
             <Path Data="M12,5 v14 M5,12 h14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" Stretch="Uniform" Width="17" Height="17"/>
           </Button>
           <Button x:Name="OpenEnhancementJobsButton" Style="{StaticResource GhostButton}" Height="32" MinWidth="70" Padding="9,0" Margin="4,0,4,0"
-                  Click="OpenEnhancementJobs_Click" ToolTip="Open AI enhancement jobs" AutomationProperties.Name="Open AI enhancement jobs"
+                  Click="OpenEnhancementJobs_Click" ToolTip="AI処理履歴を開く" AutomationProperties.Name="AI処理履歴を開く"
                   WindowChrome.IsHitTestVisibleInChrome="True">
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="{DynamicResource UiJobs}"/>
@@ -1617,8 +1617,8 @@
     <!-- AI Enhancement jobs: passive until explicitly opened; polling stops when hidden. -->
     <Grid x:Name="EnhancementJobsDialog" Grid.RowSpan="3" Panel.ZIndex="520" Visibility="Collapsed" Background="{DynamicResource OverlayStrongBrush}"
           MouseLeftButtonDown="EnhancementJobsBackdrop_MouseLeftButtonDown"
-          AutomationProperties.Name="AI enhancement jobs workspace"
-          AutomationProperties.HelpText="Review enhancement jobs. Escape or a backdrop click closes this workspace.">
+          AutomationProperties.Name="AI処理履歴の画面"
+          AutomationProperties.HelpText="AI処理履歴を確認します。Escキーまたは背景のクリックで閉じます。">
       <Border x:Name="EnhancementJobsDialogSurface" MaxWidth="1120" MaxHeight="1040" Margin="32,10" CornerRadius="6"
               Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
               HorizontalAlignment="Stretch" VerticalAlignment="Stretch" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
@@ -1626,7 +1626,7 @@
           <Grid.RowDefinitions><RowDefinition Height="54"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
           <DockPanel Grid.Row="0" Margin="16,0,10,0" LastChildFill="True">
             <Button x:Name="EnhancementJobsCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseEnhancementJobs_Click"
-                    ToolTip="Close jobs workspace" AutomationProperties.Name="Close AI enhancement jobs"
+                    ToolTip="AI処理履歴を閉じる" AutomationProperties.Name="AI処理履歴を閉じる"
                     WindowChrome.IsHitTestVisibleInChrome="True">
               <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
             </Button>
@@ -1670,31 +1670,31 @@
               <StackPanel x:Name="EnhancementJobsQueuedBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
                 <Button x:Name="EnhancementJobsClearQueuedButton" Style="{StaticResource DangerButton}" Content="待機中をすべて消す"
                         Click="CancelAllQueuedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="126" Margin="0,0,6,0"
-                        AutomationProperties.Name="Cancel all queued enhancement jobs"
+                        AutomationProperties.Name="待機中のAI処理をすべて中止"
                         ToolTip="実行中のジョブは変えず、待機中だけをキャンセルします"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
               </StackPanel>
               <StackPanel x:Name="EnhancementJobsFailedBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
                 <Button x:Name="EnhancementJobsRetryFailedButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
                         Click="RetryAllFailedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="92" Margin="0,0,6,0"
-                        AutomationProperties.Name="Retry all failed enhancement jobs with saved settings"
+                        AutomationProperties.Name="失敗したAI処理を保存済み設定ですべて再試行"
                         ToolTip="再試行できる失敗Jobを、それぞれの保存済みPrompt・設定で待機列へ追加します"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
                 <Button x:Name="EnhancementJobsClearFailedButton" Style="{StaticResource DangerButton}" Content="失敗を全部消す"
                         Click="ClearAllFailedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="108" Margin="0,0,6,0"
-                        AutomationProperties.Name="Remove all failed enhancement jobs"
+                        AutomationProperties.Name="失敗したAI処理履歴をすべて削除"
                         ToolTip="削除可能な失敗履歴だけを消します。保護対象、元画像、出力ファイルは変更しません"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
               </StackPanel>
               <StackPanel x:Name="EnhancementJobsCanceledBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
                 <Button x:Name="EnhancementJobsRetryCanceledButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
                         Click="RetryAllCanceledEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="92" Margin="0,0,6,0"
-                        AutomationProperties.Name="Retry all canceled enhancement jobs with saved settings"
+                        AutomationProperties.Name="中止したAI処理を保存済み設定ですべて再試行"
                         ToolTip="再試行できるキャンセル済みJobを、それぞれの保存済みPrompt・設定で待機列へ追加します"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
                 <Button x:Name="EnhancementJobsClearCanceledButton" Style="{StaticResource DangerButton}" Content="キャンセルを全部消す"
                         Click="ClearAllCanceledEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="132" Margin="0,0,6,0"
-                        AutomationProperties.Name="Remove all canceled enhancement jobs"
+                        AutomationProperties.Name="中止したAI処理履歴をすべて削除"
                         ToolTip="削除可能なキャンセル履歴だけを消します。保護対象、元画像、出力ファイルは変更しません"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
               </StackPanel>
@@ -1728,7 +1728,7 @@
                   <CheckBox x:Name="EnhancementJobsUpscaleFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="高画質化" Tag="upscale" Click="EnhancementJobsOperationFilter_Click" ToolTip="高画質化Jobだけを表示"/>
                   <CheckBox x:Name="EnhancementJobsPhotorealFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="実写化" Tag="photoreal" Click="EnhancementJobsOperationFilter_Click" ToolTip="実写化Jobだけを表示"/>
                   <CheckBox x:Name="EnhancementJobsVideoFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="動画化" Tag="video" Click="EnhancementJobsOperationFilter_Click" ToolTip="動画化Jobだけを表示"
-                            AutomationProperties.Name="Show video generation jobs"/>
+                            AutomationProperties.Name="動画化のAI処理だけを表示"/>
                   <CheckBox x:Name="EnhancementJobsI2iFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="AI編集" Tag="i2i" Click="EnhancementJobsOperationFilter_Click" ToolTip="AI編集Jobだけを表示"/>
                 </UniformGrid>
                 <TextBlock Text="{DynamicResource UiJobsVideoKindTitle}"
@@ -1957,7 +1957,7 @@
 
           <Border Grid.Row="2" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,0,0" Padding="12,0">
             <TextBlock x:Name="EnhancementJobsStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                       AutomationProperties.Name="AI enhancement jobs status" AutomationProperties.LiveSetting="Polite"/>
+                       AutomationProperties.Name="AI処理履歴の状態" AutomationProperties.LiveSetting="Polite"/>
           </Border>
         </Grid>
       </Border>

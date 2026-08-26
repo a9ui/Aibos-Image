@@ -22184,7 +22184,7 @@ public partial class MainWindow : Window
         UpdateModalDisplayedDeletePresentation();
         ModalEnhanceButton.ToolTip = UiLanguageResources.Format("UiEnhanceCurrentFormat", BindingText(ViewerKeyAction.EnhanceCurrentImage));
         ModalPhotorealButton.ToolTip = UiLanguageResources.Format("UiPhotorealizeCurrentFormat", BindingText(ViewerKeyAction.PhotorealizeCurrentImage));
-        OpenEnhancementJobsButton.ToolTip = $"Open AI enhancement jobs ({BindingText(ViewerKeyAction.OpenEnhancementJobs)})";
+        OpenEnhancementJobsButton.ToolTip = $"AI処理履歴を開く ({BindingText(ViewerKeyAction.OpenEnhancementJobs)})";
         ModalVideoGenerateButton.ToolTip = $"表示中の画像から動画化ボードを開く ({BindingText(ViewerKeyAction.OpenVideoGeneration)})";
         ModalI2iEditButton.ToolTip = $"表示中のOriginalまたは実写化版を実写編集 ({BindingText(ViewerKeyAction.OpenI2iEdit)})";
         OpenEnhancementJobsShortcutHintText.Text = $"[{BindingText(ViewerKeyAction.OpenEnhancementJobs)}]";
