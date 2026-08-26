@@ -12,6 +12,8 @@ Aibos Image is a local-first Windows application, not a public service.
   fallback.
 - The optional Enhancement companion stays on `127.0.0.1`. Do not expose it
   through a LAN listener, proxy, tunnel, hosted deployment, or the Internet.
+- Select an external Companion root explicitly. Public launchers must not pick
+  a private runtime source by scanning or ordering Git worktrees.
 - Loopback is not identity. Authenticate the companion before sending sensitive
   data, authenticate protected requests and responses, prevent replay, and fail
   closed if ownership cannot be proved.

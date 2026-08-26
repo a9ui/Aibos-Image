@@ -167,6 +167,10 @@ try {
         $wpfLauncher -match '(?i)build-server\s+shutdown') {
         Add-Finding 'wpf-build-residency' 'start_wpf.bat' 1 'Required launcher builds must avoid persistent shared build servers without shutting down unrelated servers.'
     }
+    if ($wpfLauncher -match '(?i)worktree\s+list' -or
+        $wpfLauncher -match '(?i):(?:resolve|try)_companion_root') {
+        Add-Finding 'companion-root-authority' 'start_wpf.bat' 1 'The public launcher must not guess a private Companion root from Git worktree order.'
+    }
 
     if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'LICENSE') -PathType Leaf)) {
         $warnings.Add([pscustomobject]@{
