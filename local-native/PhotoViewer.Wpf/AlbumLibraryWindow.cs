@@ -29,10 +29,12 @@ internal sealed class AlbumLibraryWindow : Window
     private readonly TextBox _name = new() { MinWidth = 220, MaxLength = AlbumStore.MaxNameLength };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _albumSummary = new();
-    private readonly TextBlock _memberHeading = new() { Text = "Album members" };
-    private readonly TextBlock _memberSummary = new() { Text = "Choose an Album to inspect its members." };
-    private readonly TextBlock _albumEmpty = new() { Text = "No Albums yet\nCreate one above, then add selected images." };
-    private readonly TextBlock _memberEmpty = new() { Text = "Choose an Album to inspect its members." };
+    private readonly TextBlock _headerSubtitle = new();
+    private readonly TextBlock _statusLabel = new() { Text = "ALBUM STORE" };
+    private readonly TextBlock _memberHeading = new() { Text = "Members" };
+    private readonly TextBlock _memberSummary = new() { Text = "Albumを選ぶと画像を確認できます。" };
+    private readonly TextBlock _albumEmpty = new() { Text = "Albumはまだありません。\n名前を入力して作成してください。" };
+    private readonly TextBlock _memberEmpty = new() { Text = "Albumを選ぶと画像を確認できます。" };
     private AlbumDocumentSnapshot? _document;
     private bool _isBusy;
     private bool _closed;
@@ -66,7 +68,7 @@ internal sealed class AlbumLibraryWindow : Window
         _catalogPaths = catalogPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
         _activateAlbum = activateAlbum;
         _libraryChanged = libraryChanged;
-        Title = "Albums - Aibos";
+        Title = "Albums · Aibos";
         Width = 980;
         Height = 700;
         MinWidth = 780;
@@ -109,9 +111,9 @@ internal sealed class AlbumLibraryWindow : Window
         ConfigureList(_albumList, BuildAlbumItemTemplate());
         ConfigureList(_memberList, BuildMemberItemTemplate());
         AutomationProperties.SetName(_albumList, "Albums");
-        AutomationProperties.SetHelpText(_albumList, "Shared Albums ordered by pin and recent use");
-        AutomationProperties.SetName(_memberList, "Album members");
-        AutomationProperties.SetHelpText(_memberList, "Members of the selected Album and their current availability");
+        AutomationProperties.SetHelpText(_albumList, "ピン留めと最近使った順に並ぶAlbum一覧");
+        AutomationProperties.SetName(_memberList, "Albumの画像");
+        AutomationProperties.SetHelpText(_memberList, "選択中Albumの画像と現在の利用状態");
         ConfigureEmptyState(_albumEmpty);
         ConfigureEmptyState(_memberEmpty);
         _albumEmpty.Visibility = Visibility.Collapsed;
@@ -174,15 +176,12 @@ internal sealed class AlbumLibraryWindow : Window
         var titleStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         var title = new TextBlock { Text = "Albums", FontSize = 18, FontWeight = FontWeights.SemiBold };
         title.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
-        var subtitle = new TextBlock
-        {
-            Text = "Shared by Browser and WPF - one library, safe operations",
-            FontSize = 11,
-            Margin = new Thickness(0, 2, 0, 0),
-        };
-        subtitle.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
+        _headerSubtitle.Text = "画像をまとめ、Galleryへすぐ呼び出せます";
+        _headerSubtitle.FontSize = 11;
+        _headerSubtitle.Margin = new Thickness(0, 2, 0, 0);
+        _headerSubtitle.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
         titleStack.Children.Add(title);
-        titleStack.Children.Add(subtitle);
+        titleStack.Children.Add(_headerSubtitle);
         titleStack.MouseLeftButtonDown += DragHeader_MouseLeftButtonDown;
         Grid.SetColumn(titleStack, 0);
         headerGrid.Children.Add(titleStack);
@@ -202,12 +201,12 @@ internal sealed class AlbumLibraryWindow : Window
         var close = new Button
         {
             Content = closeGlyph,
-            ToolTip = "Close Album library",
+            ToolTip = "閉じる",
             Margin = new Thickness(8, 0, 0, 0),
         };
         close.SetResourceReference(FrameworkElement.StyleProperty, "CloseButton");
-        AutomationProperties.SetName(close, "Close Album library");
-        AutomationProperties.SetHelpText(close, "Close the Album library without changing shared state");
+        AutomationProperties.SetName(close, "Albumsを閉じる");
+        AutomationProperties.SetHelpText(close, "共有状態を変更せずAlbumsを閉じます");
         close.Click += (_, _) => Close();
         headerActions.Children.Add(close);
         Grid.SetColumn(headerActions, 1);
@@ -255,7 +254,7 @@ internal sealed class AlbumLibraryWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var inputStack = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
-        var label = SectionLabel("ALBUM NAME", "Create a new shared Album or rename the selected one.");
+        var label = SectionLabel("ALBUM NAME", "新しいAlbumの作成、または選択中Albumの名前変更");
         inputStack.Children.Add(label);
         _name.Height = 32;
         _name.Padding = new Thickness(10, 0, 10, 0);
@@ -265,8 +264,8 @@ internal sealed class AlbumLibraryWindow : Window
         _name.FontSize = 13;
         _name.SetResourceReference(Control.ForegroundProperty, "TextPrimary");
         _name.SetResourceReference(TextBox.CaretBrushProperty, "AccentLight");
-        AutomationProperties.SetName(_name, "Album name");
-        AutomationProperties.SetHelpText(_name, "Enter a name to create an Album or rename the selected Album");
+        AutomationProperties.SetName(_name, "Album名");
+        AutomationProperties.SetHelpText(_name, "新しいAlbum名、または選択中Albumの変更後の名前を入力します");
         var inputBorder = new Border
         {
             Height = 32,
@@ -278,14 +277,14 @@ internal sealed class AlbumLibraryWindow : Window
         inputStack.Children.Add(inputBorder);
         grid.Children.Add(inputStack);
 
-        Button create = ActionButton("Create", "Create a shared Album", async (_, _) => await CreateAlbumAsync(), "PrimaryButton");
+        Button create = ActionButton("作成", "入力した名前でAlbumを作成します", async (_, _) => await CreateAlbumAsync(), "PrimaryButton");
         create.Height = 32;
         create.MinWidth = 90;
         create.Margin = new Thickness(0, 20, 8, 0);
         Grid.SetColumn(create, 1);
         grid.Children.Add(create);
 
-        Button refresh = ActionButton("Refresh", "Reload the shared Album library", async (_, _) => await ReloadAsync());
+        Button refresh = ActionButton("更新", "Albumsの最新状態を読み込みます", async (_, _) => await ReloadAsync());
         refresh.Height = 32;
         refresh.MinWidth = 82;
         refresh.Margin = new Thickness(0, 20, 0, 0);
@@ -305,7 +304,7 @@ internal sealed class AlbumLibraryWindow : Window
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        _albumSummary.Text = "Loading the shared library…";
+        _albumSummary.Text = "Albumsを読み込み中…";
         var sectionHeader = SectionHeading("Library", _albumSummary);
         layout.Children.Add(sectionHeader);
 
@@ -315,22 +314,22 @@ internal sealed class AlbumLibraryWindow : Window
 
         var actions = new StackPanel { Margin = new Thickness(0, 13, 0, 0) };
         var primary = new WrapPanel();
-        Button open = ActionButton("Open in gallery", "Open the selected Album in the gallery", async (_, _) => await OpenAlbumAsync(), "PrimaryButton");
+        Button open = ActionButton("Galleryで開く", "選択中のAlbumをGalleryで開きます", async (_, _) => await OpenAlbumAsync(), "PrimaryButton");
         open.Height = 32;
         open.MinWidth = 125;
         primary.Children.Add(open);
-        primary.Children.Add(ActionButton("Add selection", "Add supported selected images to this Album", async (_, _) => await AddSelectionAsync()));
+        primary.Children.Add(ActionButton("選択画像を追加", "Galleryで選択中の対応画像をこのAlbumへ追加します", async (_, _) => await AddSelectionAsync()));
         actions.Children.Add(primary);
 
         var management = new WrapPanel { Margin = new Thickness(0, 7, 0, 0) };
-        management.Children.Add(ActionButton("Rename", "Rename the selected Album", async (_, _) => await RenameAlbumAsync()));
-        management.Children.Add(ActionButton("Pin / unpin", "Pin or unpin the selected Album", async (_, _) => await TogglePinAsync()));
-        management.Children.Add(ActionButton("Catalog", "Return the gallery to the current catalog", async (_, _) =>
+        management.Children.Add(ActionButton("名前を変更", "選択中Albumの名前を変更します", async (_, _) => await RenameAlbumAsync()));
+        management.Children.Add(ActionButton("ピン留め / 解除", "選択中Albumのピン留めを切り替えます", async (_, _) => await TogglePinAsync()));
+        management.Children.Add(ActionButton("Catalogへ戻る", "Galleryを現在のCatalogへ戻します", async (_, _) =>
         {
             await _activateAlbum(null);
-            _status.Text = "Catalog source restored.";
+            _status.Text = "Catalogへ戻りました。";
         }));
-        management.Children.Add(ActionButton("Delete Album", "Delete the Album without recycling source images", async (_, _) => await DeleteAlbumAsync(), "DangerButton"));
+        management.Children.Add(ActionButton("Albumを削除", "Albumだけを削除します。元画像は削除されません。", async (_, _) => await DeleteAlbumAsync(), "DangerButton"));
         actions.Children.Add(management);
         Grid.SetRow(actions, 3);
         layout.Children.Add(actions);
@@ -351,8 +350,8 @@ internal sealed class AlbumLibraryWindow : Window
         layout.Children.Add(listSurface);
 
         var actions = new WrapPanel { Margin = new Thickness(0, 13, 0, 0) };
-        actions.Children.Add(ActionButton("Use as cover", "Use the selected Album member as the cover", async (_, _) => await SetCoverAsync()));
-        actions.Children.Add(ActionButton("Remove membership", "Remove selected memberships without recycling source images", async (_, _) => await RemoveMembersAsync(), "DangerButton"));
+        actions.Children.Add(ActionButton("Coverに設定", "選択した画像をAlbumのCoverに設定します", async (_, _) => await SetCoverAsync()));
+        actions.Children.Add(ActionButton("Albumから外す", "選択した画像をAlbumから外します。元画像は削除されません。", async (_, _) => await RemoveMembersAsync(), "DangerButton"));
         Grid.SetRow(actions, 3);
         layout.Children.Add(actions);
         return PanelCard(layout, new Thickness(16));
@@ -371,10 +370,13 @@ internal sealed class AlbumLibraryWindow : Window
         var dot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(999), Margin = new Thickness(0, 0, 8, 0) };
         dot.SetResourceReference(Border.BackgroundProperty, "AccentLight");
         statusGrid.Children.Add(dot);
-        var label = new TextBlock { Text = "SHARED STORE", FontSize = 9.5, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
-        label.SetResourceReference(TextBlock.ForegroundProperty, "TextTertiary");
-        Grid.SetColumn(label, 1);
-        statusGrid.Children.Add(label);
+        _statusLabel.FontSize = 9.5;
+        _statusLabel.FontWeight = FontWeights.SemiBold;
+        _statusLabel.Margin = new Thickness(0, 0, 12, 0);
+        _statusLabel.VerticalAlignment = VerticalAlignment.Center;
+        _statusLabel.SetResourceReference(TextBlock.ForegroundProperty, "TextTertiary");
+        Grid.SetColumn(_statusLabel, 1);
+        statusGrid.Children.Add(_statusLabel);
         Grid.SetColumn(_status, 2);
         statusGrid.Children.Add(_status);
 
@@ -730,7 +732,7 @@ internal sealed class AlbumLibraryWindow : Window
         if (_closed || _isBusy)
         {
             if (!_closed)
-                _status.Text = "An Album operation is already in progress.";
+                _status.Text = "別のAlbum操作を処理中です。";
             return false;
         }
 
@@ -760,7 +762,7 @@ internal sealed class AlbumLibraryWindow : Window
 
     private async Task<bool> ReloadAsync(string? selectAlbumId = null, string? message = null)
     {
-        if (!TryBeginBusy("Loading shared Albums…"))
+        if (!TryBeginBusy("Albumsを読み込み中…"))
             return false;
         int operationGeneration = Volatile.Read(ref _operationGeneration);
         try
@@ -770,7 +772,7 @@ internal sealed class AlbumLibraryWindow : Window
         catch (Exception ex)
         {
             if (!_closed)
-                _status.Text = $"Album reload failed without changing shared state: {ex.Message}";
+                _status.Text = $"共有状態を変更せず停止しました：{ex.Message}";
             return false;
         }
         finally
@@ -799,14 +801,14 @@ internal sealed class AlbumLibraryWindow : Window
             _document = null;
             _albumList.ItemsSource = null;
             _memberList.ItemsSource = null;
-            _albumSummary.Text = "Protected shared state";
-            _albumEmpty.Text = "Album state is protected\nNo shared data was changed.";
+            _albumSummary.Text = "保護された共有状態";
+            _albumEmpty.Text = "Albumデータは保護されています。\n共有状態は変更していません。";
             _albumEmpty.Visibility = Visibility.Visible;
-            _memberHeading.Text = "Album members";
-            _memberSummary.Text = "Members are unavailable while shared state is protected.";
-            _memberEmpty.Text = "Members are unavailable.";
+            _memberHeading.Text = "Members";
+            _memberSummary.Text = "共有状態の保護中は画像を表示できません。";
+            _memberEmpty.Text = "画像を表示できません。";
             _memberEmpty.Visibility = Visibility.Visible;
-            _status.Text = $"Shared Album state is protected and was not changed. {read.Error}";
+            _status.Text = $"Albumデータを保護しました。変更はありません。{read.Error}";
             return true;
         }
 
@@ -821,8 +823,8 @@ internal sealed class AlbumLibraryWindow : Window
             .Select(static album => new AlbumListItem(album))
             .ToList();
         _albumList.ItemsSource = items;
-        _albumSummary.Text = $"{items.Count:N0} Album(s)  ·  shared revision {read.Document.Revision:N0}";
-        _albumEmpty.Text = "No Albums yet\nCreate one above, then add selected images.";
+        _albumSummary.Text = $"{items.Count:N0} Albums  ·  Rev. {read.Document.Revision:N0}";
+        _albumEmpty.Text = "Albumはまだありません。\n名前を入力して作成してください。";
         _albumEmpty.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         _suppressMemberRefresh = true;
         try
@@ -833,7 +835,7 @@ internal sealed class AlbumLibraryWindow : Window
         {
             _suppressMemberRefresh = false;
         }
-        _status.Text = message ?? $"Shared revision {read.Document.Revision}. {_selectedPaths.Count:N0} current selection(s) can be added.";
+        _status.Text = message ?? $"Shared Rev. {read.Document.Revision:N0} · 選択中 {_selectedPaths.Count:N0}枚を追加できます";
         await RefreshMembersAsync();
         return true;
     }
@@ -850,9 +852,9 @@ internal sealed class AlbumLibraryWindow : Window
             try
             {
                 _memberList.ItemsSource = null;
-                _memberHeading.Text = "Album members";
-                _memberSummary.Text = "Choose an Album to inspect its members.";
-                _memberEmpty.Text = "Choose an Album to inspect its members.";
+                _memberHeading.Text = "Members";
+                _memberSummary.Text = "Albumを選ぶと画像を確認できます。";
+                _memberEmpty.Text = "Albumを選ぶと画像を確認できます。";
                 _memberEmpty.Visibility = Visibility.Visible;
                 return true;
             }
@@ -905,8 +907,8 @@ internal sealed class AlbumLibraryWindow : Window
             int current = items.Count(static item => item.Availability == "current");
             int missing = items.Count(static item => item.Availability == "missing");
             int outside = items.Count - current - missing;
-            _memberSummary.Text = $"{items.Count:N0} member(s)  ·  {current:N0} current  ·  {outside:N0} outside  ·  {missing:N0} missing";
-            _memberEmpty.Text = "This Album has no members yet.\nSelect images in the gallery, then use Add selection.";
+            _memberSummary.Text = $"{items.Count:N0}枚  ·  利用可 {current:N0}  ·  範囲外 {outside:N0}  ·  見つからない {missing:N0}";
+            _memberEmpty.Text = "このAlbumに画像はありません。\nGalleryで画像を選び、［選択画像を追加］を使ってください。";
             _memberEmpty.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             Interlocked.Increment(ref _memberAvailabilityApplyCount);
             return true;
@@ -919,7 +921,7 @@ internal sealed class AlbumLibraryWindow : Window
         catch (Exception ex)
         {
             if (!_closed && memberGeneration == Volatile.Read(ref _memberGeneration))
-                _status.Text = $"Album member availability could not be refreshed: {ex.Message}";
+                _status.Text = $"Album内の画像状態を更新できません：{ex.Message}";
             return false;
         }
         finally
@@ -957,7 +959,7 @@ internal sealed class AlbumLibraryWindow : Window
         Func<AlbumMutationResult, Task>? onSuccess = null,
         bool reconcileLibrary = true)
     {
-        if (!TryBeginBusy("Updating shared Albums…"))
+        if (!TryBeginBusy("Albumを更新中…"))
             return false;
         int operationGeneration = Volatile.Read(ref _operationGeneration);
         bool mutationCommitted = false;
@@ -975,8 +977,8 @@ internal sealed class AlbumLibraryWindow : Window
                 if (_closed || operationGeneration != Volatile.Read(ref _operationGeneration))
                     return true;
                 string failure = result.Status == AlbumMutationStatus.Conflict
-                    ? "The Album library changed in another process. Latest state was reloaded; retry the operation."
-                    : $"Album operation failed without overwriting shared state: {result.Error ?? result.Status.ToString()}.";
+                    ? "Albumsが別の場所で変更されました。最新状態を読み込みました。もう一度実行してください。"
+                    : $"共有状態を上書きせず停止しました：{result.Error ?? result.Status.ToString()}";
                 await ReloadCoreAsync(albumId, failure);
                 return true;
             }
@@ -995,8 +997,8 @@ internal sealed class AlbumLibraryWindow : Window
         {
             if (!_closed)
                 _status.Text = mutationCommitted
-                    ? $"The shared Album change succeeded, but the local view could not refresh: {ex.Message}"
-                    : $"Album operation failed without overwriting shared state: {ex.Message}";
+                    ? $"Albumの変更は完了しましたが、画面を更新できません：{ex.Message}"
+                    : $"共有状態を上書きせず停止しました：{ex.Message}";
             return true;
         }
         finally
@@ -1008,13 +1010,13 @@ internal sealed class AlbumLibraryWindow : Window
     private async Task<bool> CreateAlbumAsync()
     {
         string name = _name.Text.Trim();
-        if (name.Length == 0) { _status.Text = "Enter an Album name."; return false; }
+        if (name.Length == 0) { _status.Text = "Album名を入力してください。"; return false; }
         long? revision = _document?.Revision;
         string albumId = Guid.NewGuid().ToString("D");
         return await RunMutationAsync(
             () => AlbumStore.Create(_storePath, name, revision, albumId),
             albumId,
-            _ => $"Created Album {name}.");
+            _ => $"「{name}」を作成しました。");
     }
 
     private async Task<bool> RenameAlbumAsync()
@@ -1023,7 +1025,7 @@ internal sealed class AlbumLibraryWindow : Window
         if (album is null) return false;
         string name = _name.Text;
         long? revision = _document?.Revision;
-        return await RunMutationAsync(() => AlbumStore.Update(_storePath, album.Id, revision, name: name), album.Id, _ => "Album renamed.");
+        return await RunMutationAsync(() => AlbumStore.Update(_storePath, album.Id, revision, name: name), album.Id, _ => "Album名を変更しました。");
     }
 
     private async Task<bool> TogglePinAsync()
@@ -1034,7 +1036,7 @@ internal sealed class AlbumLibraryWindow : Window
         return await RunMutationAsync(
             () => AlbumStore.Update(_storePath, album.Id, revision, pinned: !album.Pinned),
             album.Id,
-            _ => album.Pinned ? "Album unpinned." : "Album pinned.");
+            _ => album.Pinned ? "ピン留めを解除しました。" : "Albumをピン留めしました。");
     }
 
     private async Task<bool> AddSelectionAsync()
@@ -1042,14 +1044,14 @@ internal sealed class AlbumLibraryWindow : Window
         AlbumEntry? album = SelectedAlbum;
         if (album is null || _selectedPaths.Count == 0)
         {
-            _status.Text = "Select images in the gallery before opening Albums.";
+            _status.Text = "Galleryで画像を選んでからAlbumsを開いてください。";
             return false;
         }
 
         SelectionAddPlan plan = BuildSelectionAddPlan(album, _selectedPaths);
         if (plan.Paths.Count == 0)
         {
-            _status.Text = $"Added 0 image(s); skipped {plan.SkippedCount:N0} unsupported or existing selection(s).";
+            _status.Text = $"追加 0件 · スキップ {plan.SkippedCount:N0}件";
             return false;
         }
 
@@ -1057,7 +1059,7 @@ internal sealed class AlbumLibraryWindow : Window
         return await RunMutationAsync(
             () => AlbumStore.AddMembers(_storePath, album.Id, plan.Paths, revision),
             album.Id,
-            _ => $"Added {plan.Paths.Count:N0} image(s); skipped {plan.SkippedCount:N0} unsupported or existing selection(s).");
+            _ => $"追加 {plan.Paths.Count:N0}件 · スキップ {plan.SkippedCount:N0}件");
     }
 
     private async Task<bool> RemoveMembersAsync()
@@ -1066,7 +1068,7 @@ internal sealed class AlbumLibraryWindow : Window
         var selected = _memberList.SelectedItems.OfType<AlbumMemberListItem>().ToList();
         if (album is null || selected.Count == 0)
         {
-            _status.Text = "Select Album members to remove. Source images will not be recycled.";
+            _status.Text = "Albumから外す画像を選んでください。";
             return false;
         }
         long? revision = _document?.Revision;
@@ -1074,29 +1076,29 @@ internal sealed class AlbumLibraryWindow : Window
         return await RunMutationAsync(
             () => AlbumStore.RemoveMembers(_storePath, album.Id, memberIds, null, revision),
             album.Id,
-            _ => $"Removed {selected.Count:N0} member(s) from the Album. Source images were not recycled.");
+            _ => $"Albumから{selected.Count:N0}件外しました。");
     }
 
     private async Task<bool> SetCoverAsync()
     {
         AlbumEntry? album = SelectedAlbum;
         AlbumMemberListItem? member = _memberList.SelectedItems.OfType<AlbumMemberListItem>().FirstOrDefault();
-        if (album is null || member is null) { _status.Text = "Select one member to use as the cover."; return false; }
+        if (album is null || member is null) { _status.Text = "Coverにする画像を1件選んでください。"; return false; }
         long? revision = _document?.Revision;
         return await RunMutationAsync(
             () => AlbumStore.Update(_storePath, album.Id, revision, coverMemberId: member.Member.Id, updateCover: true),
             album.Id,
-            _ => "Album cover updated.");
+            _ => "AlbumのCoverを更新しました。");
     }
 
     private async Task<bool> DeleteAlbumAsync()
     {
         AlbumEntry? album = SelectedAlbum;
         if (album is null) return false;
-        if (MessageBox.Show(this, $"Delete Album '{album.Name}'? Source images will not be recycled.", "Delete Album", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+        if (MessageBox.Show(this, $"「{album.Name}」を削除しますか？\n元画像は削除されません。", "Albumを削除", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
             return false;
         long? revision = _document?.Revision;
-        return await RunMutationAsync(() => AlbumStore.Delete(_storePath, album.Id, revision), null, _ => "Album deleted. Source images were not recycled.");
+        return await RunMutationAsync(() => AlbumStore.Delete(_storePath, album.Id, revision), null, _ => "Albumを削除しました。");
     }
 
     private async Task<bool> OpenAlbumAsync()
@@ -1109,7 +1111,7 @@ internal sealed class AlbumLibraryWindow : Window
             result =>
             {
                 AlbumEntry active = result.Document?.Albums.FirstOrDefault(candidate => candidate.Id == album.Id) ?? album;
-                return $"Opened {active.Name}. Existing members outside the current WPF catalog remain listed as unavailable; they were not dropped.";
+                return $"「{active.Name}」をGalleryで開きました。Catalog外の画像はAlbumに残ります。";
             },
             async result =>
             {
@@ -1182,6 +1184,15 @@ internal sealed class AlbumLibraryWindow : Window
         => _actionButtons.Count > 0 && _actionButtons.All(button => !string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(button)));
     internal bool ActionButtonsHaveFocusVisualForSmoke
         => _actionButtons.Count > 0 && _actionButtons.All(button => button.FocusVisualStyle is not null);
+    internal string HeaderSubtitleForSmoke => _headerSubtitle.Text;
+    internal string StatusLabelForSmoke => _statusLabel.Text;
+    internal IReadOnlyList<string> ActionLabelsForSmoke
+        => _actionButtons.Select(ActionButtonLabel).ToArray();
+    internal IReadOnlyDictionary<string, string> ActionHelpTextByLabelForSmoke
+        => _actionButtons.ToDictionary(
+            ActionButtonLabel,
+            AutomationProperties.GetHelpText,
+            StringComparer.Ordinal);
     internal int MemberAvailabilityStartedCountForSmoke => Volatile.Read(ref _memberAvailabilityStartedCount);
     internal int MemberAvailabilityCanceledCountForSmoke => Volatile.Read(ref _memberAvailabilityCanceledCount);
     internal int MemberAvailabilityMaxConcurrentCountForSmoke => Volatile.Read(ref _memberAvailabilityMaxConcurrentCount);
@@ -1191,6 +1202,11 @@ internal sealed class AlbumLibraryWindow : Window
     internal string? SelectedAlbumIdForSmoke => SelectedAlbum?.Id;
     internal string MemberHeadingForSmoke => _memberHeading.Text;
     internal int MemberItemCountForSmoke => (_memberList.ItemsSource as IEnumerable<AlbumMemberListItem>)?.Count() ?? 0;
+
+    private static string ActionButtonLabel(Button button)
+        => button.Content is TextBlock label
+            ? label.Text
+            : Convert.ToString(button.Content) ?? "";
 
     internal void ConfigureMemberAvailabilityDelayForSmoke(int milliseconds)
         => Volatile.Write(ref _memberAvailabilityDelayForSmokeMs, Math.Max(0, milliseconds));
@@ -1223,8 +1239,8 @@ internal sealed class AlbumLibraryWindow : Window
     private sealed record AlbumListItem(AlbumEntry Album)
     {
         public string Name => Album.Name;
-        public string Detail => $"{Album.Members.Count:N0} member(s)  ·  revision {Album.Revision:N0}";
-        public string ToolTip => $"Open {Album.Name} · {Album.Members.Count:N0} member(s)";
+        public string Detail => $"{Album.Members.Count:N0} images  ·  Rev. {Album.Revision:N0}";
+        public string ToolTip => $"{Album.Name} · {Album.Members.Count:N0} images";
         public Visibility PinnedVisibility => Album.Pinned ? Visibility.Visible : Visibility.Collapsed;
     }
 

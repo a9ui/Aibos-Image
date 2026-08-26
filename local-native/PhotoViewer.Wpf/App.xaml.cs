@@ -2805,6 +2805,53 @@ public partial class App : Application
             try
             {
                 await library.WaitForIdleForSmokeAsync();
+                string[] expectedActionLabels =
+                [
+                    "作成",
+                    "更新",
+                    "Galleryで開く",
+                    "選択画像を追加",
+                    "名前を変更",
+                    "ピン留め / 解除",
+                    "Catalogへ戻る",
+                    "Albumを削除",
+                    "Coverに設定",
+                    "Albumから外す",
+                ];
+                IReadOnlyDictionary<string, string> actionHelpText =
+                    library.ActionHelpTextByLabelForSmoke;
+                bool presentationContract = string.Equals(
+                        library.Title,
+                        "Albums · Aibos",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        library.HeaderSubtitleForSmoke,
+                        "画像をまとめ、Galleryへすぐ呼び出せます",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        library.StatusLabelForSmoke,
+                        "ALBUM STORE",
+                        StringComparison.Ordinal)
+                    && library.ActionLabelsForSmoke.SequenceEqual(expectedActionLabels)
+                    && !library.HeaderSubtitleForSmoke.Contains(
+                        "Browser",
+                        StringComparison.OrdinalIgnoreCase);
+                bool sourceSafetyPlacementContract =
+                    actionHelpText.TryGetValue("Albumを削除", out string? deleteHelp)
+                    && string.Equals(
+                        deleteHelp,
+                        "Albumだけを削除します。元画像は削除されません。",
+                        StringComparison.Ordinal)
+                    && actionHelpText.TryGetValue("Albumから外す", out string? removeHelp)
+                    && string.Equals(
+                        removeHelp,
+                        "選択した画像をAlbumから外します。元画像は削除されません。",
+                        StringComparison.Ordinal)
+                    && actionHelpText
+                        .Where(pair => pair.Key is not "Albumを削除" and not "Albumから外す")
+                        .All(pair => !pair.Value.Contains(
+                            "元画像は削除されません",
+                            StringComparison.Ordinal));
                 bool mixedSelected = library.SelectAlbumForSmoke("mixed-selection");
                 bool mixedAccepted = await library.AddSelectionForSmokeAsync();
                 AlbumReadResult mixedRead = AlbumStore.Read(albumPath);
@@ -2812,8 +2859,12 @@ public partial class App : Application
                 bool mixedFormatFiltered = mixedAccepted
                     && mixedAlbum?.Members.Any(member => string.Equals(member.ImagePath, currentPng, StringComparison.OrdinalIgnoreCase)) == true
                     && mixedAlbum.Members.All(member => !string.Equals(member.ImagePath, unsupportedBmp, StringComparison.OrdinalIgnoreCase));
-                bool addStatusCounts = library.StatusForSmoke.Contains("Added 1", StringComparison.OrdinalIgnoreCase)
-                    && library.StatusForSmoke.Contains("skipped 1", StringComparison.OrdinalIgnoreCase);
+                string addStatus = library.StatusForSmoke;
+                bool addStatusCounts = addStatus.Contains("追加 1件", StringComparison.Ordinal)
+                    && addStatus.Contains("スキップ 1件", StringComparison.Ordinal);
+                bool statusLanguageContract = addStatusCounts
+                    && !addStatus.Contains("Added", StringComparison.OrdinalIgnoreCase)
+                    && !addStatus.Contains("skipped", StringComparison.OrdinalIgnoreCase);
                 bool actionToolTips = library.ActionButtonsHaveToolTipsForSmoke;
                 bool actionAutomationHelpText = library.ActionButtonsHaveAutomationHelpTextForSmoke;
                 bool actionFocusVisuals = library.ActionButtonsHaveFocusVisualForSmoke;
@@ -2964,7 +3015,8 @@ public partial class App : Application
                     && !Directory.Exists(lockPath)
                     && !Directory.EnumerateFiles(smokeRoot, "*.tmp", SearchOption.TopDirectoryOnly).Any();
                 ok = mixedCreated.Ok && mixedSeeded.Ok && busyCreated.Ok && slowCreated.Ok && slowSeeded.Ok
-                    && mixedSelected && mixedFormatFiltered && addStatusCounts
+                    && presentationContract && sourceSafetyPlacementContract
+                    && mixedSelected && mixedFormatFiltered && addStatusCounts && statusLanguageContract
                     && availabilityCancellation && closeCancelsAvailability && openUsesLatestRevision
                     && busySelected && liveLockPreserved && dispatcherHeartbeat
                     && doubleSubmissionBlocked && busyRecovered && generationGuard
@@ -2974,9 +3026,12 @@ public partial class App : Application
                 result = new
                 {
                     ok,
+                    presentationContract,
+                    sourceSafetyPlacementContract,
                     mixedSelected,
                     mixedFormatFiltered,
                     addStatusCounts,
+                    statusLanguageContract,
                     availabilityCancellation,
                     memberAvailabilityCanceledCount = library.MemberAvailabilityCanceledCountForSmoke,
                     memberAvailabilityMaxConcurrent = library.MemberAvailabilityMaxConcurrentCountForSmoke,
