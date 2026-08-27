@@ -70,6 +70,7 @@ try {
         $result.moveOnly -ne $true -or
         $result.thumbnailsRetained -ne $true -or
         $result.modalMovedToPinnedNeighbor -ne $true -or
+        $result.modalReturnPreserved -ne $true -or
         $result.returnedToTop -ne $true -or
         $result.toolbarContract -ne $true -or
         $result.sourcesUnchanged -ne $true
