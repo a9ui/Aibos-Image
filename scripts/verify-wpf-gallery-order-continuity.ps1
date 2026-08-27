@@ -73,6 +73,7 @@ try {
         $result.modalReturnPreserved -ne $true -or
         $result.returnedToTop -ne $true -or
         $result.toolbarContract -ne $true -or
+        $result.realDoneReturnPreserved -ne $true -or
         $result.sourcesUnchanged -ne $true
     ) {
         throw "Gallery order continuity contract failed: $(Get-Content -Raw -LiteralPath $resultPath)"

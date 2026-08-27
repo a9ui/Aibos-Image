@@ -71,14 +71,30 @@ public partial class App
                     && window.OpenModalForSmoke();
                 int resetsBefore = window.ProjectionResetNotificationCountForSmoke;
                 int movesBefore = window.ProjectionMoveNotificationCountForSmoke;
+                int thumbnailCancelsBefore =
+                    window.ThumbnailViewportCancelCountForSmoke;
                 int loadedBefore = window.LoadedThumbnailCountForSmoke(
                     [startName, expectedNextName]);
                 bool singleMovePublished = window.ReorderProjectionOneTileForSmoke(
                     expectedNextName,
                     names.Count - 1);
+                int resetsAfterFirstMove =
+                    window.ProjectionResetNotificationCountForSmoke;
+                int movesAfterFirstMove =
+                    window.ProjectionMoveNotificationCountForSmoke;
+                int thumbnailCancelsAfterFirstMove =
+                    window.ThumbnailViewportCancelCountForSmoke;
                 bool singleMoveBackPublished = window.ReorderProjectionOneTileForSmoke(
                     names[^1],
                     0);
+                int resetsAfterSecondMove =
+                    window.ProjectionResetNotificationCountForSmoke;
+                int movesAfterSecondMove =
+                    window.ProjectionMoveNotificationCountForSmoke;
+                bool moveOnly = singleMovePublished
+                    && singleMoveBackPublished
+                    && resetsAfterSecondMove == resetsBefore
+                    && movesAfterSecondMove == movesBefore + 2;
                 int loadedAfter = window.LoadedThumbnailCountForSmoke(
                     [startName, expectedNextName]);
                 bool modalMovedToPinnedNeighbor = window.NavigateModalForSmoke(1)
@@ -149,6 +165,53 @@ public partial class App
                         StringComparison.OrdinalIgnoreCase);
                 bool returnedToTop = await window.InvokeGalleryScrollToTopForSmokeAsync();
                 bool toolbarContract = window.GalleryScrollToTopButtonContractForSmoke;
+
+                bool realDoneSortSet = await window.SetSortByInteractiveForSmokeAsync(
+                    "photoreal-completed-newest");
+                bool realDoneScrolled = await window.ScrollGridToMiddleForSmokeAsync();
+                await window.WaitForGridZoomAnchorForSmokeAsync();
+                string? realDoneSourceName = window.CaptureGridViewportAnchorForSmoke();
+                bool realDoneSelected = !string.IsNullOrWhiteSpace(realDoneSourceName)
+                    && window.SelectFileNameForSmoke(realDoneSourceName);
+                bool realDoneModalOpened = realDoneSelected
+                    && window.OpenModalForSmoke();
+                string? realDoneReturnAnchor =
+                    window.ModalGalleryReturnAnchorPathForSmoke;
+                bool realDoneHasStableNeighbor = realDoneModalOpened
+                    && !string.IsNullOrWhiteSpace(realDoneReturnAnchor)
+                    && !string.Equals(
+                        Path.GetFileName(realDoneReturnAnchor),
+                        realDoneSourceName,
+                        StringComparison.OrdinalIgnoreCase);
+                bool realDoneActivitySet = realDoneSourceName is not null
+                    && window.SetSortActivityForSmoke(
+                        realDoneSourceName,
+                        "photoreal",
+                        DateTimeOffset.UtcNow);
+                var realDoneRefresh = await window.RefreshCurrentSortForSmokeAsync();
+                bool realDoneMovedSourceToTop = realDoneSourceName is not null
+                    && string.Equals(
+                        window.FilteredFileNamesForSmoke(1).SingleOrDefault(),
+                        realDoneSourceName,
+                        StringComparison.OrdinalIgnoreCase);
+                window.CloseModalForSmoke(restoreFocus: true);
+                await window.WaitForGridZoomAnchorForSmokeAsync();
+                bool realDoneReturnPreserved = realDoneSortSet
+                    && realDoneScrolled
+                    && realDoneHasStableNeighbor
+                    && realDoneActivitySet
+                    && realDoneRefresh.Applied
+                    && !realDoneRefresh.Discarded
+                    && realDoneMovedSourceToTop
+                    && window.GalleryVerticalOffsetForSmoke > 0.5
+                    && string.Equals(
+                        window.LastGridZoomAnchorPathForSmoke,
+                        realDoneReturnAnchor,
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        realDoneSourceName,
+                        StringComparison.OrdinalIgnoreCase);
                 bool sourcesUnchanged = string.Equals(
                     sourceFingerprint,
                     FolderFingerprint(folder),
@@ -176,6 +239,7 @@ public partial class App
                     && modalReturnPreserved
                     && returnedToTop
                     && toolbarContract
+                    && realDoneReturnPreserved
                     && sourcesUnchanged
                     && isolated;
                 result = new
@@ -186,7 +250,16 @@ public partial class App
                         : "gallery order continuity contract failed",
                     smokeRoot,
                     moveOnly,
+                    singleMovePublished,
                     singleMoveBackPublished,
+                    resetsBefore,
+                    resetsAfterFirstMove,
+                    resetsAfterSecondMove,
+                    movesBefore,
+                    movesAfterFirstMove,
+                    movesAfterSecondMove,
+                    thumbnailCancelsBefore,
+                    thumbnailCancelsAfterFirstMove,
                     thumbnailsRetained,
                     thumbnailSchedules,
                     thumbnailBatchIdle,
@@ -208,6 +281,13 @@ public partial class App
                     modalReturnPreserved,
                     returnedToTop,
                     toolbarContract,
+                    realDoneSortSet,
+                    realDoneScrolled,
+                    realDoneSourceName,
+                    realDoneHasStableNeighbor,
+                    realDoneActivitySet,
+                    realDoneMovedSourceToTop,
+                    realDoneReturnPreserved,
                     sourcesUnchanged,
                     isolated,
                 };

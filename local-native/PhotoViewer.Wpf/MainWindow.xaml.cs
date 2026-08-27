@@ -694,6 +694,8 @@ public partial class MainWindow : Window
     private IInputElement? _deleteFocusBeforeDialog;
     private IInputElement? _settingsFocusBeforeDialog;
     private IInputElement? _modalFocusBeforeOverlay;
+    private GridZoomAnchor? _modalGalleryReturnAnchor;
+    private bool _modalGalleryReturnUsesGrid;
     public LoadMetrics? LastLoadMetrics { get; private set; }
 
     public MainWindow()
@@ -16713,7 +16715,9 @@ public partial class MainWindow : Window
         return (width, height);
     }
 
-    private GridZoomAnchor? CaptureGridZoomAnchor()
+    private GridZoomAnchor? CaptureGridZoomAnchor(
+        string? excludedPath = null,
+        bool preferSelection = true)
     {
         if (CardsList?.Visibility != Visibility.Visible)
             return null;
@@ -16725,9 +16729,14 @@ public partial class MainWindow : Window
         GridZoomAnchor? best = null;
         GridZoomAnchor? previous = null;
         double center = viewer.ViewportHeight / 2;
-        string? selectedPath = SelectedTile() is { IsRealFile: true } selectedTile
-            ? selectedTile.Path
-            : _primarySelectedPath;
+        string? selectedPath = preferSelection
+            ? SelectedTile() is { IsRealFile: true } selectedTile
+                ? selectedTile.Path
+                : _primarySelectedPath
+            : null;
+        bool IsExcluded(string path) =>
+            !string.IsNullOrWhiteSpace(excludedPath)
+            && string.Equals(path, excludedPath, StringComparison.OrdinalIgnoreCase);
         VirtualizingWrapPanel? panel = _galleryVirtualizingPanel
             ?? FindVisualDescendant<VirtualizingWrapPanel>(CardsList);
         if (panel is {
@@ -16741,6 +16750,8 @@ public partial class MainWindow : Window
             GridZoomAnchor? CandidateForPath(string? path)
             {
                 if (string.IsNullOrWhiteSpace(path))
+                    return null;
+                if (IsExcluded(path))
                     return null;
                 int index = -1;
                 for (int candidateIndex = firstVisible;
@@ -16777,9 +16788,13 @@ public partial class MainWindow : Window
             {
                 int left = middle - distance;
                 int right = middle + distance;
-                int index = left >= firstVisible && _tiles[left].IsRealFile
+                int index = left >= firstVisible
+                    && _tiles[left].IsRealFile
+                    && !IsExcluded(_tiles[left].Path)
                     ? left
-                    : right <= lastVisible && _tiles[right].IsRealFile
+                    : right <= lastVisible
+                        && _tiles[right].IsRealFile
+                        && !IsExcluded(_tiles[right].Path)
                         ? right
                         : -1;
                 if (index < 0)
@@ -16796,7 +16811,10 @@ public partial class MainWindow : Window
         }
         foreach (ListBoxItem item in FindVisualDescendants<ListBoxItem>(CardsList))
         {
-            if (item.DataContext is not Tile tile || !tile.IsRealFile || item.ActualHeight <= 0)
+            if (item.DataContext is not Tile tile
+                || !tile.IsRealFile
+                || IsExcluded(tile.Path)
+                || item.ActualHeight <= 0)
                 continue;
             try
             {
@@ -16818,6 +16836,124 @@ public partial class MainWindow : Window
             }
         }
         return selected ?? previous ?? best;
+    }
+
+    private GridZoomAnchor? CaptureListViewportAnchor(string? excludedPath = null)
+    {
+        if (RowsList?.Visibility != Visibility.Visible)
+            return null;
+        ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(RowsList);
+        if (viewer is null || viewer.ViewportHeight <= 0)
+            return null;
+
+        GridZoomAnchor? best = null;
+        GridZoomAnchor? excludedFallback = null;
+        double center = viewer.ViewportHeight / 2;
+        foreach (ListBoxItem item in FindVisualDescendants<ListBoxItem>(RowsList))
+        {
+            if (item.DataContext is not Tile { IsRealFile: true } tile
+                || item.ActualHeight <= 0)
+            {
+                continue;
+            }
+            try
+            {
+                double top = item.TransformToAncestor(viewer)
+                    .Transform(new Point(0, 0)).Y;
+                if (top >= viewer.ViewportHeight || top + item.ActualHeight <= 0)
+                    continue;
+                double distance = Math.Abs(
+                    (top + item.ActualHeight / 2) - center);
+                var candidate = new GridZoomAnchor(tile.Path, top, distance);
+                if (!string.IsNullOrWhiteSpace(excludedPath)
+                    && string.Equals(
+                        tile.Path,
+                        excludedPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    excludedFallback = candidate;
+                }
+                else if (best is null || distance < best.Value.CenterDistance)
+                {
+                    best = candidate;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // A recycled row can detach during a concurrent projection.
+            }
+        }
+        return best ?? excludedFallback;
+    }
+
+    private void RestoreModalGalleryViewport(
+        GridZoomAnchor anchor,
+        bool useGrid,
+        bool restoreFocus)
+    {
+        ListBox activeList = useGrid ? CardsList : RowsList;
+        if (activeList.Visibility != Visibility.Visible)
+        {
+            if (restoreFocus)
+                RestoreOverlayFocus(null, preferPrimaryGallery: false);
+            return;
+        }
+
+        if (useGrid)
+        {
+            RestoreGridZoomAnchorAfterLayout(anchor);
+        }
+        else
+        {
+            RestoreListViewportAnchorAfterLayout(anchor);
+        }
+
+        if (restoreFocus)
+        {
+            // Do not focus the selected card here. Real Done can move that
+            // card to index zero while the modal is open; ScrollIntoView would
+            // then undo the saved viewport and make Back appear to jump home.
+            Dispatcher.BeginInvoke(
+                () =>
+                {
+                    if (activeList.IsVisible && activeList.IsEnabled)
+                        activeList.Focus();
+                },
+                DispatcherPriority.ContextIdle);
+        }
+    }
+
+    private void RestoreListViewportAnchorAfterLayout(GridZoomAnchor anchor)
+    {
+        Tile? anchorTile = _tiles.FirstOrDefault(tile => string.Equals(
+            tile.Path,
+            anchor.Path,
+            StringComparison.OrdinalIgnoreCase));
+        if (anchorTile is null)
+            return;
+
+        RowsList.ScrollIntoView(anchorTile);
+        Dispatcher.BeginInvoke(() =>
+        {
+            ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(RowsList);
+            ListBoxItem? item = RowsList.ItemContainerGenerator.ContainerFromItem(
+                anchorTile) as ListBoxItem;
+            if (viewer is null || item is null)
+                return;
+            try
+            {
+                double currentTop = item.TransformToAncestor(viewer)
+                    .Transform(new Point(0, 0)).Y;
+                viewer.ScrollToVerticalOffset(Math.Clamp(
+                    viewer.VerticalOffset + currentTop - anchor.ViewportY,
+                    0,
+                    viewer.ScrollableHeight));
+            }
+            catch (InvalidOperationException)
+            {
+                // A newer catalog projection owns the next restoration.
+            }
+        }, DispatcherPriority.Render);
     }
 
     private void ScheduleRememberCurrentGridViewportAnchor()
@@ -18891,7 +19027,14 @@ public partial class MainWindow : Window
             InvalidateModalVideoEditV2ForSourceChange();
         bool restoreVideoOnOpen = false;
         if (opening)
+        {
             _modalFocusBeforeOverlay = Keyboard.FocusedElement;
+            _modalGalleryReturnUsesGrid = RowsList.Visibility != Visibility.Visible;
+            _modalGalleryReturnAnchor = _modalGalleryReturnUsesGrid
+                ? CaptureGridZoomAnchor(t.Path, preferSelection: false)
+                    ?? CaptureGridZoomAnchor()
+                : CaptureListViewportAnchor(t.Path);
+        }
         if (!string.Equals(_modalTransformPath, t.Path, StringComparison.OrdinalIgnoreCase))
             ResetModalTransform(t.Path, preserveZoom: !opening);
         if (sourceChanged)
@@ -20612,7 +20755,10 @@ public partial class MainWindow : Window
         bool restoreGalleryPosition = wasVisible
             && _modalGalleryReturnPath is not null;
         IInputElement? focusTarget = _modalFocusBeforeOverlay;
+        GridZoomAnchor? galleryReturnAnchor = _modalGalleryReturnAnchor;
+        bool galleryReturnUsesGrid = _modalGalleryReturnUsesGrid;
         _modalFocusBeforeOverlay = null;
+        _modalGalleryReturnAnchor = null;
         CancelPendingModalSingleClick();
         EndModalPointerGesture();
         _modalCts?.Cancel();
@@ -20679,8 +20825,17 @@ public partial class MainWindow : Window
             RestoreExternalFileDropSession();
         if (wasVisible)
             CloseExternalVideoDropSession();
-        if (wasVisible && restoreFocus)
+        if (wasVisible && galleryReturnAnchor is not null)
+        {
+            RestoreModalGalleryViewport(
+                galleryReturnAnchor.Value,
+                galleryReturnUsesGrid,
+                restoreFocus);
+        }
+        else if (wasVisible && restoreFocus)
+        {
             RestoreOverlayFocus(focusTarget, preferPrimaryGallery: true);
+        }
         ReturnToEnhancementJobsAfterModalClose(wasVisible);
         if (restoreGalleryPosition)
         {
@@ -27392,7 +27547,8 @@ public partial class MainWindow : Window
         => ModalBitmap.Visibility == Visibility.Collapsed
             && ModalArtBase.Visibility == Visibility.Visible
             && ModalArtGlow.Visibility == Visibility.Visible;
-    public void CloseModalForSmoke() => CloseModal();
+    public void CloseModalForSmoke(bool restoreFocus = false)
+        => CloseModal(restoreFocus);
     public int FilteredCountForSmoke => _tiles.Count;
     public bool ActivateAlbumForSmoke(string albumId)
     {
@@ -29937,6 +30093,11 @@ public partial class MainWindow : Window
     public bool SetSortByForSmoke(string sortBy) => SetSortBy(sortBy);
     public Task<bool> SetSortByInteractiveForSmokeAsync(string sortBy) => SetSortByInteractiveAsync(sortBy);
     public Task<bool> ReapplyCurrentSortForSmokeAsync() => ApplyCurrentSortInteractiveAsync();
+    public Task<SearchFilterCompletion> RefreshCurrentSortForSmokeAsync()
+        => QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: true,
+            selectFirst: false);
     public bool SetSortActivityForSmoke(
         string fileName,
         string activityKind,
@@ -30076,6 +30237,9 @@ public partial class MainWindow : Window
         OpenModal();
         return Modal.Visibility == Visibility.Visible;
     }
+
+    public string? ModalGalleryReturnAnchorPathForSmoke
+        => _modalGalleryReturnAnchor?.Path;
 
     public bool ToggleModalFlipForSmoke() => ToggleModalFlip();
 
