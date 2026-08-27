@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-PHOTOREAL-PRESERVATION-SCAN-001",
+  "protocol": "aibos.photoreal-preservation-scan/v1",
+  "sourceOfTruth": "docs/product-contract.md",
+  "scope": "Optional source-visible preservation scan for an explicit photoreal job",
+  "request": {
+    "field": "preservationScanEnabled",
+    "type": "boolean",
+    "missingMeaning": false,
+    "snapshot": "The value is copied into the durable photoreal job and retry settings. Later UI changes do not rewrite the job.",
+    "styleIndependence": "Built-in and user-saved photoreal Styles do not change this switch."
+  },
+  "capability": {
+    "healthPath": "capabilities.photorealPreservationScanV1",
+    "advertisedOnlyWhen": "The companion has the exact bounded scanner, validator, compiler and fallback implementation available.",
+    "passiveRead": "Health and Jobs reads do not load the scanner, open source media, acquire the GPU lease, or wake a worker."
+  },
+  "execution": {
+    "trigger": "The explicit worker execution of a photoreal job whose snapshotted switch is true.",
+    "source": "The same validated source image used by the photoreal adapter. The scan never rewrites or substitutes it.",
+    "ordering": [
+      "validate the exact source and job snapshot",
+      "acquire the existing single-GPU lease",
+      "run one bounded scanner invocation",
+      "offload or release scanner memory",
+      "compile a deterministic preservation suffix",
+      "run the existing photoreal graph with the original reference image"
+    ],
+    "singleFlight": true,
+    "maximumSubjects": 4,
+    "maximumFaces": 4,
+    "maximumVisibleHands": 8,
+    "maximumVisibleFeet": 8,
+    "maximumUtf8JsonBytes": 32768,
+    "maximumCompiledSuffixCharacters": 2000
+  },
+  "scanDocument": {
+    "requiredRootFields": [
+      "protocolVersion",
+      "faces",
+      "visibleHands",
+      "visibleFeet",
+      "clothing",
+      "composition"
+    ],
+    "protocolVersion": 1,
+    "coordinates": "Finite normalized [0,1] x, y, width and height values only.",
+    "confidence": "Finite [0,1] values only; low-confidence observations compile to no instruction.",
+    "faceObservations": [
+      "leftEye state: open, closed, occluded, or unknown",
+      "rightEye state: open, closed, occluded, or unknown",
+      "gaze direction: left, right, up, down, forward, away, or unknown",
+      "mouth state: closed, parted, open, smiling, or unknown",
+      "left and right eyebrow visible geometry",
+      "visible forehead crease presence"
+    ],
+    "bodyObservations": [
+      "visible hand count and normalized positions",
+      "visible foot count and normalized positions",
+      "bounded clothing color, construction and accessory tokens",
+      "pose, crop, camera and background-layout tokens"
+    ],
+    "forbiddenInference": [
+      "ethnicity",
+      "nationality",
+      "age",
+      "personality",
+      "emotion",
+      "beauty score",
+      "sexual-content classification",
+      "safety or censorship classification"
+    ]
+  },
+  "compiler": {
+    "kind": "pure deterministic compiler",
+    "behavior": "Append only positive preservation statements supported by validated source-visible observations.",
+    "mustNotAdd": [
+      "PG-13",
+      "safe",
+      "modest",
+      "censored",
+      "NSFW",
+      "Japanese or another nationality or ethnicity",
+      "adult or age guesses",
+      "new styling, makeup, smile, expression, anatomy, clothing or background"
+    ],
+    "referenceAuthority": "The original source image remains the native image-reference authority; compiled text is supplemental."
+  },
+  "fallback": {
+    "conditions": [
+      "scanner unavailable",
+      "scanner timeout or scanner-internal failure before photoreal inference",
+      "invalid or over-bound JSON",
+      "unsupported future protocol",
+      "no sufficiently confident visible observation",
+      "scanner memory release failure before safe inference admission"
+    ],
+    "result": "Discard the scan result and continue with the exact snapshotted user prompt plus the unchanged original reference image.",
+    "mustNotDo": [
+      "rewrite the source",
+      "invent a generic safety prompt",
+      "reuse a partial or malformed scan",
+      "silently substitute another image",
+      "change Style or saved prompt state",
+      "turn an explicit user Job cancellation into a successful fallback"
+    ]
+  },
+  "production": {
+    "writerEnabled": false,
+    "activationRequires": "focused synthetic verification, real single-GPU canary, visual review and a later owner production decision"
+  }
+}

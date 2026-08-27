@@ -24092,6 +24092,7 @@ public partial class MainWindow : Window
             SyncFoldersSectionControls();
             RestoreModalPhotorealSettings(null, null, null, null, null);
             RestorePhotorealSeedSettings(null, null);
+            RestorePhotorealPreservationScanSetting(null);
             RestoreAiStyles(null);
             RestorePhotorealPromptMappings(
                 null,
@@ -24171,6 +24172,8 @@ public partial class MainWindow : Window
         RestorePhotorealSeedSettings(
             state.PhotorealSeedMode,
             state.PhotorealSeedValue);
+        RestorePhotorealPreservationScanSetting(
+            state.PhotorealPreservationScanEnabled);
         RestorePhotorealPromptMappings(
             state.PhotorealPromptMappings,
             state.PhotorealPromptMappingDefaultsRevision ?? 0);
@@ -24452,6 +24455,8 @@ public partial class MainWindow : Window
                 PhotorealNegativePrompt = _modalPhotorealNegativePrompt,
                 PhotorealNegativePromptEnabled =
                     _modalPhotorealNegativePromptEnabled,
+                PhotorealPreservationScanEnabled =
+                    _photorealPreservationScanEnabled,
                 PhotorealSeedMode = _photorealSeedFixed
                     ? FixedSeedMode
                     : RandomSeedMode,
@@ -31784,6 +31789,8 @@ public sealed class ViewerState
     // Missing in older state defaults to OFF because FLUX.2 does not support
     // natural-language negative prompts. The text itself remains preserved.
     public bool? PhotorealNegativePromptEnabled { get; set; }
+    // Independent from photoreal Styles. Missing in older state is OFF.
+    public bool? PhotorealPreservationScanEnabled { get; set; }
     public string? PhotorealSeedMode { get; set; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? PhotorealSeedValue { get; set; }

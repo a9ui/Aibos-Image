@@ -94,6 +94,7 @@ public partial class App
             bool recoveredHqButtonContract = false;
             bool recoveredHqCapabilityGateContract = false;
             bool photorealSeedContract = false;
+            bool photorealPreservationScanContract = false;
             bool randomSeedOmitted = false;
             bool seedDefaultAndSurface = false;
             bool fixedSeedExact = false;
@@ -801,6 +802,7 @@ public partial class App
                     emptyPrompt: customEmptyPrompt,
                     negativePrompt: customNegativePrompt);
                 bool customPromptApplied = window.ModalPhotorealSettingsForSmoke.Prompt == customPrompt;
+                window.SetPhotorealPreservationScanForSmoke(true);
                 var beforeBuiltInStyle = window.ModalPhotorealSettingsForSmoke;
                 var beforeBuiltInSeed = window.PhotorealSeedForSmoke;
                 bool builtInStyleCatalogContract =
@@ -838,6 +840,8 @@ public partial class App
                         == beforeBuiltInStyle.NegativePrompt
                     && appliedBuiltInStyle.NegativePromptEnabled
                         == beforeBuiltInStyle.NegativePromptEnabled
+                    && window.PhotorealPreservationScanForSmoke
+                        is (true, true)
                     && window.PhotorealSeedForSmoke == beforeBuiltInSeed
                     && window.BuiltInPhotorealStyleDeleteDisabledForSmoke;
                 window.FlushStateForSmoke();
@@ -1502,6 +1506,7 @@ public partial class App
                     && !loraControls.ModalChecked
                     && !loraControls.AppStrengthEnabled
                     && !loraControls.ModalStrengthEnabled;
+                window.SetPhotorealPreservationScanForSmoke(true);
                 window.Show();
                 await window.LoadFolderSetAsync([imageRoot], commitRecent: false);
                 bool loadTimingDefaultOff = !window.ShowLoadTimingForSmoke
@@ -2164,6 +2169,7 @@ public partial class App
                     && body.GetProperty("prompt").GetString() ==
                         $"{customEmptyPrompt}, brows angled upward toward the center, lips separated, natural cheek flush, X-shaped restraint frame"
                     && body.GetProperty("negativePrompt").GetString() == string.Empty
+                    && body.GetProperty("preservationScanEnabled").GetBoolean()
                     && body.GetProperty("queuePlacement").GetString() == "next";
                 var negativeOff = window.ModalPhotorealSettingsForSmoke;
                 window.SetModalPhotorealNegativePromptEnabledForSmoke(true);
@@ -2182,6 +2188,11 @@ public partial class App
                     && negativeOn.NegativePromptEnabled
                     && negativeOn.EffectiveNegativePrompt == customNegativePrompt
                     && persistedNegativeToggleState?.PhotorealNegativePromptEnabled == false;
+                photorealPreservationScanContract =
+                    body.GetProperty("preservationScanEnabled").GetBoolean()
+                    && window.PhotorealPreservationScanForSmoke is (true, true)
+                    && persistedNegativeToggleState?.PhotorealPreservationScanEnabled
+                        == true;
                 loraToggleContract = loraToggleContract
                     && !body.GetProperty("loraEnabled").GetBoolean();
                 structureRemovedContract =
@@ -2562,6 +2573,7 @@ public partial class App
                     && recoveredHqButtonContract
                     && recoveredHqCapabilityGateContract
                     && photorealSeedContract
+                    && photorealPreservationScanContract
                     && gallerySingleFlightContract;
             }
             catch (Exception ex)
@@ -2654,6 +2666,7 @@ public partial class App
                     recoveredHqButtonContract,
                     recoveredHqCapabilityGateContract,
                     photorealSeedContract,
+                    photorealPreservationScanContract,
                     photorealSeedDetails = new
                     {
                         randomSeedOmitted,

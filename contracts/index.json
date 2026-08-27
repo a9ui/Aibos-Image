@@ -69,6 +69,11 @@
       "scope": "Managed output ownership and migration"
     },
     {
+      "contractId": "PV-ENHANCE-PHOTOREAL-PRESERVATION-SCAN-001",
+      "path": "contracts/enhancement-photoreal-preservation-scan-v1.json",
+      "scope": "Optional source-visible Qwen preservation scan for photoreal jobs"
+    },
+    {
       "contractId": "PV-ENHANCE-I2I-001",
       "path": "contracts/enhancement-i2i-v1.json",
       "scope": "I2I version 1 rows"
