@@ -88,9 +88,65 @@ public partial class App
                         StringComparison.OrdinalIgnoreCase);
                 string? modalName = Path.GetFileName(window.ModalSourcePathForSmoke);
                 window.CloseModalForSmoke();
+                bool moveOnly = singleMovePublished
+                    && singleMoveBackPublished
+                    && window.ProjectionResetNotificationCountForSmoke == resetsBefore
+                    && window.ProjectionMoveNotificationCountForSmoke == movesBefore + 2;
 
+                DateTimeOffset activityBase = new(
+                    2026,
+                    8,
+                    28,
+                    0,
+                    0,
+                    0,
+                    TimeSpan.Zero);
+                bool realDoneFixtures = true;
+                for (int index = 0; index < names.Count; index++)
+                {
+                    realDoneFixtures &= window.SetSortActivityForSmoke(
+                        names[index],
+                        "photoreal",
+                        activityBase.AddMinutes(index));
+                }
+                bool realDoneSortApplied = await window.SetSortByInteractiveForSmokeAsync(
+                    "photoreal-completed-newest");
                 bool scrolledAway = await window.ScrollGridToMiddleForSmokeAsync()
                     && window.GalleryVerticalOffsetForSmoke > 0.5;
+                string? returnAnchorPath = window.CaptureGridViewportAnchorPathForSmoke();
+                string? returnAnchorName = Path.GetFileName(returnAnchorPath);
+                double returnOffsetBefore = window.GalleryVerticalOffsetForSmoke;
+                bool returnModalOpened = !string.IsNullOrWhiteSpace(returnAnchorName)
+                    && window.SelectFileNameForSmoke(returnAnchorName)
+                    && window.OpenModalForSmoke();
+                for (int index = 0; index < names.Count; index++)
+                {
+                    realDoneFixtures &= window.SetSortActivityForSmoke(
+                        names[index],
+                        "photoreal",
+                        activityBase.AddMinutes(names.Count - index));
+                }
+                bool realDoneRefreshApplied = returnModalOpened
+                    && await window.ReapplyCurrentSortForSmokeAsync();
+                window.CloseModalForSmoke();
+                await window.WaitForGridZoomAnchorForSmokeAsync();
+                double returnOffsetAfter = window.GalleryVerticalOffsetForSmoke;
+                string? returnedAnchorName = window.CaptureGridViewportAnchorForSmoke();
+                bool modalReturnPreserved = realDoneFixtures
+                    && realDoneSortApplied
+                    && scrolledAway
+                    && returnModalOpened
+                    && realDoneRefreshApplied
+                    && returnOffsetBefore > 0.5
+                    && returnOffsetAfter > 0.5
+                    && string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        returnAnchorName,
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        returnedAnchorName,
+                        returnAnchorName,
+                        StringComparison.OrdinalIgnoreCase);
                 bool returnedToTop = await window.InvokeGalleryScrollToTopForSmokeAsync();
                 bool toolbarContract = window.GalleryScrollToTopButtonContractForSmoke;
                 bool sourcesUnchanged = string.Equals(
@@ -109,10 +165,6 @@ public partial class App
                     .All(path => Path.GetFullPath(path).StartsWith(
                         Path.GetFullPath(smokeRoot) + Path.DirectorySeparatorChar,
                         StringComparison.OrdinalIgnoreCase));
-                bool moveOnly = singleMovePublished
-                    && singleMoveBackPublished
-                    && window.ProjectionResetNotificationCountForSmoke == resetsBefore
-                    && window.ProjectionMoveNotificationCountForSmoke == movesBefore + 2;
                 bool thumbnailsRetained = thumbnailsLoaded
                     && loadedBefore == 2
                     && loadedAfter == loadedBefore;
@@ -121,6 +173,7 @@ public partial class App
                     && modalOpened
                     && modalMovedToPinnedNeighbor
                     && scrolledAway
+                    && modalReturnPreserved
                     && returnedToTop
                     && toolbarContract
                     && sourcesUnchanged
@@ -129,7 +182,7 @@ public partial class App
                 {
                     ok,
                     message = ok
-                        ? "one-item gallery reorder preserved thumbnails and modal neighbor order; toolbar returned the active gallery to the top"
+                        ? "gallery reorder preserved thumbnails and modal neighbor order; Real Done modal close restored the selected image and viewport; toolbar returned the active gallery to the top"
                         : "gallery order continuity contract failed",
                     smokeRoot,
                     moveOnly,
@@ -144,6 +197,15 @@ public partial class App
                     expectedNextName,
                     modalName,
                     scrolledAway,
+                    realDoneFixtures,
+                    realDoneSortApplied,
+                    returnAnchorName,
+                    returnedAnchorName,
+                    returnOffsetBefore,
+                    returnOffsetAfter,
+                    returnModalOpened,
+                    realDoneRefreshApplied,
+                    modalReturnPreserved,
                     returnedToTop,
                     toolbarContract,
                     sourcesUnchanged,

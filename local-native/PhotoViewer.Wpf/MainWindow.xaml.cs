@@ -448,6 +448,11 @@ public partial class MainWindow : Window
     private string? _modalTransformPath;
     private string? _modalSourceTilePath;
     private Tile[] _modalNavigationSnapshot = [];
+    private string? _modalGalleryReturnPath;
+    private GridZoomAnchor? _modalGalleryReturnGridAnchor;
+    private double? _modalGalleryReturnListOffset;
+    private bool _modalGalleryReturnUsesList;
+    private long _modalGalleryReturnGeneration;
     private string? _modalDisplayPath;
     private int _modalDisplayedImagePixelWidth;
     private int _modalDisplayedImagePixelHeight;
@@ -18791,6 +18796,22 @@ public partial class MainWindow : Window
         bool opening = Modal.Visibility != Visibility.Visible;
         if (opening && !ExternalFileDropSessionActive)
             _modalNavigationSnapshot = _tiles.ToArray();
+        if (opening)
+        {
+            if (!ExternalFileDropSessionActive
+                && !IsEnhancementJobsTrustedModalSource(t))
+            {
+                CaptureModalGalleryReturnState(t);
+            }
+            else
+            {
+                ClearModalGalleryReturnState();
+            }
+        }
+        else if (_modalGalleryReturnPath is not null)
+        {
+            _modalGalleryReturnPath = t.Path;
+        }
         int projectedIndex = _tiles.IndexOf(t);
         UpdateModalPositionText(t, projectedIndex);
         StopGalleryAutoScroll();
@@ -20509,6 +20530,16 @@ public partial class MainWindow : Window
         // reopen the overlay.
         CancelPendingExternalFileDropIntake();
         bool wasVisible = Modal.Visibility == Visibility.Visible;
+        string? galleryReturnPath = _modalSourceTilePath
+            ?? _modalGalleryReturnPath;
+        GridZoomAnchor? galleryReturnGridAnchor =
+            _modalGalleryReturnGridAnchor;
+        double? galleryReturnListOffset =
+            _modalGalleryReturnListOffset;
+        bool galleryReturnUsesList = _modalGalleryReturnUsesList;
+        long galleryReturnGeneration = _modalGalleryReturnGeneration;
+        bool restoreGalleryPosition = wasVisible
+            && _modalGalleryReturnPath is not null;
         IInputElement? focusTarget = _modalFocusBeforeOverlay;
         _modalFocusBeforeOverlay = null;
         CancelPendingModalSingleClick();
@@ -20549,6 +20580,7 @@ public partial class MainWindow : Window
         _modalShowingEnhanced = false;
         _modalSourceTilePath = null;
         _modalNavigationSnapshot = [];
+        ClearModalGalleryReturnState(incrementGeneration: false);
         _modalDisplayPath = null;
         _modalEnhancementRequestPending = false;
         _modalEnhancementJobId = null;
@@ -20579,6 +20611,84 @@ public partial class MainWindow : Window
         if (wasVisible && restoreFocus)
             RestoreOverlayFocus(focusTarget, preferPrimaryGallery: true);
         ReturnToEnhancementJobsAfterModalClose(wasVisible);
+        if (restoreGalleryPosition)
+        {
+            RestoreModalGalleryReturnState(
+                galleryReturnPath,
+                galleryReturnGridAnchor,
+                galleryReturnListOffset,
+                galleryReturnUsesList,
+                galleryReturnGeneration);
+        }
+    }
+
+    private void CaptureModalGalleryReturnState(Tile tile)
+    {
+        _modalGalleryReturnGeneration++;
+        _modalGalleryReturnPath = tile.Path;
+        _modalGalleryReturnUsesList = RowsList.Visibility == Visibility.Visible;
+        _modalGalleryReturnGridAnchor = _modalGalleryReturnUsesList
+            ? null
+            : CaptureGridZoomAnchor();
+        _modalGalleryReturnListOffset = _modalGalleryReturnUsesList
+            ? FindVisualDescendant<ScrollViewer>(RowsList)?.VerticalOffset
+            : null;
+    }
+
+    private void ClearModalGalleryReturnState(bool incrementGeneration = true)
+    {
+        if (incrementGeneration)
+            _modalGalleryReturnGeneration++;
+        _modalGalleryReturnPath = null;
+        _modalGalleryReturnGridAnchor = null;
+        _modalGalleryReturnListOffset = null;
+        _modalGalleryReturnUsesList = false;
+    }
+
+    private void RestoreModalGalleryReturnState(
+        string? returnPath,
+        GridZoomAnchor? gridAnchor,
+        double? listOffset,
+        bool usesList,
+        long generation)
+    {
+        Tile? returnTile = !string.IsNullOrWhiteSpace(returnPath)
+            ? _tiles.FirstOrDefault(tile => string.Equals(
+                tile.Path,
+                returnPath,
+                StringComparison.OrdinalIgnoreCase))
+            : null;
+        if (returnTile is not null)
+        {
+            int returnIndex = _tiles.IndexOf(returnTile);
+            SetSelection(
+                [returnTile],
+                returnTile,
+                returnIndex,
+                deferPrimaryPresentation: true);
+            if (gridAnchor is { } capturedGridAnchor)
+                gridAnchor = capturedGridAnchor with { Path = returnTile.Path };
+        }
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (generation != _modalGalleryReturnGeneration
+                || Modal.Visibility == Visibility.Visible)
+            {
+                return;
+            }
+
+            if (usesList)
+            {
+                ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(RowsList);
+                if (viewer is not null && listOffset.HasValue)
+                    viewer.ScrollToVerticalOffset(listOffset.Value);
+                return;
+            }
+
+            if (gridAnchor is not null)
+                RestoreGridZoomAnchorAfterLayout(gridAnchor);
+        }, DispatcherPriority.Render);
     }
 
     private void ToggleModalEnhanced_Click(object sender, RoutedEventArgs e) => ToggleModalEnhanced();
@@ -29713,6 +29823,7 @@ public partial class MainWindow : Window
     public bool SetAspectModeForSmoke(string aspectMode) => SetAspectMode(aspectMode);
     public bool SetSortByForSmoke(string sortBy) => SetSortBy(sortBy);
     public Task<bool> SetSortByInteractiveForSmokeAsync(string sortBy) => SetSortByInteractiveAsync(sortBy);
+    public Task<bool> ReapplyCurrentSortForSmokeAsync() => ApplyCurrentSortInteractiveAsync();
     public bool SetSortActivityForSmoke(
         string fileName,
         string activityKind,
