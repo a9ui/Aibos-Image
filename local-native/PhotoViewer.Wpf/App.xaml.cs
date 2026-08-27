@@ -5555,6 +5555,8 @@ public partial class App : Application
                     bool modalImageWheelZooms = window.InvokeModalImageMouseWheelForSmoke(120)
                         && window.ModalTransformForSmoke().Zoom > modalWheelZoomBefore;
                     _ = window.ResetModalTransformForSmoke();
+                    bool explicitEnhancementKeyRepeatSuppressed =
+                        window.ExplicitEnhancementKeyRepeatSuppressedForSmoke;
                     _ = window.InvokePreviewKeyForSmoke(Key.E, ModifierKeys.None);
                     bool togglePassive = string.Equals(jobsBefore, FileFingerprint(jobsPath), StringComparison.Ordinal);
                     bool i2iShortcutOpened = window.InvokePreviewKeyForSmoke(Key.I, ModifierKeys.None)
@@ -5665,7 +5667,8 @@ public partial class App : Application
                         && selectedFirst && oldFavoriteDisabled && newFavoriteHot && exactFavoriteHot
                         && selectAllHot && clearSelectionHot && staleHiddenSelectionSuppressed
                         && modalSelected && oldNextDisabled && nextHot
-                        && modalWheelReady && modalMetadataWheelNative && modalImageWheelZooms && togglePassive && aiBoardShortcutsHot
+                        && modalWheelReady && modalMetadataWheelNative && modalImageWheelZooms
+                        && explicitEnhancementKeyRepeatSuppressed && togglePassive && aiBoardShortcutsHot
                         && closeHot && jobsShortcutHot && openedFirst && openedSecond && openedThird
                         && focusedSecond && oldReorderDisabled && reorderHot && closedFirst && cardsFocused
                         && oldReopenDisabled && reopenHot && nestedUnknownPreservedExactly
@@ -5717,6 +5720,7 @@ public partial class App : Application
                         modalWheelReady,
                         modalMetadataWheelNative,
                         modalImageWheelZooms,
+                        explicitEnhancementKeyRepeatSuppressed,
                         aiBoardShortcutsHot,
                         jobsShortcutHot,
                         closeHot,
