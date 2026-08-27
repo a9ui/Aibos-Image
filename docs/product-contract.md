@@ -157,6 +157,17 @@ The executable cases for these meanings are routed by
   prompt pair; it preserves the current LoRA, strength, CFG, quality,
   resolution, seed, Negative text, and Negative-enabled state. User-saved
   Styles remain separate and may restore the full settings snapshot they own.
+- The optional photoreal `Preservation Scan` switch is independent from every
+  built-in or user-saved Style. An explicit photoreal Job snapshots the switch.
+  When enabled and advertised, the Companion may inspect only source-visible
+  eye, gaze, mouth, brow, hand, foot, clothing, pose, crop, camera, and layout
+  facts through the bounded `aibos.photoreal-preservation-scan/v1` protocol.
+  It does not infer ethnicity, nationality, age, personality, emotion, beauty,
+  sexual-content, safety, or censorship labels. Valid observations compile to
+  a deterministic positive preservation suffix; they never replace or rewrite
+  the source image. An unavailable scanner, timeout, malformed result, or
+  unsupported result is discarded and the exact saved prompt plus unchanged
+  image reference continues without a generated safety or censorship prompt.
 - A successful retry first commits the replacement child job and its durable
   idempotency receipt. Only then is the failed or canceled source row removed
   from terminal history. Rejected, pending-delivery, ambiguous, or malformed

@@ -19,6 +19,7 @@ public partial class MainWindow
     private const double DefaultPhotorealStrength = 0.4;
     private const double DefaultPhotorealCfgScale = 1.0;
     private const bool DefaultPhotorealNegativePromptEnabled = false;
+    private const bool DefaultPhotorealPreservationScanEnabled = false;
     private const int DefaultPhotorealSteps = 8;
     private const int DefaultPhotorealMaxDimension = 1280;
     private const int MaxPhotorealStyleCount = 32;
@@ -52,6 +53,8 @@ public partial class MainWindow
     private string _modalPhotorealNegativePrompt = DefaultPhotorealNegativePrompt;
     private bool _modalPhotorealNegativePromptEnabled =
         DefaultPhotorealNegativePromptEnabled;
+    private bool _photorealPreservationScanEnabled =
+        DefaultPhotorealPreservationScanEnabled;
     private bool _photorealSeedFixed;
     private string _photorealSeedValueText = "0";
     private bool _syncingModalPhotorealSettings;
@@ -165,7 +168,8 @@ public partial class MainWindow
         double CfgScale,
         int MaxDimension,
         string Prompt,
-        string NegativePrompt);
+        string NegativePrompt,
+        bool PreservationScanEnabled);
 
     private sealed record UpscaleRequestSource(
         string? SourceProducerJobId,
@@ -1453,7 +1457,8 @@ public partial class MainWindow
             prompt,
             _modalPhotorealNegativePromptEnabled
                 ? _modalPhotorealNegativePrompt.Trim()
-                : "");
+                : "",
+            _photorealPreservationScanEnabled);
     }
 
     private bool TryResolvePhotorealSeed(out int? seed, out string error)
@@ -1492,6 +1497,7 @@ public partial class MainWindow
             ["maxDimension"] = settings.MaxDimension,
             ["prompt"] = settings.Prompt,
             ["negativePrompt"] = settings.NegativePrompt,
+            ["preservationScanEnabled"] = settings.PreservationScanEnabled,
         };
         if (seed is int fixedSeed)
             requestBody["seed"] = fixedSeed;
@@ -1694,6 +1700,28 @@ public partial class MainWindow
             _modalPhotorealLoraEnabled
                 ? "WarmBloodAban Anything-to-Real LoRAを比較用に使います。"
                 : "標準のFLUX.2 Klein本体だけを使います。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void PhotorealPreservationScanEnabled_Changed(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_syncingModalPhotorealSettings
+            || sender is not CheckBox checkBox
+            || AppPhotorealPreservationScanCheckBox is null
+            || ModalPhotorealPreservationScanCheckBox is null)
+        {
+            return;
+        }
+
+        _photorealPreservationScanEnabled = checkBox.IsChecked == true;
+        SyncModalPhotorealSettingsControls();
+        SetPhotorealSettingsStatus(
+            _photorealPreservationScanEnabled
+                ? "Preservation Scanを保存しました。次の実写化Jobで元画像の見えている特徴だけを補助確認します。"
+                : "Preservation ScanはOFFです。従来どおり元画像参照と保存済みPromptだけを使います。");
         if (!_initializing)
             SaveState();
     }
@@ -2442,6 +2470,7 @@ public partial class MainWindow
             DefaultPhotorealLoraEnabled,
             DefaultPhotorealNegativePromptEnabled);
         RestorePhotorealSeedSettings(null, null);
+        RestorePhotorealPreservationScanSetting(null);
         RefreshPhotorealStyleControls(updateNameFields: true);
         SetPhotorealSettingsStatus("実写化設定を既定値に戻しました。");
         if (!_initializing)
@@ -2573,6 +2602,13 @@ public partial class MainWindow
         SyncPhotorealSeedControls();
     }
 
+    private void RestorePhotorealPreservationScanSetting(bool? enabled)
+    {
+        _photorealPreservationScanEnabled =
+            enabled ?? DefaultPhotorealPreservationScanEnabled;
+        SyncModalPhotorealSettingsControls();
+    }
+
     private void SyncPhotorealSeedControls()
     {
         bool wasSyncing = _syncingModalPhotorealSettings;
@@ -2604,6 +2640,8 @@ public partial class MainWindow
     {
         if (ModalPhotorealLoraEnabledCheckBox is null
             || AppPhotorealLoraEnabledCheckBox is null
+            || ModalPhotorealPreservationScanCheckBox is null
+            || AppPhotorealPreservationScanCheckBox is null
             || ModalPhotorealNegativePromptEnabledCheckBox is null
             || AppPhotorealNegativePromptEnabledCheckBox is null
             || ModalPhotorealStrengthSlider is null
@@ -2622,6 +2660,10 @@ public partial class MainWindow
         {
             ModalPhotorealLoraEnabledCheckBox.IsChecked = _modalPhotorealLoraEnabled;
             AppPhotorealLoraEnabledCheckBox.IsChecked = _modalPhotorealLoraEnabled;
+            ModalPhotorealPreservationScanCheckBox.IsChecked =
+                _photorealPreservationScanEnabled;
+            AppPhotorealPreservationScanCheckBox.IsChecked =
+                _photorealPreservationScanEnabled;
             ModalPhotorealNegativePromptEnabledCheckBox.IsChecked =
                 _modalPhotorealNegativePromptEnabled;
             AppPhotorealNegativePromptEnabledCheckBox.IsChecked =
@@ -2856,7 +2898,19 @@ public partial class MainWindow
             && AppPhotorealCfgScaleSlider.Minimum == 100
             && AppPhotorealCfgScaleSlider.Maximum == 200
             && AppPhotorealStepsComboBox.Items.Count == 4
-            && AppPhotorealSizeComboBox.Items.Count == 3;
+            && AppPhotorealSizeComboBox.Items.Count == 3
+            && AutomationProperties.GetName(AppPhotorealPreservationScanCheckBox)
+                == "Enable Preservation Scan for new AI photorealization jobs"
+            && AutomationProperties.GetName(ModalPhotorealPreservationScanCheckBox)
+                == "Enable Preservation Scan for this AI photorealization";
+
+    public (bool AppChecked, bool ModalChecked) PhotorealPreservationScanForSmoke
+        => (
+            AppPhotorealPreservationScanCheckBox.IsChecked == true,
+            ModalPhotorealPreservationScanCheckBox.IsChecked == true);
+
+    public void SetPhotorealPreservationScanForSmoke(bool enabled)
+        => AppPhotorealPreservationScanCheckBox.IsChecked = enabled;
 
     public (bool AppChecked, bool ModalChecked, bool AppStrengthEnabled, bool ModalStrengthEnabled) PhotorealLoraControlsForSmoke
         => (

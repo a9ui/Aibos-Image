@@ -106,6 +106,7 @@ try {
         'recoveredHqButtonContract',
         'recoveredHqCapabilityGateContract',
         'photorealSeedContract',
+        'photorealPreservationScanContract',
         'gallerySingleFlightContract',
         'legacyPhotorealCapabilitySafe',
         'modalPhotorealOperation',

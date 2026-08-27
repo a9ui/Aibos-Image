@@ -3021,6 +3021,14 @@
           <TextBlock Text="すべてのAI実写化で使う共通設定です。ここでの変更は拡大画面にも即時反映され、次にキューへ追加するジョブから使われます。待機中・処理中のジョブは変更されません。" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
             <StackPanel>
+              <CheckBox x:Name="AppPhotorealPreservationScanCheckBox"
+                        Content="Preservation Scan"
+                        IsChecked="False" Margin="0,0,0,5"
+                        Checked="PhotorealPreservationScanEnabled_Changed"
+                        Unchecked="PhotorealPreservationScanEnabled_Changed"
+                        AutomationProperties.Name="Enable Preservation Scan for new AI photorealization jobs"
+                        AutomationProperties.HelpText="ONの新規Jobだけ、Qwenが元画像に見えている目・視線・口・眉・手足・服・構図を補助確認します。画像は変更せず、判定失敗時は従来どおり元画像参照だけで続行します。"/>
+              <TextBlock Text="見えている特徴だけを補助確認。元画像は変更せず、失敗時は通常処理へ戻ります。" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,10"/>
               <CheckBox x:Name="AppPhotorealLoraEnabledCheckBox"
                         Content="WarmBloodAban Anything-to-Real LoRA（比較用）"
                         IsChecked="False" Margin="0,0,0,6"
@@ -3822,6 +3830,15 @@
                        Foreground="{StaticResource TextSecondary}" FontSize="10"
                        TextWrapping="Wrap" Margin="0,6,0,0"
                        AutomationProperties.LiveSetting="Polite"/>
+            <CheckBox x:Name="ModalPhotorealPreservationScanCheckBox"
+                      IsChecked="False" Margin="0,10,0,5"
+                      Checked="PhotorealPreservationScanEnabled_Changed"
+                      Unchecked="PhotorealPreservationScanEnabled_Changed"
+                      AutomationProperties.Name="Enable Preservation Scan for this AI photorealization"
+                      AutomationProperties.HelpText="ONの新規Jobだけ、Qwenが元画像に見えている目・視線・口・眉・手足・服・構図を補助確認します。画像は変更せず、判定失敗時は従来どおり元画像参照だけで続行します。">
+              <TextBlock Text="Preservation Scan" TextWrapping="Wrap"/>
+            </CheckBox>
+            <TextBlock Text="見えている特徴だけを補助確認。Styleとは独立して保存されます。" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,3"/>
             <CheckBox x:Name="ModalPhotorealLoraEnabledCheckBox"
                       IsChecked="False" Margin="0,10,0,6"
                       Checked="PhotorealLoraEnabled_Changed" Unchecked="PhotorealLoraEnabled_Changed"
