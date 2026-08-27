@@ -25348,7 +25348,7 @@ public partial class MainWindow : Window
             }
         }
 
-        if (TryHandleConfiguredViewerShortcut(key, modifiers))
+        if (TryHandleConfiguredViewerShortcut(key, modifiers, e.IsRepeat))
         {
             e.Handled = true;
             return;
@@ -25357,7 +25357,17 @@ public partial class MainWindow : Window
         base.OnPreviewKeyDown(e);
     }
 
-    private bool TryHandleConfiguredViewerShortcut(Key key, ModifierKeys modifiers)
+    private static bool SuppressRepeatedExplicitEnhancementShortcut(
+        ViewerKeyAction action,
+        bool isRepeat)
+        => isRepeat && action is
+            ViewerKeyAction.EnhanceCurrentImage or
+            ViewerKeyAction.PhotorealizeCurrentImage;
+
+    private bool TryHandleConfiguredViewerShortcut(
+        Key key,
+        ModifierKeys modifiers,
+        bool isRepeat = false)
     {
         if (!IsViewerShortcutSurfaceActive())
             return false;
@@ -25389,12 +25399,24 @@ public partial class MainWindow : Window
             if (MatchesBinding(ViewerKeyAction.EnhanceCurrentImage, key, modifiers)
                 && ModalEnhanceButton.IsEnabled)
             {
+                if (SuppressRepeatedExplicitEnhancementShortcut(
+                        ViewerKeyAction.EnhanceCurrentImage,
+                        isRepeat))
+                {
+                    return true;
+                }
                 StartModalEnhancement_Click(this, new RoutedEventArgs());
                 return true;
             }
             if (MatchesBinding(ViewerKeyAction.PhotorealizeCurrentImage, key, modifiers)
                 && ModalPhotorealButton.IsEnabled)
             {
+                if (SuppressRepeatedExplicitEnhancementShortcut(
+                        ViewerKeyAction.PhotorealizeCurrentImage,
+                        isRepeat))
+                {
+                    return true;
+                }
                 StartModalPhotoreal_Click(this, new RoutedEventArgs());
                 return true;
             }
@@ -28292,6 +28314,20 @@ public partial class MainWindow : Window
             _shortcutModifierProvider = previous;
         }
     }
+
+    public bool ExplicitEnhancementKeyRepeatSuppressedForSmoke
+        => SuppressRepeatedExplicitEnhancementShortcut(
+                ViewerKeyAction.EnhanceCurrentImage,
+                isRepeat: true)
+            && SuppressRepeatedExplicitEnhancementShortcut(
+                ViewerKeyAction.PhotorealizeCurrentImage,
+                isRepeat: true)
+            && !SuppressRepeatedExplicitEnhancementShortcut(
+                ViewerKeyAction.EnhanceCurrentImage,
+                isRepeat: false)
+            && !SuppressRepeatedExplicitEnhancementShortcut(
+                ViewerKeyAction.OpenI2iEdit,
+                isRepeat: true);
 
     public bool InvokeGalleryNavigationKeyForSmoke(Key key)
     {
