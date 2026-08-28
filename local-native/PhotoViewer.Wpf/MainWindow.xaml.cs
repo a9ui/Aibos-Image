@@ -4751,7 +4751,7 @@ public partial class MainWindow : Window
         }
 
         bool malformed = false;
-        bool saved = TryWithPersistenceLock(statePath, () =>
+        bool saved = TryWithViewerStateLock(statePath, () =>
         {
             if (!TryReadViewerStateFile(statePath, out ViewerState? state))
             {
@@ -6609,6 +6609,72 @@ public partial class MainWindow : Window
         return lease is not null && operation();
     }
 
+    private static bool TryWithViewerStateLock(string targetPath, Func<bool> operation)
+    {
+        // state.json is renderer-local presentation state, not a shared durable
+        // protocol document. Keep its writer lease kernel-owned so a terminated
+        // process cannot strand a pathname-only lock that blocks later saves.
+        bool onUiThread = Application.Current?.Dispatcher?.CheckAccess() == true;
+        using var lease = TryAcquireViewerStateLock(
+            targetPath,
+            onUiThread ? 0 : PersistenceLockTimeoutMilliseconds);
+        return lease is not null && operation();
+    }
+
+    private static ViewerStateLockLease? TryAcquireViewerStateLock(
+        string targetPath,
+        int timeoutMilliseconds)
+    {
+        string lockPath = targetPath + ".lock";
+        var wait = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                var stream = new FileStream(
+                    lockPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.DeleteOnClose | FileOptions.WriteThrough);
+                try
+                {
+                    stream.SetLength(0);
+                    var payload = JsonSerializer.Serialize(new
+                    {
+                        pid = Environment.ProcessId,
+                        createdAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+                    });
+                    byte[] bytes = Encoding.UTF8.GetBytes(payload);
+                    stream.Write(bytes, 0, bytes.Length);
+                    stream.Flush(flushToDisk: true);
+                    TryCleanupPersistenceTempResidue(targetPath);
+                    return new ViewerStateLockLease(stream);
+                }
+                catch
+                {
+                    stream.Dispose();
+                    return null;
+                }
+            }
+            catch (IOException)
+            {
+                // An exclusive open is the ownership check: a live legacy or
+                // current writer keeps this path unavailable. An unowned crash
+                // orphan can be opened safely and becomes this kernel-held lease.
+                if (wait.ElapsedMilliseconds >= timeoutMilliseconds)
+                    return null;
+                Thread.Sleep(PersistenceLockRetryMilliseconds);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
     private static PersistenceLockLease? TryAcquirePersistenceLock(string targetPath, int timeoutMilliseconds)
     {
         string lockPath = targetPath + ".lock";
@@ -6687,6 +6753,11 @@ public partial class MainWindow : Window
             stream.Dispose();
             try { File.Delete(path); } catch { }
         }
+    }
+
+    private sealed class ViewerStateLockLease(FileStream stream) : IDisposable
+    {
+        public void Dispose() => stream.Dispose();
     }
 
     private void ReportPersistenceRefusal(string subject, string path, bool protectedFile = false, Action? retryAction = null)
@@ -24625,7 +24696,7 @@ public partial class MainWindow : Window
                 ExtensionData = CloneExtensionData(_stateExtensionData),
             };
             bool malformed = false;
-            bool saved = TryWithPersistenceLock(path, () =>
+            bool saved = TryWithViewerStateLock(path, () =>
             {
                 if (!TryReadViewerStateFile(path, out var latest))
                 {
@@ -28897,7 +28968,7 @@ public partial class MainWindow : Window
             "favorites" => TryMergeFavoriteForSmoke(targetPath, key, 3),
             "seen" => TryMergeSeenForSmoke(targetPath, key),
             "recent" => TryMergeSharedRecentForSmoke(targetPath, key),
-            "state" => TryWithPersistenceLock(targetPath, () =>
+            "state" => TryWithViewerStateLock(targetPath, () =>
             {
                 if (!TryReadViewerStateFile(targetPath, out ViewerState? state))
                     return false;
@@ -28909,6 +28980,9 @@ public partial class MainWindow : Window
             _ => false,
         };
     }
+
+    internal static IDisposable? TryAcquireViewerStateLockForSmoke(string targetPath)
+        => TryAcquireViewerStateLock(Path.GetFullPath(targetPath), timeoutMilliseconds: 0);
 
     /// <summary>
     /// Cross-runtime verifier writer.  It intentionally uses the same create-new

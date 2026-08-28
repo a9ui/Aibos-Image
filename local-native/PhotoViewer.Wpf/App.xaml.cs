@@ -17917,12 +17917,20 @@ public partial class App : Application
                     && !win.ModalVisibleForSmoke
                     && win.SelectedGalleryItemFocusedForSmoke;
 
-                File.WriteAllText(statePath + ".lock", "{\"pid\":1}");
+                using IDisposable? liveStateLease =
+                    global::PhotoViewer.Wpf.MainWindow.TryAcquireViewerStateLockForSmoke(statePath);
                 win.FlushStateForSmoke();
-                bool lockBusyStatus = win.DeleteStatusForSmoke.Contains("busy", StringComparison.OrdinalIgnoreCase) && win.DeleteStatusRetryVisibleForSmoke;
-                File.Delete(statePath + ".lock");
+                bool lockBusyStatus = liveStateLease is not null
+                    && win.DeleteStatusForSmoke.Contains("busy", StringComparison.OrdinalIgnoreCase)
+                    && win.DeleteStatusRetryVisibleForSmoke;
+                liveStateLease?.Dispose();
                 win.RetryStatusForSmoke();
                 bool lockRetryCleared = !win.DeleteStatusRetryVisibleForSmoke;
+
+                File.WriteAllBytes(statePath + ".lock", []);
+                win.FlushStateForSmoke();
+                bool orphanStateLockRecovered = !File.Exists(statePath + ".lock")
+                    && !win.DeleteStatusRetryVisibleForSmoke;
 
                 File.WriteAllText(favoritesPath, "{\"broken\":{}}");
                 bool favoriteRefused = !win.SetSelectedFavoriteLevelForSmoke(2)
@@ -17967,7 +17975,7 @@ public partial class App : Application
                     && settingsFocus && settingsFocusRestored
                     && deleteFocus && deleteFocusRestored
                     && modalInitialFocus && modalFocusRestored
-                    && lockBusyStatus && lockRetryCleared
+                    && lockBusyStatus && lockRetryCleared && orphanStateLockRecovered
                     && favoriteRefused && seenRefused && seenVisualRollback && stateRefused && recentRefused
                     && logoAccessible && logoActivated;
                 result = new P1BSmokeResult
@@ -17989,6 +17997,7 @@ public partial class App : Application
                     CardsFocused = cardsFocused,
                     LockBusyStatus = lockBusyStatus,
                     LockRetryCleared = lockRetryCleared,
+                    OrphanStateLockRecovered = orphanStateLockRecovered,
                     FavoritesRefused = favoriteRefused,
                     SeenRefused = seenRefused,
                     SeenVisualRollback = seenVisualRollback,
@@ -38301,6 +38310,7 @@ public partial class App : Application
         public bool CardsFocused { get; init; }
         public bool LockBusyStatus { get; init; }
         public bool LockRetryCleared { get; init; }
+        public bool OrphanStateLockRecovered { get; init; }
         public bool FavoritesRefused { get; init; }
         public bool SeenRefused { get; init; }
         public bool SeenVisualRollback { get; init; }
