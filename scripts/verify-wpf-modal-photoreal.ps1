@@ -81,6 +81,7 @@ try {
         'resetPromptContract',
         'appSettingsPromptContract',
         'appSettingsControlsContract',
+        'photorealEngineContract',
         'styleContract',
         'stylePersistenceContract',
         'styleReloadContract',

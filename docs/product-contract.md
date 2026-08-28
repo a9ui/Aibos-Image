@@ -152,6 +152,10 @@ The executable cases for these meanings are routed by
   managed-operation path.
 - Every job snapshots the effective request needed for deterministic retry.
   Later settings changes do not silently rewrite queued or running jobs.
+- The photoreal Engine selector is independent from Style. Missing or unknown
+  local selection state uses the established FLUX.2 Klein adapter. An explicit
+  selection affects only newly created Jobs, whose `adapterId` remains the
+  durable execution snapshot; applying or saving a Style never changes it.
 - Opening or selecting a native photoreal Style is passive and creates no Job.
   A shipped built-in Style changes only the current positive and blank-positive
   prompt pair; it preserves the current LoRA, strength, CFG, quality,

@@ -24272,6 +24272,7 @@ public partial class MainWindow : Window
             SyncFavoriteFilterControls();
             SyncFoldersSectionControls();
             RestoreModalPhotorealSettings(null, null, null, null, null);
+            RestorePhotorealEngineSetting(null);
             RestorePhotorealSeedSettings(null, null);
             RestorePhotorealPreservationScanSetting(null);
             RestoreAiStyles(null);
@@ -24350,6 +24351,7 @@ public partial class MainWindow : Window
             state.PhotorealNegativePrompt,
             state.PhotorealLoraEnabled,
             state.PhotorealNegativePromptEnabled);
+        RestorePhotorealEngineSetting(state.PhotorealEngineId);
         RestorePhotorealSeedSettings(
             state.PhotorealSeedMode,
             state.PhotorealSeedValue);
@@ -24627,6 +24629,7 @@ public partial class MainWindow : Window
                 ModalFilmstripOpen = _modalFilmstripOpen,
                 ModalEdgeNavigationPercent = _modalEdgeNavigationPercent,
                 PhotorealLoraEnabled = _modalPhotorealLoraEnabled,
+                PhotorealEngineId = _photorealEngineId,
                 PhotorealStrength = _modalPhotorealStrength,
                 PhotorealCfgScale = _modalPhotorealCfgScale,
                 PhotorealSteps = _modalPhotorealSteps,
@@ -31998,6 +32001,9 @@ public sealed class ViewerState
     public double? ModalEdgeNavigationPercent { get; set; }
     // WPF-local request defaults for the explicit AI photorealization action.
     public bool? PhotorealLoraEnabled { get; set; }
+    // Engine is independent from Style. Missing and unknown values stay on
+    // the established FLUX.2 Klein path.
+    public string? PhotorealEngineId { get; set; }
     public double? PhotorealStrength { get; set; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public double? PhotorealStructureStrength { get; set; }

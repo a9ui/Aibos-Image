@@ -35,6 +35,7 @@ public partial class App
             bool resetPromptContract = false;
             bool appSettingsPromptContract = false;
             bool appSettingsControlsContract = false;
+            bool photorealEngineContract = false;
             bool fallbackPromptContract = false;
             bool negativePromptContract = false;
             bool loraToggleContract = false;
@@ -987,6 +988,33 @@ public partial class App
                     && styleApplied
                     && styleDeleted
                     && !window.PhotorealStyleNamesForSmoke.Contains(styleName, StringComparer.OrdinalIgnoreCase);
+                const string kreaEngineId =
+                    "comfyui-krea2-anything2real-v3-photoreal";
+                window.SelectPhotorealEngineForSmoke(kreaEngineId);
+                bool kreaSelected = window.PhotorealEngineForSmoke is
+                    (kreaEngineId, true, true);
+                bool builtInStyleSelectedWithKrea =
+                    window.SelectBuiltInPhotorealStyleForSmoke(
+                        "soft-beauty-glamour");
+                bool styleDidNotChangeEngine =
+                    window.PhotorealEngineForSmoke.EngineId == kreaEngineId;
+                window.FlushStateForSmoke();
+                var engineReloadWindow = new MainWindow();
+                try
+                {
+                    engineReloadWindow.SuppressStatePersistence();
+                    photorealEngineContract = kreaSelected
+                        && builtInStyleSelectedWithKrea
+                        && styleDidNotChangeEngine
+                        && engineReloadWindow.PhotorealEngineForSmoke.EngineId
+                            == kreaEngineId;
+                }
+                finally
+                {
+                    engineReloadWindow.Close();
+                }
+                window.SelectPhotorealEngineForSmoke(
+                    "comfyui-flux2-photoreal");
                 window.ConfigureModalPhotorealSettingsForSmoke(
                     0.55,
                     8,
@@ -2540,6 +2568,7 @@ public partial class App
                     && resetPromptContract
                     && appSettingsPromptContract
                     && appSettingsControlsContract
+                    && photorealEngineContract
                     && styleContract
                     && stylePersistenceContract
                     && styleReloadContract
@@ -2628,6 +2657,7 @@ public partial class App
                     resetPromptContract,
                     appSettingsPromptContract,
                     appSettingsControlsContract,
+                    photorealEngineContract,
                     styleContract,
                     stylePersistenceContract,
                     styleReloadContract,
