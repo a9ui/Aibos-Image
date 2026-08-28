@@ -172,10 +172,6 @@ public partial class App
                     .All(path => Path.GetFullPath(path).StartsWith(
                         Path.GetFullPath(smokeRoot) + Path.DirectorySeparatorChar,
                         StringComparison.OrdinalIgnoreCase));
-                bool moveOnly = singleMovePublished
-                    && singleMoveBackPublished
-                    && window.ProjectionResetNotificationCountForSmoke == resetsBefore
-                    && window.ProjectionMoveNotificationCountForSmoke == movesBefore + 2;
                 bool thumbnailsRetained = thumbnailsLoaded
                     && loadedBefore == 2
                     && loadedAfter == loadedBefore;
