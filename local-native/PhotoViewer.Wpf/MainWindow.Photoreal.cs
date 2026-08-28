@@ -20,6 +20,9 @@ public partial class MainWindow
     private const double DefaultPhotorealCfgScale = 1.0;
     private const bool DefaultPhotorealNegativePromptEnabled = false;
     private const bool DefaultPhotorealPreservationScanEnabled = false;
+    private const string DefaultPhotorealEngineId = "comfyui-flux2-photoreal";
+    private const string KreaV3PhotorealEngineId =
+        "comfyui-krea2-anything2real-v3-photoreal";
     private const int DefaultPhotorealSteps = 8;
     private const int DefaultPhotorealMaxDimension = 1280;
     private const int MaxPhotorealStyleCount = 32;
@@ -55,6 +58,7 @@ public partial class MainWindow
         DefaultPhotorealNegativePromptEnabled;
     private bool _photorealPreservationScanEnabled =
         DefaultPhotorealPreservationScanEnabled;
+    private string _photorealEngineId = DefaultPhotorealEngineId;
     private bool _photorealSeedFixed;
     private string _photorealSeedValueText = "0";
     private bool _syncingModalPhotorealSettings;
@@ -162,6 +166,7 @@ public partial class MainWindow
         string Label);
 
     private sealed record ModalPhotorealRequestSettings(
+        string AdapterId,
         bool LoraEnabled,
         double Strength,
         int Steps,
@@ -1449,6 +1454,7 @@ public partial class MainWindow
             prompt = _modalPhotorealEmptyPrompt.Trim();
 
         return new(
+            _photorealEngineId,
             _modalPhotorealLoraEnabled,
             _modalPhotorealStrength,
             _modalPhotorealSteps,
@@ -1489,7 +1495,7 @@ public partial class MainWindow
             ["sourceId"] = sourceIdentity,
             ["operation"] = "photoreal",
             ["presetId"] = "photoreal-balanced",
-            ["adapterId"] = "comfyui-flux2-photoreal",
+            ["adapterId"] = settings.AdapterId,
             ["loraEnabled"] = settings.LoraEnabled,
             ["strength"] = settings.Strength,
             ["steps"] = settings.Steps,
@@ -1702,6 +1708,54 @@ public partial class MainWindow
                 : "標準のFLUX.2 Klein本体だけを使います。");
         if (!_initializing)
             SaveState();
+    }
+
+    private void PhotorealEngine_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_syncingModalPhotorealSettings || sender is not ComboBox comboBox)
+            return;
+
+        string? requested = (comboBox.SelectedItem as ComboBoxItem)?.Tag as string;
+        _photorealEngineId = NormalizePhotorealEngineId(requested);
+        SyncModalPhotorealSettingsControls();
+        SetPhotorealSettingsStatus(
+            _photorealEngineId == KreaV3PhotorealEngineId
+                ? "Krea 2 + Anything2Real V3（試験用）を保存しました。LoRAは固定1.0、kv_cacheは修正版のONです。"
+                : "FLUX.2 Kleinを保存しました。次に追加する実写化ジョブから使われます。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private static string NormalizePhotorealEngineId(string? engineId)
+        => engineId == KreaV3PhotorealEngineId
+            ? KreaV3PhotorealEngineId
+            : DefaultPhotorealEngineId;
+
+    private static void SelectPhotorealEngine(
+        ComboBox comboBox,
+        string engineId)
+    {
+        foreach (object item in comboBox.Items)
+        {
+            if (item is ComboBoxItem choice
+                && string.Equals(
+                    choice.Tag as string,
+                    engineId,
+                    StringComparison.Ordinal))
+            {
+                comboBox.SelectedItem = choice;
+                return;
+            }
+        }
+        comboBox.SelectedIndex = 0;
+    }
+
+    private void RestorePhotorealEngineSetting(string? engineId)
+    {
+        _photorealEngineId = NormalizePhotorealEngineId(engineId);
+        SyncModalPhotorealSettingsControls();
     }
 
     private void PhotorealPreservationScanEnabled_Changed(
@@ -2640,6 +2694,8 @@ public partial class MainWindow
     {
         if (ModalPhotorealLoraEnabledCheckBox is null
             || AppPhotorealLoraEnabledCheckBox is null
+            || ModalPhotorealEngineComboBox is null
+            || AppPhotorealEngineComboBox is null
             || ModalPhotorealPreservationScanCheckBox is null
             || AppPhotorealPreservationScanCheckBox is null
             || ModalPhotorealNegativePromptEnabledCheckBox is null
@@ -2658,8 +2714,17 @@ public partial class MainWindow
         _syncingModalPhotorealSettings = true;
         try
         {
+            SelectPhotorealEngine(
+                ModalPhotorealEngineComboBox,
+                _photorealEngineId);
+            SelectPhotorealEngine(
+                AppPhotorealEngineComboBox,
+                _photorealEngineId);
+            bool usesKlein = _photorealEngineId == DefaultPhotorealEngineId;
             ModalPhotorealLoraEnabledCheckBox.IsChecked = _modalPhotorealLoraEnabled;
             AppPhotorealLoraEnabledCheckBox.IsChecked = _modalPhotorealLoraEnabled;
+            ModalPhotorealLoraEnabledCheckBox.IsEnabled = usesKlein;
+            AppPhotorealLoraEnabledCheckBox.IsEnabled = usesKlein;
             ModalPhotorealPreservationScanCheckBox.IsChecked =
                 _photorealPreservationScanEnabled;
             AppPhotorealPreservationScanCheckBox.IsChecked =
@@ -2669,7 +2734,8 @@ public partial class MainWindow
             AppPhotorealNegativePromptEnabledCheckBox.IsChecked =
                 _modalPhotorealNegativePromptEnabled;
             ModalPhotorealStrengthSlider.Value = _modalPhotorealStrength * 100;
-            ModalPhotorealStrengthSlider.IsEnabled = _modalPhotorealLoraEnabled;
+            ModalPhotorealStrengthSlider.IsEnabled =
+                usesKlein && _modalPhotorealLoraEnabled;
             ModalPhotorealCfgScaleSlider.Value = _modalPhotorealCfgScale * 100;
             SelectIntegerTag(ModalPhotorealStepsComboBox, _modalPhotorealSteps);
             SelectIntegerTag(ModalPhotorealSizeComboBox, _modalPhotorealMaxDimension);
@@ -2680,7 +2746,8 @@ public partial class MainWindow
             if (AppPhotorealStrengthSlider is not null)
             {
                 AppPhotorealStrengthSlider.Value = _modalPhotorealStrength * 100;
-                AppPhotorealStrengthSlider.IsEnabled = _modalPhotorealLoraEnabled;
+                AppPhotorealStrengthSlider.IsEnabled =
+                    usesKlein && _modalPhotorealLoraEnabled;
             }
             if (AppPhotorealCfgScaleSlider is not null)
                 AppPhotorealCfgScaleSlider.Value = _modalPhotorealCfgScale * 100;
@@ -2903,6 +2970,21 @@ public partial class MainWindow
                 == "Enable Preservation Scan for new AI photorealization jobs"
             && AutomationProperties.GetName(ModalPhotorealPreservationScanCheckBox)
                 == "Enable Preservation Scan for this AI photorealization";
+
+    public (string EngineId, bool AppSurface, bool ModalSurface) PhotorealEngineForSmoke
+        => (
+            _photorealEngineId,
+            AutomationProperties.GetName(AppPhotorealEngineComboBox)
+                == "Default AI photorealization engine",
+            AutomationProperties.GetName(ModalPhotorealEngineComboBox)
+                == "AI photorealization engine");
+
+    public void SelectPhotorealEngineForSmoke(string engineId)
+    {
+        SelectPhotorealEngine(
+            ModalPhotorealEngineComboBox,
+            NormalizePhotorealEngineId(engineId));
+    }
 
     public (bool AppChecked, bool ModalChecked) PhotorealPreservationScanForSmoke
         => (

@@ -35,7 +35,11 @@ public partial class MainWindow
     private static readonly string[] RecoveredUpscaleAdapterIds =
         ["realesrgan-ncnn", "comfyui", "sharp-test"];
     private static readonly string[] RecoveredPhotorealAdapterIds =
-        ["comfyui-flux2-photoreal", "a1111-photoreal"];
+        [
+            "comfyui-flux2-photoreal",
+            "comfyui-krea2-anything2real-v3-photoreal",
+            "a1111-photoreal",
+        ];
 
     private sealed record RecoveredEnhancementOutputCandidate(
         string JobId,

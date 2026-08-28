@@ -3021,6 +3021,17 @@
           <TextBlock Text="すべてのAI実写化で使う共通設定です。ここでの変更は拡大画面にも即時反映され、次にキューへ追加するジョブから使われます。待機中・処理中のジョブは変更されません。" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
             <StackPanel>
+              <TextBlock Text="Engine" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+              <ComboBox x:Name="AppPhotorealEngineComboBox"
+                        Style="{StaticResource PhotorealSettingsComboBox}"
+                        SelectedIndex="0"
+                        SelectionChanged="PhotorealEngine_SelectionChanged"
+                        Margin="0,0,0,10"
+                        AutomationProperties.Name="Default AI photorealization engine"
+                        AutomationProperties.HelpText="Engine changes only newly added jobs and is not stored in Styles.">
+                <ComboBoxItem Content="FLUX.2 Klein（標準）" Tag="comfyui-flux2-photoreal"/>
+                <ComboBoxItem Content="Krea 2 + Anything2Real V3（試験用）" Tag="comfyui-krea2-anything2real-v3-photoreal"/>
+              </ComboBox>
               <CheckBox x:Name="AppPhotorealPreservationScanCheckBox"
                         Content="Preservation Scan"
                         IsChecked="False" Margin="0,0,0,5"
@@ -3732,6 +3743,17 @@
               <TextBlock DockPanel.Dock="Right" Text="GPU queue shared with AI高画質化" Foreground="{StaticResource TextSecondary}" FontSize="10" VerticalAlignment="Center"/>
               <TextBlock Text="AI実写化 設定" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="SemiBold"/>
             </DockPanel>
+            <TextBlock Text="Engine" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalPhotorealEngineComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}"
+                      SelectedIndex="0"
+                      SelectionChanged="PhotorealEngine_SelectionChanged"
+                      Margin="0,0,0,10"
+                      AutomationProperties.Name="AI photorealization engine"
+                      AutomationProperties.HelpText="Engine changes only newly added jobs and is not stored in Styles.">
+              <ComboBoxItem Content="FLUX.2 Klein（標準）" Tag="comfyui-flux2-photoreal"/>
+              <ComboBoxItem Content="Krea 2 + Anything2Real V3（試験用）" Tag="comfyui-krea2-anything2real-v3-photoreal"/>
+            </ComboBox>
             <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalPhotorealStyleComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}"

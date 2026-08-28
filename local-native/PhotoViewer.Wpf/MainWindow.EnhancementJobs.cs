@@ -11033,7 +11033,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && !CancelRequested
         && Status == "queued"
         && Operation == "photoreal"
-        && AdapterId == "comfyui-flux2-photoreal"
+        && AdapterId is "comfyui-flux2-photoreal"
+            or "comfyui-krea2-anything2real-v3-photoreal"
         && QueuedPhotorealPromptUpdateCapabilitySafe;
     public bool QueuedPhotorealPromptUpdateCapabilitySafe
     {
@@ -11576,6 +11577,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         ("photoreal-balanced", "comfyui-flux2-photoreal") =>
             "Balanced · FLUX.2 Photoreal",
+        ("photoreal-balanced", "comfyui-krea2-anything2real-v3-photoreal") =>
+            "Balanced · Krea V3（試験用）",
         ("photo-detail-x4", "realesrgan-ncnn") =>
             "Photo Detail 4x · Real-ESRGAN",
         ("anime-sharp-x2", "realesrgan-ncnn") =>
