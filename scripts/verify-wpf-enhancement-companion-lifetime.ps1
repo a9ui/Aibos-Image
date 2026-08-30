@@ -89,6 +89,10 @@ try {
     Assert-True ($lazyResumeResult.passiveDidNotStart -eq $true) 'Passive queue UI started the Companion.'
     Assert-True ($lazyResumeResult.explicitResumeExact -eq $true) 'Explicit queue Resume was not exact.'
     Assert-True ($lazyResumeResult.duplicateGuarded -eq $true) 'Duplicate queue Resume was not guarded.'
+    Assert-True ($lazyResumeResult.walFixtureValid -eq $true) 'Queue bootstrap smoke did not create a valid TEMP SQLite WAL fixture.'
+    Assert-True ($lazyResumeResult.recoveryPreservedQueueState -eq $true) 'Queue recovery changed paused/count/order semantics before Resume.'
+    Assert-True ($lazyResumeResult.recoveryBeforeHealth -eq $true) 'Explicit bootstrap did not recover the authenticated queue before its first health read.'
+    Assert-True ($lazyResumeResult.healthBeforeRecoveryRequests -eq 0) 'Explicit bootstrap read health before WAL recovery.'
 
     [pscustomobject]@{
         allPassed = $true
@@ -103,6 +107,7 @@ try {
         explicitActionAutoStartPreserved = $explicitActionAutoStartPreserved
         automationIsolationPreserved = $true
         lazyResumeExact = $true
+        walBootstrapRecoveryExact = $true
         actualCompanionStarted = $false
     } | ConvertTo-Json -Compress
 }

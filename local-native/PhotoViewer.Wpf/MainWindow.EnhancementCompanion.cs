@@ -208,36 +208,46 @@ public partial class MainWindow
     private async Task<EnhancementApiResponse> EnsureEnhancementCompanionReadyForExplicitActionAsync(
         string? sourceIdentity = null,
         CancellationToken token = default)
-    {
-        EnhancementApiResponse readiness =
-            await EnsureEnhancementCompanionApiReadyAsync(
-                sourceIdentity,
-                token);
-        if (!readiness.Ok)
-            return readiness;
-
-        EnhancementApiResponse recovery = await SendEnhancementApiAsync(
-            HttpMethod.Post,
-            EnhancementCompanionQueueRecoveryRoute,
-            token: token);
-        return recovery.Ok ? readiness : recovery;
-    }
+        => await EnsureEnhancementCompanionApiReadyAsync(
+            sourceIdentity,
+            token,
+            recoverQueueBeforeHealth: true);
 
     private async Task<EnhancementApiResponse> EnsureEnhancementCompanionApiReadyAsync(
         string? sourceIdentity = null,
-        CancellationToken token = default)
+        CancellationToken token = default,
+        bool recoverQueueBeforeHealth = false)
     {
         _ = sourceIdentity;
         const string readinessRoute = "api/enhance/health";
-        if (!_usingDefaultModalEnhancementSender)
+        bool queueRecoveryCompleted = !recoverQueueBeforeHealth;
+
+        async Task<EnhancementApiResponse> ReadReadinessAfterRequiredRecoveryAsync(
+            CancellationToken requestToken)
         {
+            if (!queueRecoveryCompleted)
+            {
+                EnhancementApiResponse recovery = await SendEnhancementApiAsync(
+                    HttpMethod.Post,
+                    EnhancementCompanionQueueRecoveryRoute,
+                    token: requestToken);
+                if (!recovery.Ok)
+                    return recovery;
+                queueRecoveryCompleted = true;
+            }
+
             EnhancementApiResponse response = await SendEnhancementApiAsync(
                 HttpMethod.Get,
                 readinessRoute,
-                token: token);
+                token: requestToken);
             return IsReadyEnhancementCompanionResponse(response)
                 ? response
                 : InvalidEnhancementCompanionReadiness(response);
+        }
+
+        if (!_usingDefaultModalEnhancementSender)
+        {
+            return await ReadReadinessAfterRequiredRecoveryAsync(token);
         }
         if (!TryGetOrCreateEnhancementCompanionAuthToken(
                 out string authToken,
@@ -251,13 +261,7 @@ public partial class MainWindow
         if (ownership.Verified)
         {
             _enhancementCompanionOwnershipVerified = true;
-            EnhancementApiResponse response = await SendEnhancementApiAsync(
-                HttpMethod.Get,
-                readinessRoute,
-                token: token);
-            return IsReadyEnhancementCompanionResponse(response)
-                ? response
-                : InvalidEnhancementCompanionReadiness(response);
+            return await ReadReadinessAfterRequiredRecoveryAsync(token);
         }
         _enhancementCompanionOwnershipVerified = false;
         if (!ownership.TransportUnavailable && !ownership.RetryableBusy)
@@ -282,13 +286,7 @@ public partial class MainWindow
             if (ownership.Verified)
             {
                 _enhancementCompanionOwnershipVerified = true;
-                EnhancementApiResponse response = await SendEnhancementApiAsync(
-                    HttpMethod.Get,
-                    readinessRoute,
-                    token: linkedToken);
-                return IsReadyEnhancementCompanionResponse(response)
-                    ? response
-                    : InvalidEnhancementCompanionReadiness(response);
+                return await ReadReadinessAfterRequiredRecoveryAsync(linkedToken);
             }
             if (!ownership.TransportUnavailable && !ownership.RetryableBusy)
             {
@@ -313,13 +311,7 @@ public partial class MainWindow
                 if (ownership.Verified)
                 {
                     _enhancementCompanionOwnershipVerified = true;
-                    EnhancementApiResponse response = await SendEnhancementApiAsync(
-                        HttpMethod.Get,
-                        readinessRoute,
-                        token: linkedToken);
-                    return IsReadyEnhancementCompanionResponse(response)
-                        ? response
-                        : InvalidEnhancementCompanionReadiness(response);
+                    return await ReadReadinessAfterRequiredRecoveryAsync(linkedToken);
                 }
                 if (!ownership.TransportUnavailable && !ownership.RetryableBusy)
                 {
@@ -368,10 +360,14 @@ public partial class MainWindow
                 if (ownership.Verified)
                 {
                     _enhancementCompanionOwnershipVerified = true;
-                    EnhancementApiResponse response = await SendEnhancementApiAsync(
-                        HttpMethod.Get,
-                        readinessRoute,
-                        token: linkedToken);
+                    EnhancementApiResponse response =
+                        await ReadReadinessAfterRequiredRecoveryAsync(linkedToken);
+                    if (!queueRecoveryCompleted)
+                    {
+                        _enhancementCompanionLaunchError = response.Error;
+                        CompleteOwnedEnhancementCompanionAfterBootstrapFailure();
+                        return response;
+                    }
                     if (IsReadyEnhancementCompanionResponse(response))
                     {
                         _enhancementCompanionLaunchError = null;
@@ -382,7 +378,7 @@ public partial class MainWindow
                 {
                     string error = ownership.Error;
                     _enhancementCompanionLaunchError = error;
-                    StopOwnedEnhancementCompanion();
+                    CompleteOwnedEnhancementCompanionAfterBootstrapFailure();
                     return new EnhancementApiResponse(
                         false,
                         ownership.StatusCode,
@@ -393,12 +389,12 @@ public partial class MainWindow
 
             string timeoutError = "The local AI companion did not become ready within two minutes.";
             _enhancementCompanionLaunchError = timeoutError;
-            StopOwnedEnhancementCompanion();
+            CompleteOwnedEnhancementCompanionAfterBootstrapFailure();
             return new EnhancementApiResponse(false, 0, null, timeoutError);
         }
         catch (OperationCanceledException)
         {
-            StopOwnedEnhancementCompanion();
+            CompleteOwnedEnhancementCompanionAfterBootstrapFailure();
             return new EnhancementApiResponse(false, 0, null, "Starting the local AI companion was canceled.");
         }
         finally
@@ -3746,6 +3742,21 @@ public partial class MainWindow
 
     private void CompleteOwnedEnhancementCompanionForApplicationClose()
     {
+        if (Volatile.Read(ref _enhancementCompanionDurableWorkActivated) == 0)
+        {
+            StopOwnedEnhancementCompanion();
+            return;
+        }
+
+        ReleaseOwnedEnhancementCompanion();
+    }
+
+    private void CompleteOwnedEnhancementCompanionAfterBootstrapFailure()
+    {
+        // An authenticated recovery may already have adopted durable queued or
+        // running work even when its response or the following health read
+        // fails. Preserve that exact worker; a read-only bootstrap failure can
+        // still stop the exact process created by this WPF instance.
         if (Volatile.Read(ref _enhancementCompanionDurableWorkActivated) == 0)
         {
             StopOwnedEnhancementCompanion();
