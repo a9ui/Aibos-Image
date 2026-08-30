@@ -51,15 +51,15 @@ try {
     $explicitActionAutoStartPreserved =
         $companionSource -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync[\s\S]*?EnsureEnhancementCompanionApiReadyAsync' -and
         $companionSource -match 'TryStartOwnedEnhancementCompanion\(out string startError\)'
-    $explicitDurableBootstrapUnified =
-        $companionSource -match 'SendIdempotentEnhancementMutationAsync[\s\S]{0,3500}recoverQueueBeforeHealth:\s*\r?\n\s*IsDurableWorkActivatingCompanionRequest\(method\)' -and
-        $companionSource -match 'SendEnhancementEnqueueAsync\([\s\S]{0,6000}recoverQueueBeforeHealth:\s*true' -and
-        $companionSource -match 'TrySendDurableEnhancementBatchCoreAsync\([\s\S]{0,5000}recoverQueueBeforeHealth:\s*true' -and
-        $companionSource -match 'RecoverAndWakeDurableEnqueueInboxAsync\([\s\S]{0,1800}recoverQueueBeforeHealth:\s*true'
+    $explicitRecoveryBoundaryExact =
+        $companionSource -match 'RecoverAndWakeDurableEnqueueInboxAsync\([\s\S]{0,1800}recoverQueueBeforeHealth:\s*true' -and
+        $companionSource -notmatch 'SendIdempotentEnhancementMutationAsync[\s\S]{0,3500}recoverQueueBeforeHealth:\s*true' -and
+        $companionSource -notmatch 'SendEnhancementEnqueueAsync\([\s\S]{0,6000}recoverQueueBeforeHealth:\s*true' -and
+        $companionSource -notmatch 'TrySendDurableEnhancementBatchCoreAsync\([\s\S]{0,5000}recoverQueueBeforeHealth:\s*true'
     Assert-True $ordinaryStartupLazy 'Ordinary WPF startup still references Companion auto-start.'
     Assert-True $passiveReadProbeOnly 'A passive Companion read can start a process.'
     Assert-True $explicitActionAutoStartPreserved 'Explicit Enhancement action lost owned Companion auto-start.'
-    Assert-True $explicitDurableBootstrapUnified 'An explicit durable mutation still reads health before authenticated queue recovery.'
+    Assert-True $explicitRecoveryBoundaryExact 'Queue recovery escaped Resume or the post-publish durable-inbox boundary.'
 
     & $DotnetPath build $project -c $Configuration --artifacts-path $artifacts --nologo
     Assert-True ($LASTEXITCODE -eq 0) 'Aibos WPF build failed.'
@@ -113,7 +113,7 @@ try {
         ordinaryStartupLazy = $ordinaryStartupLazy
         passiveReadProbeOnly = $passiveReadProbeOnly
         explicitActionAutoStartPreserved = $explicitActionAutoStartPreserved
-        explicitDurableBootstrapUnified = $explicitDurableBootstrapUnified
+        explicitRecoveryBoundaryExact = $explicitRecoveryBoundaryExact
         automationIsolationPreserved = $true
         lazyResumeExact = $true
         walBootstrapRecoveryExact = $true

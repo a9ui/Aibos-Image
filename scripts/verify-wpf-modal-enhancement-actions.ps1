@@ -169,10 +169,10 @@ try {
         'idempotentMutationReconnected',
         'idempotentMutationExactReplay',
         'idempotentMutationNoDuplicate',
+        'idempotentMutationRecoverySuppressed',
         'explicitCompanionAutoStart',
         'companionQueueRecoveryAuthenticated',
         'durableListenerHandoffSavedForDelivery',
-        'durableBootstrapRecoveryBeforePublish',
         'durableRecoveryAfterPublish',
         'durableRecoveryCarriedRequestId',
         'durableBatchDefinitiveFailurePerItem',
@@ -200,6 +200,9 @@ try {
         Assert-True ($null -ne $property) "Smoke JSON is missing required property: $propertyName"
         Assert-True ($property.Value -eq $true) "Smoke invariant failed: $propertyName"
     }
+    $recoveryBeforePublish = $result.PSObject.Properties['durableRecoveryBeforePublish']
+    Assert-True ($null -ne $recoveryBeforePublish) 'Smoke JSON is missing required property: durableRecoveryBeforePublish'
+    Assert-True ($recoveryBeforePublish.Value -eq $false) 'Durable enqueue recovered or pumped the queue before publishing its reservation.'
     & $DotnetPath $dll --modal-photoreal-smoke $recoveryResultPath
     $recoveryChildExitCode = $LASTEXITCODE
     Assert-True (Test-Path -LiteralPath $recoveryResultPath -PathType Leaf) 'Recovered Enhancement reference smoke did not produce JSON.'
@@ -299,6 +302,7 @@ try {
         idempotentMutationReconnected = [bool]$result.idempotentMutationReconnected
         idempotentMutationExactReplay = [bool]$result.idempotentMutationExactReplay
         idempotentMutationNoDuplicate = [bool]$result.idempotentMutationNoDuplicate
+        idempotentMutationRecoverySuppressed = [bool]$result.idempotentMutationRecoverySuppressed
         closeCompleted = [bool]$result.closeCompleted
         environmentRestored = [bool]$result.environmentRestored
         fingerprintsCaptured = [bool]$result.fingerprintsCaptured

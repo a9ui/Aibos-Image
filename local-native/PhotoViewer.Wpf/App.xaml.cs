@@ -24433,6 +24433,7 @@ public partial class App : Application
             bool idempotentMutationReconnected = false;
             bool idempotentMutationExactReplay = false;
             bool idempotentMutationNoDuplicate = false;
+            bool idempotentMutationRecoverySuppressed = false;
             bool untrustedProbeContainedNoSensitiveData = true;
             bool untrustedDurableReservationSuppressed = false;
             int untrustedProbeCount = 0;
@@ -24443,7 +24444,7 @@ public partial class App : Application
             bool companionListenerHandoffResponseRejected = false;
             bool companionPassiveReadReconnected = false;
             bool durableListenerHandoffSavedForDelivery = false;
-            bool durableBootstrapRecoveryBeforePublish = false;
+            bool durableRecoveryBeforePublish = false;
             bool durableRecoveryAfterPublish = false;
             bool durableRecoveryCarriedRequestId = false;
             bool durableBatchDefinitiveFailurePerItem = false;
@@ -24858,6 +24859,7 @@ public partial class App : Application
                 int mutationIdentityProbeCount = 0;
                 int mutationRequestCount = 0;
                 int mutationApplyCount = 0;
+                int mutationRecoveryCount = 0;
                 var mutationBodies = new List<string>();
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
                     async (request, token) =>
@@ -24924,6 +24926,7 @@ public partial class App : Application
                                 StringComparison.Ordinal)
                             && inner?.BodyJson is null)
                         {
+                            mutationRecoveryCount++;
                             return win.EnhancementCompanionSecureResponseForSmoke(
                                 request,
                                 (int)HttpStatusCode.OK,
@@ -24990,6 +24993,7 @@ public partial class App : Application
                         out JsonElement mutationMissing)
                     && mutationMissing.TryGetInt32(out int mutationMissingCount)
                     && mutationMissingCount == 2;
+                idempotentMutationRecoverySuppressed = mutationRecoveryCount == 0;
 
                 int readinessProbeCount = 0;
                 int readinessJobsRequestCount = 0;
@@ -25233,7 +25237,7 @@ public partial class App : Application
                             }
                             else
                             {
-                                durableBootstrapRecoveryBeforePublish = true;
+                                durableRecoveryBeforePublish = true;
                             }
                         }
                         if (durableListenerSwapped
@@ -25312,7 +25316,7 @@ public partial class App : Application
                     durableSaved
                     && durableListenerSwapped
                     && durableListenerSawOnlyCiphertext
-                    && durableBootstrapRecoveryBeforePublish
+                    && !durableRecoveryBeforePublish
                     && durableRecoveryAfterPublish
                     && durableRecoveryCarriedRequestId
                     && pendingAfterListenerSwap == pendingBeforeListenerSwap + 1;
@@ -25836,6 +25840,7 @@ public partial class App : Application
                     && idempotentMutationReconnected
                     && idempotentMutationExactReplay
                     && idempotentMutationNoDuplicate
+                    && idempotentMutationRecoverySuppressed
                     && explicitCompanionAutoStart
                     && companionAuthenticatedRequestHeaders
                     && companionListenerHandoffEncrypted
@@ -25990,6 +25995,7 @@ public partial class App : Application
                 idempotentMutationReconnected,
                 idempotentMutationExactReplay,
                 idempotentMutationNoDuplicate,
+                idempotentMutationRecoverySuppressed,
                 explicitCompanionAutoStart,
                 companionAuthenticatedRequestHeaders,
                 companionQueueRecoveryAuthenticated,
@@ -25997,7 +26003,7 @@ public partial class App : Application
                 companionListenerHandoffResponseRejected,
                 companionPassiveReadReconnected,
                 durableListenerHandoffSavedForDelivery,
-                durableBootstrapRecoveryBeforePublish,
+                durableRecoveryBeforePublish,
                 durableRecoveryAfterPublish,
                 durableRecoveryCarriedRequestId,
                 durableBatchDefinitiveFailurePerItem,

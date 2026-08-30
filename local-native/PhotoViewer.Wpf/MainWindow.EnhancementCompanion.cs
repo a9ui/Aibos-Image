@@ -528,10 +528,7 @@ public partial class MainWindow
             && !_enhancementCompanionOwnershipVerified)
         {
             EnhancementApiResponse readiness =
-                await EnsureEnhancementCompanionApiReadyAsync(
-                    token: token,
-                    recoverQueueBeforeHealth:
-                        IsDurableWorkActivatingCompanionRequest(method));
+                await EnsureEnhancementCompanionApiReadyAsync(token: token);
             if (!readiness.Ok)
                 return readiness;
         }
@@ -549,10 +546,7 @@ public partial class MainWindow
         }
 
         EnhancementApiResponse reconnect =
-            await EnsureEnhancementCompanionApiReadyAsync(
-                token: token,
-                recoverQueueBeforeHealth:
-                    IsDurableWorkActivatingCompanionRequest(method));
+            await EnsureEnhancementCompanionApiReadyAsync(token: token);
         if (!reconnect.Ok)
             return reconnect;
 
@@ -1622,8 +1616,7 @@ public partial class MainWindow
             EnhancementApiResponse readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
                     recoverySourceIdentity,
-                    token,
-                    recoverQueueBeforeHealth: true);
+                    token);
             if (!readiness.Ok)
                 return readiness;
         }
@@ -1805,8 +1798,7 @@ public partial class MainWindow
         {
             EnhancementApiResponse readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
-                    token: token,
-                    recoverQueueBeforeHealth: true);
+                    token: token);
             if (!readiness.Ok)
             {
                 EnhancementApiResponse rejected = new(
