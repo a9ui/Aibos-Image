@@ -1302,6 +1302,16 @@ public partial class App : Application
             return;
         }
 
+        int photorealSafetySmokeIdx = Array.IndexOf(
+            e.Args,
+            "--photoreal-safety-smoke");
+        if (photorealSafetySmokeIdx >= 0
+            && photorealSafetySmokeIdx + 1 < e.Args.Length)
+        {
+            CapturePhotorealSafetySmoke(e.Args[photorealSafetySmokeIdx + 1]);
+            return;
+        }
+
         int enhancementJobsWorkspaceSmokeIdx = Array.IndexOf(e.Args, "--enhancement-jobs-workspace-smoke");
         if (enhancementJobsWorkspaceSmokeIdx >= 0 && enhancementJobsWorkspaceSmokeIdx + 1 < e.Args.Length)
         {

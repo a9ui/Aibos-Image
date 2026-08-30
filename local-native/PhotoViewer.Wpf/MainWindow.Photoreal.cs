@@ -25,6 +25,7 @@ public partial class MainWindow
         "comfyui-krea2-anything2real-v3-photoreal";
     private const string KreaAnimeToRealV1PhotorealEngineId =
         "comfyui-krea2-anime-to-real-edit-v1-photoreal";
+    private const string LegacyA1111PhotorealEngineId = "a1111-photoreal";
     private const int DefaultPhotorealSteps = 8;
     private const int DefaultPhotorealMaxDimension = 1280;
     private const int MaxPhotorealStyleCount = 32;
@@ -61,6 +62,7 @@ public partial class MainWindow
     private bool _photorealPreservationScanEnabled =
         DefaultPhotorealPreservationScanEnabled;
     private string _photorealEngineId = DefaultPhotorealEngineId;
+    private bool _kreaAnimeToRealV1HealthSupported;
     private bool _photorealSeedFixed;
     private string _photorealSeedValueText = "0";
     private bool _syncingModalPhotorealSettings;
@@ -334,6 +336,7 @@ public partial class MainWindow
         if (!TryGetExactDurableCurrentModalEnhancementVersion(
                 tile,
                 out ManagedEnhancementVersion exact)
+            || !exact.MutationSafe
             || IsManagedImageOutputDependencyProtected(exact))
         {
             return false;
@@ -597,7 +600,12 @@ public partial class MainWindow
                 StringComparison.OrdinalIgnoreCase));
         _modalEnhancementVersions.Insert(
             0,
-            new ManagedEnhancementVersion(job.Id, job.Operation, output));
+            new ManagedEnhancementVersion(
+                job.Id,
+                job.Operation,
+                output,
+                MutationSafe: job.Operation != "photoreal"
+                    || job.PhotorealMutationSafe));
         _modalEnhancementVersionIndex = 1;
         _modalShowingEnhanced = true;
         RememberModalDisplayPreference(
@@ -1758,6 +1766,34 @@ public partial class MainWindow
             _ => DefaultPhotorealEngineId,
         };
 
+    private static bool IsKnownPhotorealAdapterId(string? adapterId)
+        => adapterId is DefaultPhotorealEngineId
+            or KreaV3PhotorealEngineId
+            or KreaAnimeToRealV1PhotorealEngineId
+            or LegacyA1111PhotorealEngineId;
+
+    public static bool IsKnownPhotorealAdapterIdForSmoke(string? adapterId)
+        => IsKnownPhotorealAdapterId(adapterId);
+
+    private void ApplyKreaAnimeToRealV1HealthCapability(bool supported)
+    {
+        _kreaAnimeToRealV1HealthSupported = supported;
+        if (AppPhotorealKreaAnimeToRealV1EngineItem is not null)
+        {
+            AppPhotorealKreaAnimeToRealV1EngineItem.IsEnabled = supported;
+            AppPhotorealKreaAnimeToRealV1EngineItem.ToolTip = supported
+                ? "Authenticated local AI health recognizes this exact adapter row."
+                : "Connect to a compatible authenticated local AI service before selecting this engine.";
+        }
+        if (ModalPhotorealKreaAnimeToRealV1EngineItem is not null)
+        {
+            ModalPhotorealKreaAnimeToRealV1EngineItem.IsEnabled = supported;
+            ModalPhotorealKreaAnimeToRealV1EngineItem.ToolTip = supported
+                ? "Authenticated local AI health recognizes this exact adapter row."
+                : "Connect to a compatible authenticated local AI service before selecting this engine.";
+        }
+    }
+
     private bool CurrentPhotorealEngineSupportsQueuedSettingsUpdate()
         => _photorealEngineId == DefaultPhotorealEngineId;
 
@@ -2748,6 +2784,8 @@ public partial class MainWindow
             SelectPhotorealEngine(
                 AppPhotorealEngineComboBox,
                 _photorealEngineId);
+            ApplyKreaAnimeToRealV1HealthCapability(
+                _kreaAnimeToRealV1HealthSupported);
             bool usesKlein = _photorealEngineId == DefaultPhotorealEngineId;
             bool usesKrea = !usesKlein;
             bool usesKreaAnimeToReal =
@@ -3098,6 +3136,12 @@ public partial class MainWindow
         => (
             (AppPhotorealEngineComboBox.SelectedItem as ComboBoxItem)?.Tag as string,
             (ModalPhotorealEngineComboBox.SelectedItem as ComboBoxItem)?.Tag as string);
+
+    public (bool AppEnabled, bool ModalEnabled)
+        KreaAnimeToRealV1SelectorEnabledForSmoke
+        => (
+            AppPhotorealKreaAnimeToRealV1EngineItem.IsEnabled,
+            ModalPhotorealKreaAnimeToRealV1EngineItem.IsEnabled);
 
     public void SelectPhotorealEngineForSmoke(string engineId)
     {

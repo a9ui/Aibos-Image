@@ -3031,7 +3031,10 @@
                         AutomationProperties.HelpText="Engine changes only newly added jobs and is not stored in Styles.">
                 <ComboBoxItem Content="FLUX.2 Klein（標準）" Tag="comfyui-flux2-photoreal"/>
                 <ComboBoxItem Content="Krea 2 + Anything2Real V3（試験用）" Tag="comfyui-krea2-anything2real-v3-photoreal"/>
-                <ComboBoxItem Content="Krea Anime→Real V1（試験用）" Tag="comfyui-krea2-anime-to-real-edit-v1-photoreal"/>
+                <ComboBoxItem x:Name="AppPhotorealKreaAnimeToRealV1EngineItem"
+                              Content="Krea Anime→Real V1（試験用）"
+                              Tag="comfyui-krea2-anime-to-real-edit-v1-photoreal"
+                              IsEnabled="False"/>
               </ComboBox>
               <CheckBox x:Name="AppPhotorealPreservationScanCheckBox"
                         Content="Preservation Scan"
@@ -3755,7 +3758,10 @@
                       AutomationProperties.HelpText="Engine changes only newly added jobs and is not stored in Styles.">
               <ComboBoxItem Content="FLUX.2 Klein（標準）" Tag="comfyui-flux2-photoreal"/>
               <ComboBoxItem Content="Krea 2 + Anything2Real V3（試験用）" Tag="comfyui-krea2-anything2real-v3-photoreal"/>
-              <ComboBoxItem Content="Krea Anime→Real V1（試験用）" Tag="comfyui-krea2-anime-to-real-edit-v1-photoreal"/>
+              <ComboBoxItem x:Name="ModalPhotorealKreaAnimeToRealV1EngineItem"
+                            Content="Krea Anime→Real V1（試験用）"
+                            Tag="comfyui-krea2-anime-to-real-edit-v1-photoreal"
+                            IsEnabled="False"/>
             </ComboBox>
             <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalPhotorealStyleComboBox"
