@@ -563,6 +563,10 @@ internal static class AlbumStore
         }
         finally
         {
+            // temporaryPath is a generated, create-new sibling of the selected
+            // Album store. No Album field, image path, or member value can
+            // choose this cleanup target.
+            // codeql[cs/path-injection]
             try { File.Delete(temporaryPath); } catch { }
         }
     }

@@ -6866,7 +6866,15 @@ public partial class MainWindow : Window
         {
             try
             {
+                // All callers supply the process-selected Viewer state store:
+                // the fixed LocalAppData default or an explicit test/deployment
+                // override. Media paths, persisted fields, and UI text cannot
+                // select this target.
+                // codeql[cs/path-injection]
                 Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                // lockPath is only that state capability plus the fixed .lock
+                // suffix, and DeleteOnClose keeps cleanup bound to this handle.
+                // codeql[cs/path-injection]
                 var stream = new FileStream(
                     lockPath,
                     FileMode.OpenOrCreate,
@@ -6999,6 +7007,9 @@ public partial class MainWindow : Window
     {
         string message = protectedFile
             ? $"{subject} could not be saved because its local file is invalid or newer. Fix it, then reload the folder."
+            // This read checks only the fixed .lock sibling of an already
+            // resolved application store; it never opens or mutates the file.
+            // codeql[cs/path-injection]
             : File.Exists(path + ".lock")
                 ? $"{subject} could not be saved while an update is in progress. Retry after the current update finishes."
                 : $"{subject} could not be saved. Check local file access, then retry the action.";
