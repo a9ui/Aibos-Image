@@ -128,6 +128,10 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-photoreal.ps1
 
+      - name: Photoreal reader-only safety smoke
+        shell: pwsh
+        run: pwsh -NoProfile -File .\scripts\verify-wpf-photoreal-safety.ps1
+
       - name: Video reader, playback, settings, and request smoke
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-enhancement-operation-filter.ps1

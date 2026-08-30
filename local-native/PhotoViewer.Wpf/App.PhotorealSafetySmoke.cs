@@ -19,6 +19,7 @@ public partial class App
             MainWindow? window = null;
             MainWindow? jobsWindow = null;
             MainWindow? batchWindow = null;
+            MainWindow? legacyMixedWindow = null;
             var previousEnvironment = new Dictionary<string, string?>(
                 StringComparer.Ordinal);
             bool ok = false;
@@ -33,10 +34,13 @@ public partial class App
             bool modalClassificationExact = false;
             bool unknownMutationRequestsZero = false;
             bool authoritativeBatchHealthBlocked = false;
+            bool legacyTerminalReaderOnlyFailClosed = false;
             var failureEvidence = new List<object>();
             int enqueueMutationRequests = 0;
             int readerOnlyMutationRequests = 0;
+            int readerOnlyTargetPlanRequests = 0;
             int authoritativeMutationRequests = 0;
+            int legacyMixedMutationRequests = 0;
             try
             {
                 string storeRoot = Path.Combine(smokeRoot, "stores");
@@ -49,12 +53,18 @@ public partial class App
                     storeRoot,
                     "batch-health",
                     "jobs.json");
+                string jobsLegacyMixedPath = Path.Combine(
+                    storeRoot,
+                    "legacy-mixed",
+                    "jobs.json");
                 string outputRoot = Path.Combine(smokeRoot, "outputs");
                 Directory.CreateDirectory(storeRoot);
                 Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(
                     jobsReaderOnlyPath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(jobsBatchPath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(
+                    jobsLegacyMixedPath)!);
                 Directory.CreateDirectory(outputRoot);
                 var environment = new Dictionary<string, string>(
                     StringComparer.Ordinal)
@@ -462,6 +472,34 @@ public partial class App
                 jobsWindow.ConfigureModalEnhancementForSmoke((request, _) =>
                 {
                     string route = request.RequestUri?.AbsolutePath ?? "";
+                    if (request.Method == HttpMethod.Post
+                        && route.EndsWith(
+                            "/api/enhance/jobs/terminal/targets",
+                            StringComparison.Ordinal))
+                    {
+                        Interlocked.Increment(ref readerOnlyTargetPlanRequests);
+                        string body = request.Content?.ReadAsStringAsync()
+                            .GetAwaiter().GetResult() ?? "";
+                        using JsonDocument targetDocument = JsonDocument.Parse(body);
+                        string requestedStatus = targetDocument.RootElement
+                            .GetProperty("status").GetString() ?? "";
+                        int protectedCount = unknownJobs.Count(job =>
+                        {
+                            using JsonDocument jobDocument = JsonDocument.Parse(
+                                JsonSerializer.Serialize(job));
+                            return jobDocument.RootElement.GetProperty("status")
+                                .GetString() == requestedStatus;
+                        });
+                        return Task.FromResult(
+                            JsonResponseForPhotorealSafetySmoke(
+                                HttpStatusCode.OK,
+                                new
+                                {
+                                    targetCount = 0,
+                                    protectedCount,
+                                    ids = Array.Empty<string>(),
+                                }));
+                    }
                     if (request.Method != HttpMethod.Get)
                     {
                         Interlocked.Increment(ref readerOnlyMutationRequests);
@@ -535,10 +573,11 @@ public partial class App
                         == 0;
                 unknownMutationRequestsZero = mutationsRejected
                     && readerOnlyMutationRequests == 0
+                    && readerOnlyTargetPlanRequests == 4
                     && !jobsWindow.RetryAllFailedEnhancementJobsControlForSmoke
-                    && !jobsWindow.ClearAllFailedEnhancementJobsControlForSmoke
+                    && jobsWindow.ClearAllFailedEnhancementJobsControlForSmoke
                     && !jobsWindow.RetryAllCanceledEnhancementJobsControlForSmoke
-                    && !jobsWindow.ClearAllCanceledEnhancementJobsControlForSmoke;
+                    && jobsWindow.ClearAllCanceledEnhancementJobsControlForSmoke;
 
                 var knownKreaJobs = new List<object>
                 {
@@ -629,6 +668,71 @@ public partial class App
                         ModalEnabled: false,
                     };
 
+                var legacyMixedJobs = new List<object>
+                {
+                    PhotorealSafetyJob(
+                        "legacy-safe-photoreal-failed",
+                        "failed",
+                        "comfyui-flux2-photoreal"),
+                    PhotorealSafetyJob(
+                        "legacy-future-photoreal-failed",
+                        "failed",
+                        "comfyui-future-photoreal-v9"),
+                };
+                object legacyMixedHealth = PhotorealSafetyJobsHealth(
+                    legacyMixedJobs,
+                    terminalHistoryCapabilities: false);
+                Environment.SetEnvironmentVariable(
+                    "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH",
+                    jobsLegacyMixedPath);
+                legacyMixedWindow = HiddenWindow();
+                legacyMixedWindow.SuppressStatePersistence();
+                legacyMixedWindow.ConfigureEnhancementJobsBulkConfirmationForSmoke(
+                    static (_, _) => true);
+                legacyMixedWindow.ConfigureModalEnhancementForSmoke((request, _) =>
+                {
+                    string route = request.RequestUri?.AbsolutePath ?? "";
+                    if (request.Method != HttpMethod.Get)
+                    {
+                        Interlocked.Increment(ref legacyMixedMutationRequests);
+                        return Task.FromResult(
+                            JsonResponseForPhotorealSafetySmoke(
+                                HttpStatusCode.InternalServerError,
+                                new { error = "legacy mixed mutation escaped" }));
+                    }
+                    if (route.EndsWith(
+                            "/api/enhance/health",
+                            StringComparison.Ordinal))
+                    {
+                        return Task.FromResult(
+                            JsonResponseForPhotorealSafetySmoke(
+                                HttpStatusCode.OK,
+                                legacyMixedHealth));
+                    }
+                    if (route.EndsWith(
+                            "/api/enhance/jobs",
+                            StringComparison.Ordinal))
+                    {
+                        return Task.FromResult(
+                            JsonResponseForPhotorealSafetySmoke(
+                                HttpStatusCode.OK,
+                                new { jobs = legacyMixedJobs }));
+                    }
+                    return Task.FromResult(JsonResponseForPhotorealSafetySmoke(
+                        HttpStatusCode.NotFound,
+                        new { error = "unexpected legacy mixed route" }));
+                });
+                legacyMixedWindow.Show();
+                await legacyMixedWindow.OpenEnhancementJobsForSmokeAsync();
+                legacyTerminalReaderOnlyFailClosed =
+                    legacyMixedWindow.RetryAllFailedEnhancementJobsControlForSmoke
+                    && !legacyMixedWindow.ClearAllFailedEnhancementJobsControlForSmoke
+                    && await legacyMixedWindow
+                        .RetryAllFailedEnhancementJobsForSmokeAsync() == 0
+                    && await legacyMixedWindow
+                        .ClearAllFailedEnhancementJobsForSmokeAsync() == 0
+                    && legacyMixedMutationRequests == 0;
+
                 ok = initialSelectorsClosed
                     && failureMatrixBlocked
                     && validHealthPublished
@@ -638,7 +742,8 @@ public partial class App
                     && unknownRowsReaderOnly
                     && modalClassificationExact
                     && unknownMutationRequestsZero
-                    && authoritativeBatchHealthBlocked;
+                    && authoritativeBatchHealthBlocked
+                    && legacyTerminalReaderOnlyFailClosed;
                 if (!ok)
                 {
                     failure = "Photoreal safety invariants did not all hold.";
@@ -650,6 +755,10 @@ public partial class App
             }
             finally
             {
+                if (legacyMixedWindow is not null)
+                {
+                    try { legacyMixedWindow.Close(); } catch { }
+                }
                 if (batchWindow is not null)
                 {
                     try { batchWindow.Close(); } catch { }
@@ -683,9 +792,12 @@ public partial class App
                     modalClassificationExact,
                     unknownMutationRequestsZero,
                     authoritativeBatchHealthBlocked,
+                    legacyTerminalReaderOnlyFailClosed,
                     enqueueMutationRequests,
                     readerOnlyMutationRequests,
+                    readerOnlyTargetPlanRequests,
                     authoritativeMutationRequests,
+                    legacyMixedMutationRequests,
                     failureEvidence,
                 }, new JsonSerializerOptions { WriteIndented = true }));
             try { Directory.Delete(smokeRoot, recursive: true); } catch { }
@@ -735,7 +847,9 @@ public partial class App
         return job;
     }
 
-    private static object PhotorealSafetyJobsHealth(IReadOnlyList<object> jobs)
+    private static object PhotorealSafetyJobsHealth(
+        IReadOnlyList<object> jobs,
+        bool terminalHistoryCapabilities = true)
     {
         int Count(string status) => jobs.Count(job =>
         {
@@ -744,6 +858,29 @@ public partial class App
             return document.RootElement.GetProperty("status").GetString()
                 == status;
         });
+        var capabilities = new Dictionary<string, object?>
+        {
+            ["queuedPhotorealSettingsUpdateV1"] = true,
+            ["photorealPromptControlsV2"] = true,
+            ["kreaAnimeToRealV1"] = true,
+            ["kreaAnythingToReal1536V1"] = true,
+            ["atomicImageEnqueueNext"] = true,
+            ["queuedJobsBatchCancelV1"] = true,
+            ["queuedJobsBatchReorderV1"] = true,
+            ["durableEnqueueInboxV1"] = new
+            {
+                ready = true,
+                protocolVersion = 1,
+                backendGeneration = "json-v1",
+            },
+        };
+        if (terminalHistoryCapabilities)
+        {
+            capabilities["terminalHistoryBatchDismissV1"] = true;
+            capabilities["terminalHistoryTargetsV1"] = true;
+            capabilities["terminalHistoryBatchRetryV1"] = true;
+        }
+
         return new
         {
             version = 1,
@@ -774,25 +911,7 @@ public partial class App
                 lastTerminalAt = "2026-08-30T00:00:01.000Z",
             },
             worker = new { paused = false },
-            capabilities = new
-            {
-                queuedPhotorealSettingsUpdateV1 = true,
-                photorealPromptControlsV2 = true,
-                kreaAnimeToRealV1 = true,
-                kreaAnythingToReal1536V1 = true,
-                atomicImageEnqueueNext = true,
-                terminalHistoryBatchDismissV1 = true,
-                queuedJobsBatchCancelV1 = true,
-                queuedJobsBatchReorderV1 = true,
-                terminalHistoryTargetsV1 = true,
-                terminalHistoryBatchRetryV1 = true,
-                durableEnqueueInboxV1 = new
-                {
-                    ready = true,
-                    protocolVersion = 1,
-                    backendGeneration = "json-v1",
-                },
-            },
+            capabilities,
         };
     }
 

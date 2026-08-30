@@ -23,7 +23,7 @@
       "update current settings",
       "bulk cancel, retry, dismiss, reorder, or settings update"
     ],
-    "bulkRule": "a loaded reader-only photoreal row is never included in an id-targeted mutation; a broader authoritative target plan is not requested when the loaded matching scope contains one"
+    "bulkRule": "a loaded reader-only photoreal row is never included in an id-targeted mutation; when authoritative terminal target planning is advertised, request the broader plan and mutate only returned safe ids while leaving protected ids unchanged; without that capability, a loaded matching reader-only row keeps bulk mutation fail-closed"
   },
   "queueOrder": {
     "field": "queueOrder",
