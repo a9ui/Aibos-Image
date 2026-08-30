@@ -58,7 +58,31 @@
         "lastWorkerErrorAt": null,
         "lastLeaseContentionAt": null
       },
+      "backendAvailability": {
+        "kreaPhotorealV1": {
+          "allQueuedJobsWaiting": false,
+          "engines": [
+            {
+              "adapterId": "comfyui-krea2-anything2real-v3-photoreal",
+              "recognized": true,
+              "ready": true,
+              "reason": "Backend ready.",
+              "queuedCount": 0,
+              "waitingCount": 0
+            },
+            {
+              "adapterId": "comfyui-krea2-anime-to-real-edit-v1-photoreal",
+              "recognized": true,
+              "ready": false,
+              "reason": "Backend unavailable; readiness is rechecked on Recover, Resume, a new enqueue, or Companion restart.",
+              "queuedCount": 0,
+              "waitingCount": 0
+            }
+          ]
+        }
+      },
       "capabilities": {
+        "deferredBackendSkipV1": true,
         "queuedPhotorealPromptUpdate": true,
         "queuedPhotorealSettingsUpdateV1": true,
         "terminalHistoryBatchDismissV1": true,
@@ -67,6 +91,7 @@
         "terminalHistoryTargetsV1": true,
         "terminalHistoryBatchRetryV1": true,
         "photorealPromptControlsV2": true,
+        "kreaAnimeToRealV1": true,
         "atomicImageEnqueueNext": true,
         "displayedManagedVideoSourceV1": true,
         "videoH3StepsV1": {

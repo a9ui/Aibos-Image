@@ -70,6 +70,20 @@
     "wakesWorker": false,
     "legacyReader": "a WPF reader must require capabilities.queuedPhotorealSettingsUpdateV1 before sending the extended body"
   },
+  "deferredBackendSkipV1": {
+    "capability": "capabilities.deferredBackendSkipV1 is exactly true",
+    "appliesTo": "a queued executable job whose recognized adapter backend is temporarily unavailable",
+    "blockedRow": "remain queued at the exact durable queueOrder with no presentation reorder, payload update, retry, cancellation, timestamp update, or other mutation",
+    "executionSelection": "skip unavailable-backend rows only while selecting execution work and claim the earliest later runnable row in reader ordering",
+    "allBlocked": "when every active queued row is waiting for an unavailable backend, stop the pump intentionally without reporting queued-without-pump",
+    "readyTransition": "when the backend becomes ready, claim the row from its original queue position on the next explicit pump, recover, resume, enqueue action, or Companion restart",
+    "passiveReads": "health and Jobs reads may report bounded readiness and waiting counts but never enqueue, wake, claim, retry, reorder, mutate, start a worker, or monitor external assets",
+    "pause": "a paused queue claims nothing even when a deferred backend becomes ready; resume preserves the original ordering",
+    "kreaAdapters": [
+      "comfyui-krea2-anything2real-v3-photoreal",
+      "comfyui-krea2-anime-to-real-edit-v1-photoreal"
+    ]
+  },
   "atomicImageEnqueueNext": {
     "route": "POST /api/enhance/jobs",
     "field": "queuePlacement",
