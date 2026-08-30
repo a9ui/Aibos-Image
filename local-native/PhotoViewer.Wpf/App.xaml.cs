@@ -20671,6 +20671,13 @@ public partial class App : Application
                             error: "future operation",
                             operation: "future-motion-v2"),
                         Job(
+                            "future-photoreal-reader-job",
+                            "failed",
+                            0,
+                            error: "future photoreal adapter",
+                            operation: "photoreal",
+                            adapter: "comfyui-future-photoreal-v9"),
+                        Job(
                             "null-operation-reader-job",
                             "failed",
                             0,
@@ -21223,6 +21230,7 @@ public partial class App : Application
                         [
                             "video-malformed-provenance-job",
                             "future-reader-job",
+                            "future-photoreal-reader-job",
                             "null-operation-reader-job",
                             "future-canceled-reader-job",
                             "protected-queued-job",
@@ -22135,6 +22143,10 @@ public partial class App : Application
                 var futureReaderView =
                     window.EnhancementJobViewIdentityForSmoke("future-reader-job")
                         as EnhancementWorkspaceJobView;
+                var futurePhotorealReaderView =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "future-photoreal-reader-job")
+                        as EnhancementWorkspaceJobView;
                 var nullOperationReaderView =
                     window.EnhancementJobViewIdentityForSmoke("null-operation-reader-job")
                         as EnhancementWorkspaceJobView;
@@ -22516,8 +22528,22 @@ public partial class App : Application
                         CanReorder: false,
                         CanUseOutput: false,
                     }
+                    && futurePhotorealReaderView is
+                    {
+                        Operation: "photoreal",
+                        AdapterId: "comfyui-future-photoreal-v9",
+                        IsPhotorealReaderOnly: true,
+                        CanCancel: false,
+                        CanRetry: false,
+                        CanReorder: false,
+                        CanUseOutput: false,
+                    }
                     && !await window.CancelEnhancementJobForSmokeAsync("future-reader-job")
                     && !await window.RetryEnhancementJobForSmokeAsync("future-reader-job")
+                    && !await window.CancelEnhancementJobForSmokeAsync(
+                        "future-photoreal-reader-job")
+                    && !await window.RetryEnhancementJobForSmokeAsync(
+                        "future-photoreal-reader-job")
                     && !await window.CancelEnhancementJobForSmokeAsync("null-operation-reader-job")
                     && !await window.RetryEnhancementJobForSmokeAsync("null-operation-reader-job");
                 bool legacyMissingOperation =
@@ -23310,21 +23336,41 @@ public partial class App : Application
                     .ToArray();
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkFailedRetry =
                     window.EnhancementJobsWorkspaceForSmoke();
+                var futurePhotorealAfterRetry =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "future-photoreal-reader-job")
+                        as EnhancementWorkspaceJobView;
+                int requestsBeforeBulkFailedClear = requests.Count;
                 int bulkFailedCleared =
                     await window.ClearAllFailedEnhancementJobsForSmokeAsync();
+                string[] bulkFailedClearRequests = requests
+                    .Skip(requestsBeforeBulkFailedClear)
+                    .ToArray();
                 window.SelectEnhancementJobsFilterForSmoke("failed");
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkFailedClear =
                     window.EnhancementJobsWorkspaceForSmoke();
+                var futurePhotorealAfterClear =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "future-photoreal-reader-job")
+                        as EnhancementWorkspaceJobView;
+                int failedTargetRequestIndex = Array.IndexOf(
+                    bulkFailedRequests,
+                    "POST /api/enhance/jobs/terminal/targets");
+                int failedRetryRequestIndex = Array.IndexOf(
+                    bulkFailedRequests,
+                    "POST /api/enhance/jobs/terminal/retry");
+                int failedClearTargetRequestIndex = Array.IndexOf(
+                    bulkFailedClearRequests,
+                    "POST /api/enhance/jobs/terminal/targets");
+                int failedClearMutationRequestIndex = Array.IndexOf(
+                    bulkFailedClearRequests,
+                    "DELETE /api/enhance/jobs/terminal");
                 bool bulkFailedActionsContract = filteredTerminalBulkControls
                     && bulkFailedControlsReady
                     && receiptOnlyResponseStaysVisible
                     && bulkFailedRetried == 1
-                    && bulkFailedRequests.Contains(
-                        "POST /api/enhance/jobs/terminal/targets",
-                        StringComparer.Ordinal)
-                    && bulkFailedRequests.Contains(
-                        "POST /api/enhance/jobs/terminal/retry",
-                        StringComparer.Ordinal)
+                    && failedTargetRequestIndex >= 0
+                    && failedRetryRequestIndex > failedTargetRequestIndex
                     && !bulkFailedRequests.Contains(
                         "POST /api/enhance/jobs/delivery-failed-job/retry",
                         StringComparer.Ordinal)
@@ -23335,14 +23381,36 @@ public partial class App : Application
                     && afterBulkFailedRetry.VisibleIds.Contains(
                         "clearable-failed-job",
                         StringComparer.Ordinal)
+                    && afterBulkFailedRetry.VisibleIds.Contains(
+                        "future-photoreal-reader-job",
+                        StringComparer.Ordinal)
+                    && ReferenceEquals(
+                        futurePhotorealReaderView,
+                        futurePhotorealAfterRetry)
                     && bulkFailedCleared == 1
-                    && afterBulkFailedClear.Filtered == 3
+                    && failedClearTargetRequestIndex >= 0
+                    && failedClearMutationRequestIndex
+                        > failedClearTargetRequestIndex
+                    && afterBulkFailedClear.Filtered == 4
                     && afterBulkFailedClear.VisibleIds.Contains(
                         "video-malformed-provenance-job",
                         StringComparer.Ordinal)
                     && afterBulkFailedClear.VisibleIds.Contains(
                         "future-reader-job",
                         StringComparer.Ordinal)
+                    && afterBulkFailedClear.VisibleIds.Contains(
+                        "future-photoreal-reader-job",
+                        StringComparer.Ordinal)
+                    && ReferenceEquals(
+                        futurePhotorealReaderView,
+                        futurePhotorealAfterClear)
+                    && futurePhotorealAfterClear is
+                    {
+                        Operation: "photoreal",
+                        AdapterId: "comfyui-future-photoreal-v9",
+                        IsPhotorealReaderOnly: true,
+                        Status: "failed",
+                    }
                     && afterBulkFailedClear.VisibleIds.Contains(
                         "null-operation-reader-job",
                         StringComparer.Ordinal)
@@ -23435,6 +23503,7 @@ public partial class App : Application
                         "clearable-failed-job",
                         "video-malformed-provenance-job",
                         "future-reader-job",
+                        "future-photoreal-reader-job",
                         "null-operation-reader-job");
                 bool terminalHistoryBatchRetryContract =
                     terminalHistoryRetryBodies.Count == 2
@@ -23444,6 +23513,7 @@ public partial class App : Application
                         "delivery-failed-job",
                         "video-malformed-provenance-job",
                         "future-reader-job",
+                        "future-photoreal-reader-job",
                         "null-operation-reader-job")
                     && IsTerminalHistoryRetryBody(
                         terminalHistoryRetryBodies[1],
@@ -23539,6 +23609,8 @@ public partial class App : Application
                     && !requests.Contains("DELETE /api/enhance/jobs/clearable-failed-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/video-malformed-provenance-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/future-reader-job", StringComparer.Ordinal)
+                    && !requests.Contains("POST /api/enhance/jobs/future-photoreal-reader-job/retry", StringComparer.Ordinal)
+                    && !requests.Contains("DELETE /api/enhance/jobs/future-photoreal-reader-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/null-operation-reader-job", StringComparer.Ordinal)
                     && !requests.Contains("POST /api/enhance/jobs/future-canceled-reader-job/retry", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/future-canceled-reader-job", StringComparer.Ordinal)
@@ -23677,9 +23749,9 @@ public partial class App : Application
                     });
                 ok = historyWindowReaderContract
                     && initial.Visible
-                    && initial.Total == 18
+                    && initial.Total == 19
                     && initial.Active == 4
-                    && initial.Failed == 7
+                    && initial.Failed == 8
                     && initial.Canceled == 3
                     && largeHistoryPaging
                     && thumbnailViewportLoadBounded
@@ -23716,7 +23788,7 @@ public partial class App : Application
                     && stableJobViews
                     && queued.Filtered == 3
                     && queueInventoryOrdered
-                    && failed.Filtered == 7
+                    && failed.Filtered == 8
                     && completed.Filtered == 4
                     && canceled.Filtered == 3
                     && operationLabelsVisible
@@ -23753,32 +23825,32 @@ public partial class App : Application
                     && staleQueueRefreshSuppressed
                     && healthAfterInventoryReorderSuppressed
                     && cancelIssued
-                    && afterCancel.Total == 18
+                    && afterCancel.Total == 19
                     && afterCancel.Active == 4
                     && afterCancel.Polling
                     && videoCancelPendingSafe
                     && videoCancelSettled
                     && afterVideoCancelSettled.Active == 3
                     && failedCancelIssued
-                    && afterFailedCancel.Total == 18
+                    && afterFailedCancel.Total == 19
                     && afterFailedCancel.Active == 3
                     && afterFailedCancel.VisibleIds.Contains("failed-cancel-job", StringComparer.Ordinal)
                     && canceledAfterActions.Filtered == 5
                     && retryIssued
-                    && afterRetry.Total == 18
+                    && afterRetry.Total == 19
                     && afterRetry.Active == 4
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && !afterRetry.VisibleIds.Contains("failed-retry-job", StringComparer.Ordinal)
                     && afterRetry.VisibleStatusLabels.Any(static label => label == "待機中 · 4 / 4")
                     && canceledRetryIssued
-                    && afterCanceledRetry.Total == 18
+                    && afterCanceledRetry.Total == 19
                     && afterCanceledRetry.Active == 5
                     && afterCanceledRetry.VisibleIds.Contains("canceled-retry-job", StringComparer.Ordinal)
                     && !afterCanceledRetry.VisibleIds.Contains("canceled-job", StringComparer.Ordinal)
                     && rerunIssued
                     && rerunSettingsContract
                     && rerunSeedContract
-                    && afterRerun.Total == 19
+                    && afterRerun.Total == 20
                     && afterRerun.Active == 6
                     && afterRerun.VisibleIds.Contains("rerun-job", StringComparer.Ordinal)
                     && queuedPromptUpdateIssued

@@ -6107,13 +6107,13 @@ public partial class MainWindow
     private async Task<int> RetryAllTerminalEnhancementJobsAsync(
         string terminalStatus)
     {
-        if (HasReaderOnlyPhotorealTerminalRows(terminalStatus))
-            return 0;
         if (_enhancementWorkspaceTerminalHistoryBatchRetrySupported)
         {
             return await RetryAllTerminalEnhancementJobsBatchAsync(
                 terminalStatus);
         }
+        if (HasReaderOnlyPhotorealTerminalRows(terminalStatus))
+            return 0;
         if (!EnhancementWorkspaceHasCompleteTerminalHistory(terminalStatus))
         {
             EnhancementJobsStatusText.Text =
@@ -6281,8 +6281,7 @@ public partial class MainWindow
             terminalStatus);
         if (_enhancementWorkspaceMutationPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible
-            || totalStatusCount == 0
-            || HasReaderOnlyPhotorealTerminalRows(terminalStatus))
+            || totalStatusCount == 0)
         {
             return 0;
         }
@@ -6547,9 +6546,10 @@ public partial class MainWindow
             _enhancementWorkspaceTerminalHistoryTargetsSupported;
         if (_enhancementWorkspaceMutationPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible
-            || HasReaderOnlyPhotorealTerminalRows(terminalStatus)
-            || useExactTargetPlan && totalStatusCount == 0
-            || !useExactTargetPlan && dismissibleIds.Length == 0)
+            || (!useExactTargetPlan
+                && HasReaderOnlyPhotorealTerminalRows(terminalStatus))
+            || (useExactTargetPlan && totalStatusCount == 0)
+            || (!useExactTargetPlan && dismissibleIds.Length == 0))
         {
             return 0;
         }
