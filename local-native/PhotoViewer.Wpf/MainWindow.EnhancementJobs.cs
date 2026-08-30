@@ -1523,9 +1523,6 @@ public partial class MainWindow
 
     private bool CanRetryAllTerminalEnhancementJobs(string status)
     {
-        if (HasReaderOnlyPhotorealTerminalRows(status)
-            || HasReaderOnlyUpscaleTerminalRows(status))
-            return false;
         bool historyIsComplete =
             EnhancementWorkspaceHasCompleteTerminalHistory(status);
         if (!historyIsComplete)
@@ -1561,14 +1558,14 @@ public partial class MainWindow
 
     private bool CanClearAllTerminalEnhancementJobs(string status)
     {
+        int totalStatusCount = EnhancementWorkspaceTotalStatusCount(status);
+        if (_enhancementWorkspaceTerminalHistoryTargetsSupported)
+            return totalStatusCount > 0;
         if (HasReaderOnlyPhotorealTerminalRows(status)
             || HasReaderOnlyUpscaleTerminalRows(status))
             return false;
         int loadedStatusCount = _enhancementWorkspaceJobs.Count(job =>
             job.Status == status);
-        int totalStatusCount = EnhancementWorkspaceTotalStatusCount(status);
-        if (_enhancementWorkspaceTerminalHistoryTargetsSupported)
-            return totalStatusCount > 0;
         return loadedStatusCount == totalStatusCount
             && _enhancementWorkspaceJobs.Any(job =>
                 job.Status == status
