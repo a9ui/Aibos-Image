@@ -156,6 +156,12 @@ The executable cases for these meanings are routed by
   local selection state uses the established FLUX.2 Klein adapter. An explicit
   selection affects only newly created Jobs, whose `adapterId` remains the
   durable execution snapshot; applying or saving a Style never changes it.
+- The exact Krea Anime-to-Real v1 adapter is offered only when the authenticated
+  Companion advertises boolean `kreaAnimeToRealV1`. That capability means the
+  writer recognizes the durable adapter row; backend and asset readiness stay
+  separate. Its engine LoRA is fixed on at strength 1.0, its execution schedule
+  is fixed at 8 steps and CFG 1, and generic photoreal Strength is compatibility
+  input rather than Krea denoise authority.
 - Opening or selecting a native photoreal Style is passive and creates no Job.
   A shipped built-in Style changes only the current positive and blank-positive
   prompt pair; it preserves the current LoRA, strength, CFG, quality,
@@ -244,6 +250,12 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   companion applies that order in one write only if the queued-id snapshot is
   still exact; a concurrent claim, enqueue, or cancel returns conflict without
   a partial reorder or worker wake.
+- With exact `deferredBackendSkipV1`, a recognized queued Krea row whose backend
+  is temporarily unavailable stays byte-equivalent at its durable queue order.
+  Execution selection may claim the earliest later runnable row, but it does
+  not reorder or update the waiting row. Readiness is reconsidered only at an
+  explicit pump, recovery, resume, enqueue, or Companion restart; passive Jobs
+  and health reads never monitor assets, start a worker, or wake the queue.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
   ComfyUI, or GPU side effect.
 - The durable `progress` field is the companion-owned percentage of completed
