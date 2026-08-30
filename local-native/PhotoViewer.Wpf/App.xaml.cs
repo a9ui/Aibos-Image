@@ -2683,7 +2683,9 @@ public partial class App : Application
                     .ToDictionary(static property => property.Name, static property => property.Value.Clone(), StringComparer.Ordinal);
                 Dictionary<ViewerKeyAction, KeyChord> migrated = KeyBindingSettings.NormalizePersisted(legacyBindings, out _);
                 bool collisionAwareShortcut = migrated[ViewerKeyAction.ToggleModalFilmstrip].DisplayText == "B"
-                    && migrated[ViewerKeyAction.AddToAlbum].DisplayText == "V";
+                    && migrated[ViewerKeyAction.AddToAlbum].IsBound
+                    && migrated[ViewerKeyAction.AddToAlbum].DisplayText != "B"
+                    && KeyBindingSettings.FindConflicts(migrated).Count == 0;
 
                 window.ReturnToCatalogForSmoke();
                 bool catalogRestored = window.ActiveAlbumIdForSmoke is null && window.FilteredCountForSmoke == 2;
@@ -17938,8 +17940,14 @@ public partial class App : Application
                 win.RetryStatusForSmoke();
                 bool lockRetryCleared = !win.DeleteStatusRetryVisibleForSmoke;
 
+                // statePath is the fixed state.json child of this method's
+                // app-created TEMP smoke root; no CLI or media path reaches it.
+                // codeql[cs/path-injection]
                 File.WriteAllBytes(statePath + ".lock", []);
                 win.FlushStateForSmoke();
+                // The same fixed TEMP child is inspected after the recovery
+                // attempt; this is read-only smoke evidence.
+                // codeql[cs/path-injection]
                 bool orphanStateLockRecovered = !File.Exists(statePath + ".lock")
                     && !win.DeleteStatusRetryVisibleForSmoke;
 
