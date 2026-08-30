@@ -110,6 +110,8 @@ try {
         'photorealPreservationScanContract',
         'gallerySingleFlightContract',
         'legacyPhotorealCapabilitySafe',
+        'kreaAnimeToRealCapabilityGateContract',
+        'kreaAnythingToReal1536Contract',
         'modalPhotorealOperation',
         'sharedQueueRoute',
         'sourceUntouched'

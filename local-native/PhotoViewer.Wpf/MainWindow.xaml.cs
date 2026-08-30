@@ -259,6 +259,9 @@ public partial class MainWindow : Window
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ManagedEnhancementQueueActivity> _catalogEnhancementQueueActivityByPath =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _activeEnhancementJobIds =
+        new(StringComparer.Ordinal);
+    private bool _activeEnhancementJobIdsSnapshotComplete;
     private readonly HashSet<string> _ambiguousEnhancementJobIds =
         new(StringComparer.Ordinal);
     private readonly HashSet<string> _activeI2iSourceProducerJobIds =
@@ -332,6 +335,25 @@ public partial class MainWindow : Window
     private DateTime _enhancedStateQueuedWriteTimeUtc;
     private long _enhancedStateQueuedLength = -1;
     private long _enhancedStateQueuedCatalogRevision = -1;
+    private const int SavedForDeliveryCatalogAdoptionMaximumProbeCount = 128;
+    private const int SavedForDeliveryCatalogAdoptionMaximumElapsedMilliseconds =
+        365_000;
+    private bool _savedForDeliveryCatalogAdoptionPending;
+    private int _savedForDeliveryCatalogAdoptionRemainingProbeCount;
+    private int _savedForDeliveryCatalogAdoptionProbeLimit =
+        SavedForDeliveryCatalogAdoptionMaximumProbeCount;
+    private int _savedForDeliveryCatalogAdoptionElapsedLimitMilliseconds =
+        SavedForDeliveryCatalogAdoptionMaximumElapsedMilliseconds;
+    private long _savedForDeliveryCatalogAdoptionDeadlineTick;
+    private long _savedForDeliveryCatalogAdoptionMinimumRefreshGeneration;
+    private DateTime _savedForDeliveryCatalogAdoptionBaselineWriteTimeUtc;
+    private long _savedForDeliveryCatalogAdoptionBaselineLength = -1;
+    private long _savedForDeliveryCatalogAdoptionBaselineRevision = -1;
+    private readonly HashSet<string>
+        _savedForDeliveryCatalogAdoptionBaselineActiveJobIds =
+            new(StringComparer.Ordinal);
+    private bool
+        _savedForDeliveryCatalogAdoptionBaselineActiveJobIdsSnapshotComplete;
     private Rect _restoreBounds;
     private bool _fakeMaximized;
     private System.Windows.Interop.HwndSource? _windowChromeSource;
@@ -483,6 +505,7 @@ public partial class MainWindow : Window
     private string? _modalEnhancementJobId;
     private string? _modalEnhancementJobStatus;
     private string _modalEnhancementJobAdapterId = "";
+    private int? _modalEnhancementJobPhotorealMaxDimension;
     private bool _modalEnhancementJobMutationSafe = true;
     private int _modalEnhancementProgress;
     private string? _modalEnhancementError;
@@ -775,8 +798,8 @@ public partial class MainWindow : Window
         {
             Interval = TimeSpan.FromSeconds(3),
         };
-        _activeEnhancementStateRefreshTimer.Tick += (_, _) =>
-            QueueEnhancedStateRefreshIfChanged();
+        _activeEnhancementStateRefreshTimer.Tick +=
+            ActiveEnhancementStateRefreshTimer_Tick;
         LandingFolderSetList.ItemsSource = _landingFolderSet;
         SidebarFolderSetList.ItemsSource = _folderBucketViews;
         FavoriteFolderSetList.ItemsSource = _favoriteFolderSetViews;
@@ -848,6 +871,7 @@ public partial class MainWindow : Window
             _galleryWheelZoomTimer.Stop();
             _modalChromeTransientTimer.Stop();
             _modalEnhancementPollTimer.Stop();
+            ClearSavedForDeliveryCatalogAdoptionWatch();
             _activeEnhancementStateRefreshTimer.Stop();
             StopEnhancementNotifications();
             _modalEnhancementGeneration++;
@@ -1809,7 +1833,8 @@ public partial class MainWindow : Window
         string? ErrorMessage,
         bool CancelRequested,
         long? SourceSize,
-        double? SourceMtimeMs);
+        double? SourceMtimeMs,
+        int? PhotorealMaxDimension);
 
     private sealed record ManagedEnhancedOutput(string OutputPath, long SourceSize, double SourceMtimeMs);
 
@@ -1900,6 +1925,7 @@ public partial class MainWindow : Window
         Dictionary<string, List<ManagedVideoVersion>> VideoVersions,
         Dictionary<string, List<ManagedVideoVersion>> CatalogVideoVersionsByPath,
         Dictionary<string, ManagedEnhancementQueueActivity> CatalogQueueActivityByPath,
+        HashSet<string> ActiveJobIds,
         HashSet<string> AmbiguousJobIds,
         HashSet<string> ActiveI2iSourceProducerJobIds,
         HashSet<string> ActiveVideoSourceProducerJobIds,
@@ -5307,6 +5333,7 @@ public partial class MainWindow : Window
         bool activeVideoDependencySnapshotComplete = true;
         var activeNotificationJobs = new List<EnhancementNotificationJobState>();
         var terminalNotificationJobs = new List<EnhancementNotificationJobState>();
+        var activeJobIds = new HashSet<string>(StringComparer.Ordinal);
         var photorealVideoSources =
             new Dictionary<string, ManagedPhotorealVideoSource>(
                 StringComparer.Ordinal);
@@ -5377,10 +5404,18 @@ public partial class MainWindow : Window
                             notificationOperation,
                             status!.ToLowerInvariant()));
                     }
-                    TryRecordActiveEnhancementQueueActivity(
+                    bool projectedActiveQueueActivity =
+                        TryRecordActiveEnhancementQueueActivity(
                         job,
                         operation,
                         nextCatalogQueueActivityByPath);
+                    if (projectedActiveQueueActivity
+                        && HasSingleProperty(job, "id")
+                        && !string.IsNullOrWhiteSpace(notificationJobId)
+                        && !ambiguousJobIds.Contains(notificationJobId!))
+                    {
+                        activeJobIds.Add(notificationJobId!);
+                    }
                     if (operation == "i2i"
                         && TryReadOptionalI2iSourceProducerJobId(
                             job,
@@ -5675,6 +5710,7 @@ public partial class MainWindow : Window
                     nextVideoVersions,
                     nextCatalogVideoVersionsByPath,
                     nextCatalogQueueActivityByPath,
+                    activeJobIds,
                     ambiguousJobIds,
                     activeI2iSourceProducerJobIds,
                     activeVideoSourceProducerJobIds,
@@ -5749,7 +5785,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void TryRecordActiveEnhancementQueueActivity(
+    private bool TryRecordActiveEnhancementQueueActivity(
         JsonElement job,
         string operation,
         Dictionary<string, ManagedEnhancementQueueActivity> activityByPath)
@@ -5757,14 +5793,14 @@ public partial class MainWindow : Window
         if (operation is not ("upscale" or "photoreal" or "i2i" or "video")
             || !TryGetStringProperty(job, "sourceId", out string? sourceId))
         {
-            return;
+            return false;
         }
 
         string? lexicalAlias = NormalizeCatalogEnhancementPath(sourceId);
         if (lexicalAlias is null
             || !SupportedImageExtensions.Contains(Path.GetExtension(lexicalAlias)))
         {
-            return;
+            return false;
         }
 
         string? canonicalAlias = TryResolveEnhancementSourceIdentity(
@@ -5783,6 +5819,7 @@ public partial class MainWindow : Window
         activityByPath[lexicalAlias] = activity;
         if (canonicalAlias is not null)
             activityByPath[canonicalAlias] = activity;
+        return true;
     }
 
     private static DateTimeOffset? ReadEnhancementCreatedAtUtc(JsonElement job)
@@ -5811,10 +5848,19 @@ public partial class MainWindow : Window
         }
 
         TrackActiveEnhancementNotificationJob(job);
-        TryRecordActiveEnhancementQueueActivity(
+        bool projectedActiveQueueActivity =
+            TryRecordActiveEnhancementQueueActivity(
             job,
             ReadEnhancementOperation(job),
             _catalogEnhancementQueueActivityByPath);
+        if (projectedActiveQueueActivity
+            && HasSingleProperty(job, "id")
+            && TryGetStringProperty(job, "id", out string? activeJobId)
+            && !string.IsNullOrWhiteSpace(activeJobId)
+            && !_ambiguousEnhancementJobIds.Contains(activeJobId!))
+        {
+            _activeEnhancementJobIds.Add(activeJobId!);
+        }
         if (targetTile is not null)
             ApplyTileEnhancementQueueActivity(targetTile);
         UpdateActiveEnhancementStateRefreshTimer();
@@ -5830,7 +5876,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ApplyEnhancedStateSnapshot(EnhancedStateSnapshot snapshot)
+    private void ApplyEnhancedStateSnapshot(
+        EnhancedStateSnapshot snapshot,
+        long? refreshGeneration = null)
     {
         ApplyEnhancementNotificationSnapshot(
             snapshot.ActiveNotificationJobs,
@@ -5857,6 +5905,12 @@ public partial class MainWindow : Window
         _catalogEnhancementQueueActivityByPath.Clear();
         foreach ((string alias, ManagedEnhancementQueueActivity activity) in snapshot.CatalogQueueActivityByPath)
             _catalogEnhancementQueueActivityByPath[alias] = activity;
+        ObserveSavedForDeliveryCatalogAdoption(
+            snapshot,
+            refreshGeneration);
+        _activeEnhancementJobIds.Clear();
+        _activeEnhancementJobIds.UnionWith(snapshot.ActiveJobIds);
+        _activeEnhancementJobIdsSnapshotComplete = true;
         UpdateActiveEnhancementStateRefreshTimer();
         _ambiguousEnhancementJobIds.Clear();
         _ambiguousEnhancementJobIds.UnionWith(snapshot.AmbiguousJobIds);
@@ -6018,17 +6072,190 @@ public partial class MainWindow : Window
 
     private void UpdateActiveEnhancementStateRefreshTimer()
     {
-        bool hasActive = _catalogEnhancementQueueActivityByPath.Values.Any(
+        if (_savedForDeliveryCatalogAdoptionPending
+            && (_savedForDeliveryCatalogAdoptionRemainingProbeCount <= 0
+                || Environment.TickCount64
+                    >= _savedForDeliveryCatalogAdoptionDeadlineTick))
+        {
+            ClearSavedForDeliveryCatalogAdoptionWatch();
+        }
+
+        bool hasActive = HasActiveEnhancementQueueActivity();
+        bool currentSessionActivatedDurableWork =
+            Volatile.Read(ref _enhancementCompanionDurableWorkActivated) != 0;
+        if (currentSessionActivatedDurableWork
+            && (hasActive || _savedForDeliveryCatalogAdoptionPending))
+        {
+            _activeEnhancementStateRefreshTimer.Start();
+        }
+        else
+        {
+            _activeEnhancementStateRefreshTimer.Stop();
+        }
+    }
+
+    private bool HasActiveEnhancementQueueActivity()
+        => _catalogEnhancementQueueActivityByPath.Values.Any(
             static activity => activity.UpscaleActive
                 || activity.PhotorealActive
                 || activity.I2iActive
                 || activity.VideoActive);
-        bool currentSessionActivatedDurableWork =
-            Volatile.Read(ref _enhancementCompanionDurableWorkActivated) != 0;
-        if (hasActive && currentSessionActivatedDurableWork)
-            _activeEnhancementStateRefreshTimer.Start();
-        else
-            _activeEnhancementStateRefreshTimer.Stop();
+
+    private void ArmSavedForDeliveryCatalogAdoptionWatch()
+    {
+        _savedForDeliveryCatalogAdoptionPending = true;
+        _savedForDeliveryCatalogAdoptionRemainingProbeCount =
+            Math.Max(1, _savedForDeliveryCatalogAdoptionProbeLimit);
+        _savedForDeliveryCatalogAdoptionDeadlineTick = checked(
+            Environment.TickCount64
+            + Math.Max(
+                1,
+                _savedForDeliveryCatalogAdoptionElapsedLimitMilliseconds));
+        _savedForDeliveryCatalogAdoptionMinimumRefreshGeneration =
+            _enhancedStateRefreshGeneration + 1;
+        EnhancementStoreProbe baseline = new(
+            _enhancementJobsLastWriteTimeUtc,
+            _enhancementJobsLength,
+            _enhancementCatalogRevision);
+        bool baselineFingerprintMatchesAppliedSnapshot = false;
+        try
+        {
+            baseline = ProbeEnhancementStore(ResolvedEnhancementJobsPath);
+            baselineFingerprintMatchesAppliedSnapshot =
+                baseline.CatalogRevision >= 0
+                    ? baseline.CatalogRevision == _enhancementCatalogRevision
+                    : _enhancementCatalogRevision < 0
+                        && baseline.LastWriteTimeUtc
+                            == _enhancementJobsLastWriteTimeUtc
+                        && baseline.Length == _enhancementJobsLength;
+        }
+        catch
+        {
+            // The durable mutation already succeeded. A malformed or busy
+            // local reader must not turn SavedForDelivery into a failure.
+        }
+        _savedForDeliveryCatalogAdoptionBaselineWriteTimeUtc =
+            baseline.LastWriteTimeUtc;
+        _savedForDeliveryCatalogAdoptionBaselineLength = baseline.Length;
+        _savedForDeliveryCatalogAdoptionBaselineRevision =
+            baseline.CatalogRevision;
+        _savedForDeliveryCatalogAdoptionBaselineActiveJobIds.Clear();
+        _savedForDeliveryCatalogAdoptionBaselineActiveJobIds.UnionWith(
+            _activeEnhancementJobIds);
+        _savedForDeliveryCatalogAdoptionBaselineActiveJobIdsSnapshotComplete =
+            baselineFingerprintMatchesAppliedSnapshot
+            && _activeEnhancementJobIdsSnapshotComplete;
+    }
+
+    private void ObserveSavedForDeliveryCatalogAdoption(
+        EnhancedStateSnapshot snapshot,
+        long? refreshGeneration)
+    {
+        if (!_savedForDeliveryCatalogAdoptionPending)
+        {
+            return;
+        }
+
+        if (refreshGeneration is long generation
+            && generation
+                < _savedForDeliveryCatalogAdoptionMinimumRefreshGeneration)
+        {
+            _savedForDeliveryCatalogAdoptionBaselineActiveJobIds.UnionWith(
+                snapshot.ActiveJobIds);
+            return;
+        }
+
+        if (!_savedForDeliveryCatalogAdoptionBaselineActiveJobIdsSnapshotComplete)
+        {
+            _savedForDeliveryCatalogAdoptionBaselineActiveJobIds.Clear();
+            _savedForDeliveryCatalogAdoptionBaselineActiveJobIds.UnionWith(
+                snapshot.ActiveJobIds);
+            _savedForDeliveryCatalogAdoptionBaselineActiveJobIdsSnapshotComplete =
+                true;
+            _savedForDeliveryCatalogAdoptionBaselineWriteTimeUtc =
+                snapshot.LastWriteTimeUtc;
+            _savedForDeliveryCatalogAdoptionBaselineLength = snapshot.Length;
+            _savedForDeliveryCatalogAdoptionBaselineRevision =
+                snapshot.CatalogRevision;
+            _savedForDeliveryCatalogAdoptionMinimumRefreshGeneration =
+                (refreshGeneration ?? _enhancedStateRefreshGeneration) + 1;
+            return;
+        }
+
+        bool baselineKnown =
+            _savedForDeliveryCatalogAdoptionBaselineRevision >= 0
+            || _savedForDeliveryCatalogAdoptionBaselineLength >= 0;
+        if (!baselineKnown)
+        {
+            _savedForDeliveryCatalogAdoptionBaselineWriteTimeUtc =
+                snapshot.LastWriteTimeUtc;
+            _savedForDeliveryCatalogAdoptionBaselineLength = snapshot.Length;
+            _savedForDeliveryCatalogAdoptionBaselineRevision =
+                snapshot.CatalogRevision;
+            _savedForDeliveryCatalogAdoptionMinimumRefreshGeneration =
+                (refreshGeneration ?? _enhancedStateRefreshGeneration) + 1;
+            _savedForDeliveryCatalogAdoptionBaselineActiveJobIds.UnionWith(
+                snapshot.ActiveJobIds);
+            return;
+        }
+
+        bool changedAfterArm = snapshot.CatalogRevision >= 0
+            ? snapshot.CatalogRevision
+                != _savedForDeliveryCatalogAdoptionBaselineRevision
+            : snapshot.LastWriteTimeUtc
+                    != _savedForDeliveryCatalogAdoptionBaselineWriteTimeUtc
+                || snapshot.Length
+                    != _savedForDeliveryCatalogAdoptionBaselineLength;
+        if (!changedAfterArm)
+        {
+            _savedForDeliveryCatalogAdoptionBaselineActiveJobIds.UnionWith(
+                snapshot.ActiveJobIds);
+            return;
+        }
+
+        bool adoptedNewActiveJob = HasActiveEnhancementQueueActivity()
+            && snapshot.ActiveJobIds.Any(jobId =>
+                !_savedForDeliveryCatalogAdoptionBaselineActiveJobIds.Contains(
+                    jobId));
+        if (adoptedNewActiveJob)
+            ClearSavedForDeliveryCatalogAdoptionWatch();
+    }
+
+    private void ClearSavedForDeliveryCatalogAdoptionWatch()
+    {
+        _savedForDeliveryCatalogAdoptionPending = false;
+        _savedForDeliveryCatalogAdoptionRemainingProbeCount = 0;
+        _savedForDeliveryCatalogAdoptionDeadlineTick = 0;
+        _savedForDeliveryCatalogAdoptionMinimumRefreshGeneration = 0;
+        _savedForDeliveryCatalogAdoptionBaselineActiveJobIds.Clear();
+        _savedForDeliveryCatalogAdoptionBaselineActiveJobIdsSnapshotComplete =
+            false;
+    }
+
+    private void ActiveEnhancementStateRefreshTimer_Tick(
+        object? sender,
+        EventArgs e)
+    {
+        UpdateActiveEnhancementStateRefreshTimer();
+        if (!_activeEnhancementStateRefreshTimer.IsEnabled
+            || !_enhancedStateRefreshTask.IsCompleted)
+        {
+            return;
+        }
+
+        bool consumedSavedDeliveryProbe =
+            _savedForDeliveryCatalogAdoptionPending;
+        if (consumedSavedDeliveryProbe)
+            _savedForDeliveryCatalogAdoptionRemainingProbeCount--;
+        QueueEnhancedStateRefreshIfChanged();
+        if (consumedSavedDeliveryProbe
+            && _savedForDeliveryCatalogAdoptionPending
+            && _savedForDeliveryCatalogAdoptionRemainingProbeCount <= 0
+            && _enhancedStateRefreshTask.IsCompleted)
+        {
+            ClearSavedForDeliveryCatalogAdoptionWatch();
+            UpdateActiveEnhancementStateRefreshTimer();
+        }
     }
 
     private EnhancementStoreProbe ProbeEnhancementStoreTracked(string path)
@@ -6067,7 +6294,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            ApplyEnhancedStateSnapshot(result.Snapshot);
+            ApplyEnhancedStateSnapshot(result.Snapshot, generation);
             ApplyEnhancedOutputsToVisibleCatalog();
             if (Modal.Visibility == Visibility.Visible
                 && TryGetModalSourceTile(out Tile selected))
@@ -6773,7 +7000,7 @@ public partial class MainWindow : Window
         string message = protectedFile
             ? $"{subject} could not be saved because its local file is invalid or newer. Fix it, then reload the folder."
             : File.Exists(path + ".lock")
-                ? $"{subject} is busy in another Aibos window. Retry after that update finishes."
+                ? $"{subject} could not be saved while an update is in progress. Retry after the current update finishes."
                 : $"{subject} could not be saved. Check local file access, then retry the action.";
         SetStatusToast(message, retryAction);
     }
@@ -10310,6 +10537,9 @@ public partial class MainWindow : Window
                     ? photoreal.AdapterId
                     : upscaleAdapterId,
                 enqueueNext,
+                photorealMaxDimension: normalizedOperation == "photoreal"
+                    ? photoreal.MaxDimension
+                    : null,
                 requiresPhotorealSourceUpscale:
                     requestSource.UsesPhotorealSource,
                 requiresRecoveredPhotorealSourceUpscale:
@@ -19514,6 +19744,7 @@ public partial class MainWindow : Window
         _modalEnhancementPollTimer.Stop();
         _modalEnhancementJobId = null;
         _modalEnhancementOperation = "upscale";
+        _modalEnhancementJobPhotorealMaxDimension = null;
         _modalEnhancementJobStatus = null;
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
@@ -19903,6 +20134,23 @@ public partial class MainWindow : Window
             && HasSingleProperty(job, "operation")
             && HasSingleProperty(job, "adapterId")
             && IsKnownPhotorealAdapterId(adapterId);
+        int? photorealMaxDimension = null;
+        if (operation == "photoreal"
+            && !TryReadPersistedPhotorealMaxDimension(
+                job,
+                out photorealMaxDimension))
+        {
+            photorealMutationSafe = false;
+        }
+        if (photorealMutationSafe
+            && !IsSupportedDurablePhotorealAdapterDimension(
+                new DurableEnhancementAdapterIdentity(
+                    operation,
+                    adapterId ?? "",
+                    photorealMaxDimension)))
+        {
+            photorealMutationSafe = false;
+        }
         return new ModalEnhancementJobSnapshot(
             id!,
             operation,
@@ -19916,7 +20164,8 @@ public partial class MainWindow : Window
             errorMessage,
             cancelRequested,
             sourceSize,
-            sourceMtimeMs);
+            sourceMtimeMs,
+            photorealMaxDimension);
     }
 
     private static IReadOnlyList<ModalEnhancementJobSnapshot> ParseModalEnhancementJobs(JsonElement payload)
@@ -20038,6 +20287,8 @@ public partial class MainWindow : Window
         _modalEnhancementJobId = job?.Id;
         _modalEnhancementOperation = job?.Operation ?? "upscale";
         _modalEnhancementJobAdapterId = job?.AdapterId ?? "";
+        _modalEnhancementJobPhotorealMaxDimension =
+            job?.PhotorealMaxDimension;
         _modalEnhancementJobMutationSafe = job is null
             || job.Operation != "photoreal"
             || job.PhotorealMutationSafe;
@@ -20367,6 +20618,12 @@ public partial class MainWindow : Window
                             : photoreal.AdapterId
                         : upscaleAdapterId,
                     enqueueNext: false,
+                    photorealMaxDimension:
+                        normalizedOperation == "photoreal"
+                            ? retry
+                                ? _modalEnhancementJobPhotorealMaxDimension
+                                : photoreal.MaxDimension
+                            : null,
                     requiresPhotorealSourceUpscale:
                         requestSource.UsesPhotorealSource,
                     requiresRecoveredPhotorealSourceUpscale:
@@ -20407,7 +20664,11 @@ public partial class MainWindow : Window
                     ? normalizedOperation == "photoreal"
                         ? _modalEnhancementJobAdapterId
                         : upscaleAdapterId
-                    : null);
+                    : null,
+                durableRetryPhotorealMaxDimension:
+                    retry && normalizedOperation == "photoreal"
+                        ? _modalEnhancementJobPhotorealMaxDimension
+                        : null);
 
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
@@ -20653,6 +20914,7 @@ public partial class MainWindow : Window
             _modalEnhancementJobId = null;
             _modalEnhancementOperation = "upscale";
             _modalEnhancementJobAdapterId = "";
+            _modalEnhancementJobPhotorealMaxDimension = null;
             _modalEnhancementJobMutationSafe = true;
             _modalEnhancementJobStatus = null;
             _modalEnhancementProgress = 0;
@@ -20839,6 +21101,7 @@ public partial class MainWindow : Window
         _modalEnhancementJobId = null;
         _modalEnhancementOperation = "upscale";
         _modalEnhancementJobAdapterId = "";
+        _modalEnhancementJobPhotorealMaxDimension = null;
         _modalEnhancementJobMutationSafe = true;
         _modalEnhancementJobStatus = null;
         _modalEnhancementProgress = 0;
@@ -24467,6 +24730,8 @@ public partial class MainWindow : Window
             state.PhotorealLoraEnabled,
             state.PhotorealNegativePromptEnabled);
         RestorePhotorealEngineSetting(state.PhotorealEngineId);
+        RestoreKreaAnythingToReal1536Setting(
+            state.KreaAnythingToReal1536Enabled);
         RestorePhotorealSeedSettings(
             state.PhotorealSeedMode,
             state.PhotorealSeedValue);
@@ -24745,6 +25010,8 @@ public partial class MainWindow : Window
                 ModalEdgeNavigationPercent = _modalEdgeNavigationPercent,
                 PhotorealLoraEnabled = _modalPhotorealLoraEnabled,
                 PhotorealEngineId = _photorealEngineId,
+                KreaAnythingToReal1536Enabled =
+                    _kreaAnythingToReal1536Selected,
                 PhotorealStrength = _modalPhotorealStrength,
                 PhotorealCfgScale = _modalPhotorealCfgScale,
                 PhotorealSteps = _modalPhotorealSteps,
@@ -27824,6 +28091,48 @@ public partial class MainWindow : Window
     {
         MarkEnhancementCompanionDurableWorkActivated();
         return _activeEnhancementStateRefreshTimer.IsEnabled;
+    }
+    public bool ActivateSavedForDeliveryRevisionWatcherForSmoke()
+    {
+        KickEnhancementCompanionRecoveryAfterDurablePublish(
+            sourceIdentity: null,
+            requestId: "00000000-0000-4000-8000-000000000001",
+            scheduleRecovery: false);
+        return _activeEnhancementStateRefreshTimer.IsEnabled;
+    }
+    public void ConfigureSavedForDeliveryRevisionWatcherForSmoke(
+        int intervalMilliseconds,
+        int maximumProbeCount,
+        int maximumElapsedMilliseconds)
+    {
+        if (intervalMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(intervalMilliseconds));
+        if (maximumProbeCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumProbeCount));
+        if (maximumElapsedMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumElapsedMilliseconds));
+
+        _activeEnhancementStateRefreshTimer.Interval =
+            TimeSpan.FromMilliseconds(intervalMilliseconds);
+        _savedForDeliveryCatalogAdoptionProbeLimit = maximumProbeCount;
+        _savedForDeliveryCatalogAdoptionElapsedLimitMilliseconds =
+            maximumElapsedMilliseconds;
+    }
+    public bool SavedForDeliveryCatalogAdoptionPendingForSmoke
+        => _savedForDeliveryCatalogAdoptionPending;
+    public long EnhancementCatalogRevisionForSmoke
+        => _enhancementCatalogRevision;
+    public bool HasActiveEnhancementQueueActivityForSmoke(string sourcePath)
+    {
+        string? alias = NormalizeCatalogEnhancementPath(sourcePath);
+        return alias is not null
+            && _catalogEnhancementQueueActivityByPath.TryGetValue(
+                alias,
+                out ManagedEnhancementQueueActivity activity)
+            && (activity.UpscaleActive
+                || activity.PhotorealActive
+                || activity.I2iActive
+                || activity.VideoActive);
     }
     public async Task<bool> WaitForEnhancedStateRefreshForSmokeAsync(int timeoutMilliseconds = 10_000)
     {
@@ -32134,6 +32443,8 @@ public sealed class ViewerState
     // Engine is independent from Style. Missing and unknown values stay on
     // the established FLUX.2 Klein path.
     public string? PhotorealEngineId { get; set; }
+    // Explicit, Style-independent author workflow. Missing in older state is OFF.
+    public bool? KreaAnythingToReal1536Enabled { get; set; }
     public double? PhotorealStrength { get; set; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public double? PhotorealStructureStrength { get; set; }

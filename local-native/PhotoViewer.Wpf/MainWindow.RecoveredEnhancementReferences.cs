@@ -175,6 +175,7 @@ public partial class MainWindow
             new HashSet<string>(StringComparer.Ordinal),
             new HashSet<string>(StringComparer.Ordinal),
             new HashSet<string>(StringComparer.Ordinal),
+            new HashSet<string>(StringComparer.Ordinal),
             new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             false,
             [],

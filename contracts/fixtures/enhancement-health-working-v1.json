@@ -81,8 +81,9 @@
           ]
         }
       },
-      "capabilities": {
-        "deferredBackendSkipV1": true,
+        "capabilities": {
+          "deferredBackendSkipV1": true,
+          "fairGpuFamilyDispatchV1": true,
         "queuedPhotorealPromptUpdate": true,
         "queuedPhotorealSettingsUpdateV1": true,
         "terminalHistoryBatchDismissV1": true,
@@ -92,6 +93,7 @@
         "terminalHistoryBatchRetryV1": true,
         "photorealPromptControlsV2": true,
         "kreaAnimeToRealV1": true,
+        "kreaAnythingToReal1536V1": true,
         "atomicImageEnqueueNext": true,
         "displayedManagedVideoSourceV1": true,
         "videoH3StepsV1": {

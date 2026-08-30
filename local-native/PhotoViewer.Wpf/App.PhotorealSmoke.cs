@@ -79,6 +79,7 @@ public partial class App
             bool modalEnqueueNextDisplayedPhotorealContract = false;
             bool legacyPhotorealCapabilitySafe = false;
             bool kreaAnimeToRealCapabilityGateContract = false;
+            bool kreaAnythingToReal1536Contract = false;
             bool modalPhotorealOperation = false;
             bool recoveredReferenceExact = false;
             bool recoveredReferenceValidEmptyJobs = false;
@@ -998,6 +999,80 @@ public partial class App
                 bool legacyKreaSelected = window.PhotorealEngineForSmoke is
                     (legacyKreaEngineId, true, true)
                     && window.KreaFixedLoraPresentationForSmoke;
+                bool authorSelectorClosedBeforeCapability =
+                    window.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppVisible: false,
+                        ModalVisible: false,
+                        AppEnabled: false,
+                        ModalEnabled: false,
+                        AppChecked: false,
+                        ModalChecked: false,
+                    };
+                window.ApplyKreaAnythingToReal1536HealthCapabilityForSmoke(true);
+                bool authorSelectorOpenedOff =
+                    window.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppVisible: true,
+                        ModalVisible: true,
+                        AppEnabled: true,
+                        ModalEnabled: true,
+                        AppChecked: false,
+                        ModalChecked: false,
+                    };
+                window.SetKreaAnythingToReal1536ForSmoke(true);
+                using JsonDocument author1536Request = JsonDocument.Parse(
+                    window.CreateCurrentPhotorealRequestBodyForSmoke(sourcePath));
+                bool explicitAuthorRequest1536 =
+                    author1536Request.RootElement
+                        .GetProperty("adapterId").GetString()
+                        == legacyKreaEngineId
+                    && author1536Request.RootElement
+                        .GetProperty("maxDimension").GetInt32() == 1536
+                    && window.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppChecked: true,
+                        ModalChecked: true,
+                    };
+                bool authorStyleSelected =
+                    window.SelectBuiltInPhotorealStyleForSmoke(
+                        "soft-beauty-glamour");
+                using JsonDocument authorStyleRequest = JsonDocument.Parse(
+                    window.CreateCurrentPhotorealRequestBodyForSmoke(sourcePath));
+                bool authorSelectionStyleIndependent = authorStyleSelected
+                    && authorStyleRequest.RootElement
+                        .GetProperty("maxDimension").GetInt32() == 1536
+                    && window.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppChecked: true,
+                        ModalChecked: true,
+                    };
+                window.ApplyKreaAnythingToReal1536HealthCapabilityForSmoke(false);
+                using JsonDocument authorHealthLostRequest = JsonDocument.Parse(
+                    window.CreateCurrentPhotorealRequestBodyForSmoke(sourcePath));
+                bool authorHealthLossDidNotDowngrade =
+                    authorHealthLostRequest.RootElement
+                        .GetProperty("maxDimension").GetInt32() == 1536
+                    && window.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppVisible: false,
+                        ModalVisible: false,
+                        AppEnabled: false,
+                        ModalEnabled: false,
+                        AppChecked: false,
+                        ModalChecked: false,
+                    };
+                window.ApplyKreaAnythingToReal1536HealthCapabilityForSmoke(true);
+                bool authorChoiceRestoredWithCapability =
+                    window.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppVisible: true,
+                        ModalVisible: true,
+                        AppEnabled: true,
+                        ModalEnabled: true,
+                        AppChecked: true,
+                        ModalChecked: true,
+                    };
                 window.SelectPhotorealEngineForSmoke(kreaAnimeToRealEngineId);
                 bool kreaAnimeToRealSelected = window.PhotorealEngineForSmoke is
                     (kreaAnimeToRealEngineId, true, true)
@@ -1035,21 +1110,76 @@ public partial class App
                         .GetDouble() == 1
                     && kreaAnimeToRealRequestBody.GetProperty("maxDimension")
                         .GetInt32() == 1280
+                    && window.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppVisible: false,
+                        ModalVisible: false,
+                        AppEnabled: false,
+                        ModalEnabled: false,
+                    }
                     && PhotoViewer.Wpf.MainWindow
                         .IsRecoveredPhotorealAdapterForSmoke(
                         kreaAnimeToRealEngineId);
                 window.FlushStateForSmoke();
+                ViewerState? persistedAuthorState =
+                    JsonSerializer.Deserialize<ViewerState>(File.ReadAllText(
+                        environment["PHOTOVIEWER_WPF_STATE_PATH"]));
                 var engineReloadWindow = new MainWindow();
                 try
                 {
                     engineReloadWindow.SuppressStatePersistence();
+                    bool reloadedEngineWasAnime =
+                        engineReloadWindow.PhotorealEngineForSmoke.EngineId
+                            == kreaAnimeToRealEngineId;
+                    engineReloadWindow
+                        .ApplyKreaAnythingToReal1536HealthCapabilityForSmoke(true);
+                    engineReloadWindow.SelectPhotorealEngineForSmoke(
+                        legacyKreaEngineId);
+                    using JsonDocument reloadedAuthorRequest = JsonDocument.Parse(
+                        engineReloadWindow
+                            .CreateCurrentPhotorealRequestBodyForSmoke(sourcePath));
+                    bool authorSelectionReloaded =
+                        reloadedAuthorRequest.RootElement
+                            .GetProperty("maxDimension").GetInt32() == 1536
+                        && engineReloadWindow
+                            .KreaAnythingToReal1536SelectorForSmoke is
+                        {
+                            AppVisible: true,
+                            ModalVisible: true,
+                            AppEnabled: true,
+                            ModalEnabled: true,
+                            AppChecked: true,
+                            ModalChecked: true,
+                        };
+                    engineReloadWindow.ResetAppPhotorealSettingsForSmoke();
+                    using JsonDocument resetAuthorRequest = JsonDocument.Parse(
+                        engineReloadWindow
+                            .CreateCurrentPhotorealRequestBodyForSmoke(sourcePath));
+                    bool authorResetOff = resetAuthorRequest.RootElement
+                            .GetProperty("maxDimension").GetInt32() == 1280
+                        && engineReloadWindow
+                            .KreaAnythingToReal1536SelectorForSmoke is
+                        {
+                            AppChecked: false,
+                            ModalChecked: false,
+                        };
                     photorealEngineContract = legacyKreaSelected
                         && kreaAnimeToRealSelected
                         && builtInStyleSelectedWithKrea
                         && styleDidNotChangeEngine
                         && kreaAnimeToRealRequestContract
-                        && engineReloadWindow.PhotorealEngineForSmoke.EngineId
-                            == kreaAnimeToRealEngineId;
+                        && reloadedEngineWasAnime;
+                    kreaAnythingToReal1536Contract =
+                        authorSelectorClosedBeforeCapability
+                        && authorSelectorOpenedOff
+                        && explicitAuthorRequest1536
+                        && authorSelectionStyleIndependent
+                        && authorHealthLossDidNotDowngrade
+                        && authorChoiceRestoredWithCapability
+                        && persistedAuthorState?.KreaAnythingToReal1536Enabled
+                            == true
+                        && authorSelectionReloaded
+                        && authorResetOff;
                 }
                 finally
                 {
@@ -2318,6 +2448,72 @@ public partial class App
                             kreaCapabilityMissing.RootElement,
                             "photoreal",
                             "comfyui-flux2-photoreal");
+                using JsonDocument authorCapabilityPresent = JsonDocument.Parse(
+                    "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnythingToReal1536V1\":true}}");
+                using JsonDocument authorCapabilityFalse = JsonDocument.Parse(
+                    "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnythingToReal1536V1\":false}}");
+                using JsonDocument authorCapabilityMalformed = JsonDocument.Parse(
+                    "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnythingToReal1536V1\":\"true\"}}");
+                using JsonDocument authorCapabilityOldSpelling = JsonDocument.Parse(
+                    "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnythingToRealV3MaxDimension1536V1\":true}}");
+                using JsonDocument authorCapabilityDuplicateMember =
+                    JsonDocument.Parse(
+                        "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnythingToReal1536V1\":false,\"kreaAnythingToReal1536V1\":true}}");
+                using JsonDocument authorCapabilityDuplicateObject =
+                    JsonDocument.Parse(
+                        "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnythingToReal1536V1\":true},\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnythingToReal1536V1\":true}}");
+                const string kreaAnythingAdapterId =
+                    "comfyui-krea2-anything2real-v3-photoreal";
+                kreaAnythingToReal1536Contract =
+                    kreaAnythingToReal1536Contract
+                    && !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            kreaCapabilityMissing.RootElement,
+                            "photoreal",
+                            kreaAnythingAdapterId,
+                            1536)
+                    && PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            authorCapabilityPresent.RootElement,
+                            "photoreal",
+                            kreaAnythingAdapterId,
+                            1536)
+                    && !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            authorCapabilityFalse.RootElement,
+                            "photoreal",
+                            kreaAnythingAdapterId,
+                            1536)
+                    && !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            authorCapabilityMalformed.RootElement,
+                            "photoreal",
+                            kreaAnythingAdapterId,
+                            1536)
+                    && !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            authorCapabilityOldSpelling.RootElement,
+                            "photoreal",
+                            kreaAnythingAdapterId,
+                            1536)
+                    && !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            authorCapabilityDuplicateMember.RootElement,
+                            "photoreal",
+                            kreaAnythingAdapterId,
+                            1536)
+                    && !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            authorCapabilityDuplicateObject.RootElement,
+                            "photoreal",
+                            kreaAnythingAdapterId,
+                            1536)
+                    && PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            kreaCapabilityMissing.RootElement,
+                            "photoreal",
+                            kreaAnythingAdapterId,
+                            1280);
 
                 using JsonDocument document = JsonDocument.Parse(
                     randomPhotorealBody);
@@ -2720,6 +2916,7 @@ public partial class App
                     && modalEnqueueNextDisplayedPhotorealContract
                     && legacyPhotorealCapabilitySafe
                     && kreaAnimeToRealCapabilityGateContract
+                    && kreaAnythingToReal1536Contract
                     && sharedQueueRoute
                     && sourceUntouched
                     && modalPhotorealOperation
@@ -2815,6 +3012,7 @@ public partial class App
                     modalEnqueueNextDisplayedPhotorealContract,
                     legacyPhotorealCapabilitySafe,
                     kreaAnimeToRealCapabilityGateContract,
+                    kreaAnythingToReal1536Contract,
                     modalPhotorealOperation,
                     sharedQueueRoute,
                     sourceUntouched,

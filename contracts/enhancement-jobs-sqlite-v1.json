@@ -45,7 +45,7 @@
         "updatedAt"
       ],
       "operation": "a non-empty string when present; absence is the legacy upscale representation",
-      "operationSpecificProjection": "i2i retains preset and video retains video so WPF can classify the operation and gate mutations without reading payload_json",
+      "operationSpecificProjection": "upscale retains the writer-computed upscaleMutationSafeV1 gate, i2i retains preset, and video retains video so WPF can classify the operation and gate mutations without reading payload_json",
       "catalogConsumer": "the managed-media catalog may ignore fields beyond id and status for failed, canceled, deleted, or unknown rows; this does not permit the writer to omit the common Jobs projection"
     }
   },
@@ -82,6 +82,14 @@
       ],
       "legacyOperationDefault": "absence of operation means upscale; a present known operation must parse as that same operation"
     },
+    "upscaleMutationGate": {
+      "field": "upscaleMutationSafeV1",
+      "arming": "exactly one JSON boolean true",
+      "protected": "missing, false, null, string, number, object, array, or duplicate members fail closed for cancel, retry, dismiss, reorder, output deletion, and every other upscale mutation surface",
+      "legacy": "rows written before this projection field remain visible as read-only history and are not passively migrated or backfilled",
+      "immutableIdentity": "the validated gate value is part of the WPF workspace immutable identity, so a true-to-protected or protected-to-true projection change replaces the bound view instead of inheriting stale controls",
+      "authority": "the projection is WPF presentation permission and is not execution authority; the authenticated companion revalidates current durable executability for every accepted mutation"
+    },
     "progressPresentation": {
       "durableFieldMeaning": "progress is the companion-owned integer percentage of completed adapter execution stages; it is not an ETA or a remaining-time estimate",
       "activeRows": "queued rows retain lifecycle value zero but present only their waiting order and no progress bar; running rows alone render a determinate value clamped to 1 through 99, with 99 explicitly labelled as final publication or verification",
@@ -95,7 +103,7 @@
         "status": "must still exactly match the selected Jobs row",
         "payload_json": "UTF-8 JSON object containing the complete durable job payload"
       },
-      "identityBinding": "payload_json id, status, operation, source identity, preset id, and adapter id must exactly match the displayed compact projection",
+      "identityBinding": "payload_json id, status, operation, source identity, preset id, adapter id, and the writer-computed upscaleMutationSafeV1 gate must exactly match the displayed compact projection when that gate is present",
       "retention": "a loaded detail string may be released when Details closes and is refreshed before Copy"
     },
     "snapshot": "one deferred transaction on a read-only query_only connection",
@@ -133,7 +141,8 @@
     "migratesStore": false,
     "mutatesQueue": false,
     "startsWorker": false,
-    "backgroundCatalogRefresh": "queued or running records loaded during ordinary WPF startup do not by themselves enable the three-second catalog-revision timer; the timer is enabled only after this WPF session explicitly activates authenticated durable Enhancement work, remains single-flight, and stops again when the validated snapshot has no active work",
+    "backgroundCatalogRefresh": "queued or running records loaded during ordinary WPF startup do not by themselves enable the three-second catalog-revision timer; the timer is enabled only after this WPF session explicitly activates authenticated durable Enhancement work and remains single-flight; SavedForDelivery arms a local read-only adoption watch across a pre-recovery zero-active snapshot, bounded by both probe count and elapsed time, until a post-arm validated snapshot introduces a previously unobserved valid queued or running job; unrelated zero-active revisions and updates to jobs already active at arm do not discharge the watch; the watch never sends an API request, recovers, wakes, or mutates the queue, continues under the ordinary active-work rule when adoption reveals queued or running work, and otherwise stops after adoption or either bound",
+    "upscaleMutationProjection": "WPF passively reads upscaleMutationSafeV1, never backfills or rewrites it, and never upgrades a legacy or malformed row into mutable state",
     "unsupportedOrMalformed": "fail the direct Enhancement projection closed without rewriting either store",
     "explicitOverride": "an explicit jobs-path override is authoritative and is never silently replaced by its SQLite sibling"
   },
@@ -190,6 +199,7 @@
           "adapterId": "realesrgan-ncnn",
           "status": "succeeded",
           "operation": "upscale",
+          "upscaleMutationSafeV1": true,
           "progress": 100,
           "createdAt": "2026-08-22T00:00:00.000Z",
           "updatedAt": "2026-08-22T00:00:01.000Z",
@@ -205,6 +215,7 @@
           "adapterId": "realesrgan-ncnn",
           "status": "succeeded",
           "operation": "upscale",
+          "upscaleMutationSafeV1": true,
           "progress": 100,
           "createdAt": "2026-08-22T00:00:00.000Z",
           "updatedAt": "2026-08-22T00:00:01.000Z",

@@ -17931,7 +17931,8 @@ public partial class App : Application
                     global::PhotoViewer.Wpf.MainWindow.TryAcquireViewerStateLockForSmoke(statePath);
                 win.FlushStateForSmoke();
                 bool lockBusyStatus = liveStateLease is not null
-                    && win.DeleteStatusForSmoke.Contains("busy", StringComparison.OrdinalIgnoreCase)
+                    && win.DeleteStatusForSmoke.Contains("update is in progress", StringComparison.OrdinalIgnoreCase)
+                    && !win.DeleteStatusForSmoke.Contains("another Aibos window", StringComparison.OrdinalIgnoreCase)
                     && win.DeleteStatusRetryVisibleForSmoke;
                 liveStateLease?.Dispose();
                 win.RetryStatusForSmoke();
