@@ -134,7 +134,7 @@ jobs:
 
       - name: Enhancement jobs workspace smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-enhancement-jobs-workspace.ps1
+        run: pwsh -NoProfile -File .\scripts\verify-wpf-enhancement-jobs-workspace.ps1
 
       - name: Favorite presentation close-drain smoke
         shell: pwsh

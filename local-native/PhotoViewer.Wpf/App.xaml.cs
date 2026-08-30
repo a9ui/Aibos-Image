@@ -20408,6 +20408,7 @@ public partial class App : Application
                         ? "comfyui-flux2-photoreal"
                         : "realesrgan-ncnn"),
                     operation,
+                    upscaleMutationSafeV1 = operation == "upscale",
                     status,
                     progress,
                     queueOrder,
@@ -20860,6 +20861,7 @@ public partial class App : Application
                     }
                     capabilities["photorealPromptControlsV2"] = true;
                     capabilities["kreaAnimeToRealV1"] = true;
+                    capabilities["kreaAnythingToReal1536V1"] = true;
                     capabilities["atomicImageEnqueueNext"] = true;
                     capabilities["terminalHistoryBatchDismissV1"] = true;
                     capabilities["queuedJobsBatchCancelV1"] = true;
