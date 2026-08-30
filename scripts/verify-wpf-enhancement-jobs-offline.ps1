@@ -58,6 +58,42 @@ try {
         $contract.wpfRules.backgroundCatalogRefresh.Contains(
             'only after this WPF session explicitly activates')) (
         'Ordinary-startup catalog refresh gating is missing.')
+    Assert-True (
+        $contract.wpfRules.backgroundCatalogRefresh.Contains(
+            'SavedForDelivery arms a local read-only adoption watch')) (
+        'SavedForDelivery catalog adoption watch is missing.')
+    Assert-True (
+        $contract.wpfRules.backgroundCatalogRefresh.Contains(
+            'bounded by both probe count and elapsed time')) (
+        'SavedForDelivery catalog adoption bounds are missing.')
+    Assert-True (
+        $contract.wpfRules.backgroundCatalogRefresh.Contains(
+            'never sends an API request, recovers, wakes, or mutates the queue')) (
+        'SavedForDelivery adoption watch side-effect boundary is missing.')
+    Assert-True (
+        $contract.wpfRules.backgroundCatalogRefresh.Contains(
+            'unrelated zero-active revisions')) (
+        'SavedForDelivery adoption watch can be discharged by an unrelated revision.')
+    Assert-True (
+        $contract.jobsWorkspaceSurface.upscaleMutationGate.field -eq
+            'upscaleMutationSafeV1') (
+        'Jobs SQLite upscale mutation gate field drifted.')
+    Assert-True (
+        $contract.jobsWorkspaceSurface.upscaleMutationGate.arming -eq
+            'exactly one JSON boolean true') (
+        'Jobs SQLite upscale mutation gate is not exact-true-only.')
+    Assert-True (
+        $contract.jobsWorkspaceSurface.upscaleMutationGate.legacy.Contains(
+            'read-only')) (
+        'Legacy upscale rows are not protected read-only.')
+    Assert-True (
+        $contract.jobsWorkspaceSurface.upscaleMutationGate.authority.Contains(
+            'not execution authority')) (
+        'The WPF projection was incorrectly made execution authority.')
+    Assert-True (
+        $contract.wpfRules.upscaleMutationProjection.Contains(
+            'never backfills')) (
+        'WPF passive upscale projection backfill is not forbidden.')
 
     $buildArguments = @(
         'build',
@@ -109,6 +145,19 @@ try {
         'futureRejected',
         'malformedRejected',
         'explicitDurableWatcherExact',
+        'savedDeliveryEmptyIdleExact',
+        'savedDeliveryCountBound',
+        'savedDeliveryElapsedBound',
+        'savedDeliveryEmptyActivation',
+        'savedDeliveryZeroActiveRevisionKeptWatch',
+        'savedDeliveryQueuedObserved',
+        'savedDeliveryTerminalStopped',
+        'savedDeliveryStaleActiveBaselineExact',
+        'savedDeliveryWatchReadOnly',
+        'savedDeliveryRecoveryExact',
+        'upscaleMutationGateExact',
+        'upscaleMutationIdentityExact',
+        'videoCancellationUnchanged',
         'noMutationOrStart')) {
         Assert-True ($result.$field -eq $true) "Offline Jobs gate failed: $field"
     }
@@ -127,6 +176,19 @@ try {
         futureRejected = $true
         malformedRejected = $true
         explicitDurableWatcherExact = $true
+        savedDeliveryEmptyIdleExact = $true
+        savedDeliveryCountBound = $true
+        savedDeliveryElapsedBound = $true
+        savedDeliveryEmptyActivation = $true
+        savedDeliveryZeroActiveRevisionKeptWatch = $true
+        savedDeliveryQueuedObserved = $true
+        savedDeliveryTerminalStopped = $true
+        savedDeliveryStaleActiveBaselineExact = $true
+        savedDeliveryWatchReadOnly = $true
+        savedDeliveryRecoveryExact = $true
+        upscaleMutationGateExact = $true
+        upscaleMutationIdentityExact = $true
+        videoCancellationUnchanged = $true
         noMutationOrStart = $true
         identityProbes = [int]$result.identityProbes
         actualCompanionStarted = $false

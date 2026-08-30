@@ -106,6 +106,28 @@
       "comfyui-krea2-anime-to-real-edit-v1-photoreal"
     ]
   },
+  "fairGpuFamilyDispatchV1": {
+    "capability": "capabilities.fairGpuFamilyDispatchV1 is exactly true",
+    "scope": "the single shared GPU lane only; the dormant CPU Video Trim lane is excluded",
+    "families": {
+      "image": [
+        "upscale",
+        "photoreal",
+        "i2i"
+      ],
+      "video": [
+        "GPU-backed video"
+      ]
+    },
+    "selection": "when both families have runnable work, claim the earliest runnable job from the family opposite the most recently started exact GPU job; otherwise claim the earliest runnable job in reader ordering",
+    "familyFifo": "within the selected family, preserve reader ordering and never rewrite queueOrder",
+    "durableCursor": "derive the previous family from the latest valid startedAt across exact GPU jobs, using id as a stable equal-timestamp tie-breaker; do not add or passively write scheduler state",
+    "unavailableBackend": "apply deferred-backend skip before family selection so an unavailable Krea row stays byte-equivalent while a later runnable image remains eligible",
+    "strictBarrier": "never select across an unavailable adapter that is explicitly classified as a strict FIFO barrier",
+    "starvationBound": "while both families remain runnable, no family starts two consecutive GPU jobs",
+    "restartAndRecovery": "the derived cursor survives restart and recovery without requeue, reorder, retry, or timestamp mutation",
+    "singleGpu": "claim and adapter execution remain inside the existing one physical cross-process GPU lease; fairness never creates a second worker"
+  },
   "atomicImageEnqueueNext": {
     "route": "POST /api/enhance/jobs",
     "field": "queuePlacement",
@@ -176,7 +198,7 @@
     "normalization": "after a queue mutation, persist contiguous queueOrder values starting at zero"
   },
   "workerRules": {
-    "claim": "claim the first queued job in reader ordering",
+    "claim": "apply fairGpuFamilyDispatchV1 when advertised, otherwise claim the first queued job in reader ordering",
     "singleWorker": true,
     "pauseAndClaimShareOneLock": true,
     "currentJobFinishesWhenPaused": true,

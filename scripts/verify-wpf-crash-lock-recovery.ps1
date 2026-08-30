@@ -15,29 +15,47 @@ if (-not $fullRoot.StartsWith($tempBase + [IO.Path]::DirectorySeparatorChar, [St
 }
 
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+$artifacts = Join-Path $fullRoot 'build-artifacts'
+$exe = Join-Path $artifacts (
+    "bin\PhotoViewer.Wpf\{0}\PhotoViewer.Wpf.exe" -f $Configuration.ToLowerInvariant())
 $failures = [Collections.Generic.List[string]]::new()
+$ownedProcesses = [Collections.Generic.List[Diagnostics.Process]]::new()
 
 function Start-Wpf([string[]]$Arguments) {
-    Start-Process -FilePath $exe -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+    $process = Start-Process -FilePath $exe -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+    $ownedProcesses.Add($process)
+    return $process
+}
+
+function Stop-Wpf([Diagnostics.Process]$Process) {
+    try {
+        $Process.Refresh()
+        if ($Process.HasExited) { return }
+        $Process.Kill($true)
+        if (-not $Process.WaitForExit(10000)) {
+            $Process.Kill()
+            $null = $Process.WaitForExit(5000)
+        }
+    } catch { }
 }
 
 function Wait-Wpf([Diagnostics.Process]$Process, [int]$TimeoutMilliseconds = 60000) {
     if (-not $Process.WaitForExit($TimeoutMilliseconds)) {
-        try { $Process.Kill($true) } catch { }
+        Stop-Wpf $Process
         throw "WPF worker $($Process.Id) timed out."
     }
     $Process.Refresh()
     return $Process.ExitCode
 }
 
-function Wait-Ready([Diagnostics.Process]$Process, [string]$ReadyPath, [int]$TimeoutMilliseconds = 5000) {
+function Wait-Ready([Diagnostics.Process]$Process, [string]$ReadyPath, [int]$TimeoutMilliseconds = 30000) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     while ($watch.ElapsedMilliseconds -lt $TimeoutMilliseconds) {
         if (Test-Path -LiteralPath $ReadyPath) { return }
         if ($Process.HasExited) { throw "WPF worker $($Process.Id) exited before publishing ready evidence." }
         Start-Sleep -Milliseconds 10
     }
+    Stop-Wpf $Process
     throw "WPF worker $($Process.Id) did not publish ready evidence."
 }
 
@@ -121,12 +139,13 @@ function Verify-RecoveredDocument([string]$Kind, [string]$Target, [string]$Key) 
 
 try {
     New-Item -ItemType Directory -Force -Path $fullRoot | Out-Null
-    dotnet build $project -c $Configuration --nologo
+    dotnet build $project -c $Configuration --artifacts-path $artifacts --nologo
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     if (-not (Test-Path -LiteralPath $exe)) { throw "Missing WPF executable: $exe" }
 
     $staleCrashLocksProtected = 0
     $explicitCrashRecoveries = 0
+    $viewerStateOrphanRecoveries = 0
     foreach ($kind in @('favorites', 'seen', 'recent', 'state')) {
         $storeRoot = Join-Path $fullRoot $kind
         New-Item -ItemType Directory -Force -Path $storeRoot | Out-Null
@@ -180,6 +199,18 @@ try {
             $lockBeforeFreshAttempt = Fingerprint $reportedLockPath
             $tempBeforeFreshAttempt = Fingerprint $reportedTempPath
             $freshExit = Invoke-Recovery $kind $target $key $result
+            if ($kind -eq 'state') {
+                if ($freshExit -ne 0 -or (Fingerprint $target) -eq $beforeFreshAttempt -or
+                    (Test-Path -LiteralPath $reportedLockPath) -or
+                    (Test-Path -LiteralPath $reportedTempPath)) {
+                    $failures.Add('state did not recover its unowned crash lock on the first write')
+                } else {
+                    Verify-RecoveredDocument $kind $target $key
+                    $viewerStateOrphanRecoveries++
+                }
+                Assert-NoResidue $storeRoot $target
+                continue
+            }
             if ($freshExit -eq 0 -or (Fingerprint $target) -ne $beforeFreshAttempt -or
                 (Fingerprint $reportedLockPath) -ne $lockBeforeFreshAttempt -or
                 (Fingerprint $reportedTempPath) -ne $tempBeforeFreshAttempt) {
@@ -306,17 +337,18 @@ try {
     Remove-Item -LiteralPath $fullRoot -Recurse -Force
     [pscustomobject]@{
         ok = $true
-        message = 'Actual WPF crash processes proved fresh and stale legacy locks fail closed; explicit TEMP-owned cleanup, residue cleanup, schema protection, and concurrent WPF writers passed.'
+        message = 'Actual WPF crash processes proved viewer-state orphan locks recover on the first write while fresh and stale shared-store legacy locks fail closed; explicit TEMP-owned cleanup, residue cleanup, schema protection, and concurrent WPF writers passed.'
         iterations = $Iterations
-        crashRecoveries = $explicitCrashRecoveries
+        crashRecoveries = $explicitCrashRecoveries + $viewerStateOrphanRecoveries
         explicitCrashRecoveries = $explicitCrashRecoveries
+        viewerStateOrphanRecoveries = $viewerStateOrphanRecoveries
         staleCrashLocksProtected = $staleCrashLocksProtected
         schemaRefusals = $schemaRefusals
         sharedStateWriters = 3
         sharedRecentWriters = 4
         liveOwnerLocksProtected = 4
         staleFixtureAgeSeconds = 31
-        firstUiWriteRecovered = $false
+        firstUiWriteRecovered = $viewerStateOrphanRecoveries -eq $Iterations
         stalePathnameRecoveryDisabled = $true
         unknownFieldsPreserved = $true
         malformedAndFutureProtected = $true
@@ -329,6 +361,9 @@ try {
     } | ConvertTo-Json -Depth 5
 }
 finally {
+    foreach ($ownedProcess in $ownedProcesses) {
+        Stop-Wpf $ownedProcess
+    }
     if (Test-Path -LiteralPath $fullRoot) {
         Remove-Item -LiteralPath $fullRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

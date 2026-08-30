@@ -22,6 +22,8 @@ public partial class MainWindow
         "prod_launcher.js";
     private const string PhotorealPromptControlsCapability = "photorealPromptControlsV2";
     private const string KreaAnimeToRealV1Capability = "kreaAnimeToRealV1";
+    private const string KreaAnythingToReal1536Capability =
+        "kreaAnythingToReal1536V1";
     private const string AtomicImageEnqueueNextCapability = "atomicImageEnqueueNext";
     private const string PhotorealSourceUpscaleCapability = "photorealSourceUpscale";
     private const string RecoveredPhotorealSourceUpscaleCapability =
@@ -133,10 +135,13 @@ public partial class MainWindow
         string? RetryJobId,
         Func<IDisposable?>? DurablePublishLeaseFactory = null,
         string? Operation = null,
-        string? AdapterId = null);
+        string? AdapterId = null,
+        int? PhotorealMaxDimension = null);
     private readonly record struct DurableEnhancementAdapterIdentity(
         string Operation,
-        string AdapterId)
+        string AdapterId,
+        int? PhotorealMaxDimension,
+        bool InvalidPhotorealMaxDimension = false)
     {
         internal bool IsComplete =>
             !string.IsNullOrWhiteSpace(Operation)
@@ -718,20 +723,35 @@ public partial class MainWindow
         try
         {
             JsonElement root = JsonSerializer.SerializeToElement(body);
-            if (root.ValueKind != JsonValueKind.Object
-                || !HasSingleProperty(root, "operation")
-                || !root.TryGetProperty("operation", out JsonElement operation)
-                || operation.ValueKind != JsonValueKind.String
-                || !HasSingleProperty(root, "adapterId")
-                || !root.TryGetProperty("adapterId", out JsonElement adapterId)
-                || adapterId.ValueKind != JsonValueKind.String)
-            {
+            if (root.ValueKind != JsonValueKind.Object)
                 return default;
-            }
+
+            string operation = HasSingleProperty(root, "operation")
+                && root.TryGetProperty(
+                    "operation",
+                    out JsonElement operationElement)
+                && operationElement.ValueKind == JsonValueKind.String
+                    ? operationElement.GetString() ?? ""
+                    : "";
+            string adapterId = HasSingleProperty(root, "adapterId")
+                && root.TryGetProperty(
+                    "adapterId",
+                    out JsonElement adapterIdElement)
+                && adapterIdElement.ValueKind == JsonValueKind.String
+                    ? adapterIdElement.GetString() ?? ""
+                    : "";
+
+            bool validPhotorealMaxDimension =
+                TryReadPhotorealMaxDimensionFromRequestBody(
+                    root,
+                    out int? photorealMaxDimension);
 
             return new DurableEnhancementAdapterIdentity(
-                operation.GetString() ?? "",
-                adapterId.GetString() ?? "");
+                operation,
+                adapterId,
+                photorealMaxDimension,
+                InvalidPhotorealMaxDimension:
+                    !validPhotorealMaxDimension);
         }
         catch (Exception ex) when (ex is ArgumentException
             or InvalidOperationException
@@ -740,6 +760,109 @@ public partial class MainWindow
         {
             return default;
         }
+    }
+
+    private static bool TryReadPhotorealMaxDimensionFromRequestBody(
+        JsonElement root,
+        out int? maxDimension)
+    {
+        maxDimension = null;
+        int propertyCount = root.EnumerateObject().Count(property =>
+            property.NameEquals("maxDimension"));
+        if (propertyCount == 0)
+            return true;
+        if (propertyCount != 1
+            || !root.TryGetProperty(
+                "maxDimension",
+                out JsonElement maxDimensionElement)
+            || maxDimensionElement.ValueKind != JsonValueKind.Number
+            || !maxDimensionElement.TryGetInt32(out int parsed))
+        {
+            return false;
+        }
+
+        maxDimension = parsed;
+        return true;
+    }
+
+    private static bool IsSupportedDurablePhotorealAdapterDimension(
+        DurableEnhancementAdapterIdentity identity)
+    {
+        bool isPhotoreal = string.Equals(
+            identity.Operation,
+            "photoreal",
+            StringComparison.Ordinal);
+        if (!isPhotoreal)
+        {
+            // A present author-mode dimension without an exact operation is
+            // ambiguous. Other complete operations own their own dimensions.
+            return identity.IsComplete
+                || identity.PhotorealMaxDimension
+                    != KreaAnythingToRealAuthorMaxDimension;
+        }
+        if (!identity.IsComplete
+            || !IsKnownPhotorealAdapterId(identity.AdapterId))
+        {
+            return false;
+        }
+
+        return identity.PhotorealMaxDimension is null
+            or 512
+            or 640
+            or 768
+            or 1024
+            or DefaultPhotorealMaxDimension
+            || identity.PhotorealMaxDimension
+                == KreaAnythingToRealAuthorMaxDimension
+                && string.Equals(
+                    identity.AdapterId,
+                    KreaV3PhotorealEngineId,
+                    StringComparison.Ordinal);
+    }
+
+    private static bool TryReadPersistedPhotorealMaxDimension(
+        JsonElement job,
+        out int? maxDimension)
+    {
+        maxDimension = null;
+        int presetCount = job.EnumerateObject().Count(property =>
+            property.NameEquals("preset"));
+        if (presetCount == 0)
+            return true;
+        if (presetCount != 1
+            || !job.TryGetProperty("preset", out JsonElement preset)
+            || preset.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        int optionsCount = preset.EnumerateObject().Count(property =>
+            property.NameEquals("options"));
+        if (optionsCount == 0)
+            return true;
+        if (optionsCount != 1
+            || !preset.TryGetProperty("options", out JsonElement options)
+            || options.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        int maxDimensionCount = options.EnumerateObject().Count(property =>
+            property.NameEquals("maxDimension"));
+        if (maxDimensionCount == 0)
+            return true;
+        if (maxDimensionCount != 1
+            || !options.TryGetProperty(
+                "maxDimension",
+                out JsonElement maxDimensionElement)
+            || maxDimensionElement.ValueKind != JsonValueKind.Number
+            || !maxDimensionElement.TryGetInt32(out int parsed))
+        {
+            return false;
+        }
+
+        maxDimension = parsed;
+        return true;
     }
 
     private static bool RequiresExactKreaAnimeToRealV1Health(
@@ -753,24 +876,51 @@ public partial class MainWindow
                 KreaAnimeToRealV1PhotorealEngineId,
                 StringComparison.Ordinal);
 
+    private static bool RequiresExactKreaAnythingToReal1536Health(
+        DurableEnhancementAdapterIdentity identity)
+        => string.Equals(
+                identity.Operation,
+                "photoreal",
+                StringComparison.Ordinal)
+            && string.Equals(
+                identity.AdapterId,
+                KreaV3PhotorealEngineId,
+                StringComparison.Ordinal)
+            && identity.PhotorealMaxDimension
+                == KreaAnythingToRealAuthorMaxDimension;
+
     private static EnhancementApiResponse? ValidateRequiredAdapterHealth(
         EnhancementEnqueueProbe probe,
         DurableEnhancementAdapterIdentity identity)
-        => !RequiresExactKreaAnimeToRealV1Health(identity)
-            ? null
-            : ValidateEnhancementEnqueueProbe(
-                probe,
-                static payload => HasEnhancementCapability(
+    {
+        bool needsKreaAnimeToRealV1 =
+            RequiresExactKreaAnimeToRealV1Health(identity);
+        bool needsKreaAnythingToReal1536 =
+            RequiresExactKreaAnythingToReal1536Health(identity);
+        if (!needsKreaAnimeToRealV1 && !needsKreaAnythingToReal1536)
+            return null;
+
+        return ValidateEnhancementEnqueueProbe(
+            probe,
+            payload => needsKreaAnimeToRealV1
+                    && !HasEnhancementCapability(
                         payload,
                         KreaAnimeToRealV1Capability)
-                    ? null
-                    : "The Aibos Image local AI service cannot prove the exact Krea Anime-to-Real V1 adapter row. Restart the local AI service first; no job was added.",
-                requireExactHealthValidation: true);
+                ? "The Aibos Image local AI service cannot prove the exact Krea Anime-to-Real V1 adapter row. Restart the local AI service first; no job was added."
+                : needsKreaAnythingToReal1536
+                    && !HasEnhancementCapability(
+                        payload,
+                        KreaAnythingToReal1536Capability)
+                    ? "The Aibos Image local AI service cannot prove the bounded Krea Anything-to-Real V3 1536 workflow. Restart the local AI service first; no job was added."
+                    : null,
+            requireExactHealthValidation: true);
+    }
 
     private static Func<JsonElement, string?>? CreateImageEnhancementHealthValidator(
         string operation,
         string? adapterId,
         bool enqueueNext,
+        int? photorealMaxDimension = null,
         bool requiresPhotorealSourceUpscale = false,
         bool requiresRecoveredPhotorealSourceUpscale = false,
         bool requiresPhotorealSeedControl = false)
@@ -784,6 +934,13 @@ public partial class MainWindow
                 adapterId,
                 KreaAnimeToRealV1PhotorealEngineId,
                 StringComparison.Ordinal);
+        bool needsKreaAnythingToReal1536 = needsPhotorealControls
+            && string.Equals(
+                adapterId,
+                KreaV3PhotorealEngineId,
+                StringComparison.Ordinal)
+            && photorealMaxDimension
+                == KreaAnythingToRealAuthorMaxDimension;
         if (!needsPhotorealControls
             && !enqueueNext
             && !requiresPhotorealSourceUpscale
@@ -805,6 +962,14 @@ public partial class MainWindow
                 && !HasEnhancementCapability(payload, KreaAnimeToRealV1Capability))
             {
                 missingCapabilities.Add("the Krea Anime-to-Real V1 adapter row");
+            }
+            if (needsKreaAnythingToReal1536
+                && !HasEnhancementCapability(
+                    payload,
+                    KreaAnythingToReal1536Capability))
+            {
+                missingCapabilities.Add(
+                    "the bounded Krea Anything-to-Real V3 1536 workflow");
             }
             if (enqueueNext
                 && !HasEnhancementCapability(payload, AtomicImageEnqueueNextCapability))
@@ -1358,6 +1523,12 @@ public partial class MainWindow
             mode == EnhancementEnqueueBackendMode.Durable
             && health.Payload is JsonElement payload
             && HasEnhancementCapability(payload, KreaAnimeToRealV1Capability));
+        ApplyKreaAnythingToReal1536HealthCapability(
+            mode == EnhancementEnqueueBackendMode.Durable
+            && health.Payload is JsonElement anythingPayload
+            && HasEnhancementCapability(
+                anythingPayload,
+                KreaAnythingToReal1536Capability));
         return new EnhancementEnqueueProbe(
             mode,
             health.Payload,
@@ -1418,20 +1589,26 @@ public partial class MainWindow
         Func<EnhancementEnqueueInboxItem, IDisposable?>?
             onBeforeDurablePublish = null,
         string? durableRetryOperation = null,
-        string? durableRetryAdapterId = null)
+        string? durableRetryAdapterId = null,
+        int? durableRetryPhotorealMaxDimension = null)
     {
         DurableEnhancementAdapterIdentity adapterIdentity = retryJobId is null
             ? ReadDurableEnhancementAdapterIdentity(body)
             : new DurableEnhancementAdapterIdentity(
                 durableRetryOperation ?? "",
-                durableRetryAdapterId ?? "");
-        if (retryJobId is not null && !adapterIdentity.IsComplete)
+                durableRetryAdapterId ?? "",
+                durableRetryPhotorealMaxDimension);
+        if (adapterIdentity.InvalidPhotorealMaxDimension
+            || !IsSupportedDurablePhotorealAdapterDimension(adapterIdentity)
+            || retryJobId is not null && !adapterIdentity.IsComplete)
         {
             return new EnhancementApiResponse(
                 false,
                 409,
                 null,
-                "The saved adapter identity cannot be verified. The retry reservation was not published.");
+                retryJobId is null
+                    ? "The adapter identity or photoreal dimension cannot be verified. The reservation was not published."
+                    : "The saved adapter identity or photoreal dimension cannot be verified. The retry reservation was not published.");
         }
         if (_usingDefaultModalEnhancementSender)
         {
@@ -1587,7 +1764,8 @@ public partial class MainWindow
                         ? () => PinVideoRetrySourceForDurablePublish(job)
                         : null,
                     job.Operation,
-                    job.AdapterId)).ToArray(),
+                    job.AdapterId,
+                    job.PhotorealMaxDimension)).ToArray(),
             "last",
             token,
             itemHealthValidators: validators,
@@ -1668,14 +1846,21 @@ public partial class MainWindow
                     ? ReadDurableEnhancementAdapterIdentity(item.Body)
                     : new DurableEnhancementAdapterIdentity(
                         item.Operation ?? "",
-                        item.AdapterId ?? "");
+                        item.AdapterId ?? "",
+                        item.PhotorealMaxDimension);
             EnhancementApiResponse? itemValidationFailure =
-                item.RetryJobId is not null && !adapterIdentity.IsComplete
+                adapterIdentity.InvalidPhotorealMaxDimension
+                    || !IsSupportedDurablePhotorealAdapterDimension(
+                        adapterIdentity)
+                    || item.RetryJobId is not null
+                        && !adapterIdentity.IsComplete
                     ? new EnhancementApiResponse(
                         false,
                         409,
                         null,
-                        "The saved adapter identity cannot be verified. The retry reservation was not published.")
+                        item.RetryJobId is null
+                            ? "The adapter identity or photoreal dimension cannot be verified. The reservation was not published."
+                            : "The saved adapter identity or photoreal dimension cannot be verified. The retry reservation was not published.")
                 : itemHealthValidators is null
                     ? null
                     : ValidateEnhancementEnqueueProbe(
@@ -1887,7 +2072,9 @@ public partial class MainWindow
 
     private void KickEnhancementCompanionRecoveryAfterDurablePublish(
         string? sourceIdentity,
-        string requestId)
+        string requestId,
+        bool armSavedDeliveryCatalogAdoption = true,
+        bool scheduleRecovery = true)
     {
         if (!_usingDefaultModalEnhancementSender
             || _enhancementCompanionLifetimeCts.IsCancellationRequested)
@@ -1895,7 +2082,12 @@ public partial class MainWindow
             return;
         }
 
-        MarkEnhancementCompanionDurableWorkActivated();
+        MarkEnhancementCompanionDurableWorkActivated(
+            awaitSavedDeliveryCatalogAdoption:
+                armSavedDeliveryCatalogAdoption);
+        if (!scheduleRecovery)
+            return;
+
         lock (_enhancementCompanionDurableRecoverySync)
         {
             _enhancementCompanionDurableRecoveryRequested = true;
@@ -1946,31 +2138,45 @@ public partial class MainWindow
                 {
                     KickEnhancementCompanionRecoveryAfterDurablePublish(
                         _enhancementCompanionDurableRecoverySourceIdentity,
-                        _enhancementCompanionDurableRecoveryRequestId ?? requestId);
+                        _enhancementCompanionDurableRecoveryRequestId ?? requestId,
+                        armSavedDeliveryCatalogAdoption: false);
                 }
             }
         });
     }
 
-    private void MarkEnhancementCompanionDurableWorkActivated()
+    private void MarkEnhancementCompanionDurableWorkActivated(
+        bool awaitSavedDeliveryCatalogAdoption = false)
     {
-        if (Interlocked.Exchange(
+        bool newlyActivated = Interlocked.Exchange(
                 ref _enhancementCompanionDurableWorkActivated,
-                1) != 0)
-        {
+                1) == 0;
+        if (!newlyActivated && !awaitSavedDeliveryCatalogAdoption)
             return;
+
+        void ApplyDurableWorkActivation()
+        {
+            if (_enhancementCompanionLifetimeCts.IsCancellationRequested
+                || Dispatcher.HasShutdownStarted
+                || Dispatcher.HasShutdownFinished)
+            {
+                return;
+            }
+            if (awaitSavedDeliveryCatalogAdoption)
+                ArmSavedForDeliveryCatalogAdoptionWatch();
+            UpdateActiveEnhancementStateRefreshTimer();
         }
 
         if (Dispatcher.CheckAccess())
         {
-            UpdateActiveEnhancementStateRefreshTimer();
+            ApplyDurableWorkActivation();
             return;
         }
         if (!Dispatcher.HasShutdownStarted
             && !Dispatcher.HasShutdownFinished)
         {
             _ = Dispatcher.BeginInvoke(
-                new Action(UpdateActiveEnhancementStateRefreshTimer),
+                new Action(ApplyDurableWorkActivation),
                 System.Windows.Threading.DispatcherPriority.Background);
         }
     }
@@ -4228,6 +4434,36 @@ public partial class MainWindow
             response.PublishedCount,
             response.Responses.Any(static item => item.SavedForDelivery));
     }
+    public async Task<(bool Ok, bool SavedForDelivery, int StatusCode)>
+        SendKreaAnythingToReal1536RetryForSmokeAsync(string retryJobId)
+    {
+        EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+            body: null,
+            retryJobId: retryJobId,
+            durableRetryOperation: "photoreal",
+            durableRetryAdapterId: KreaV3PhotorealEngineId,
+            durableRetryPhotorealMaxDimension:
+                KreaAnythingToRealAuthorMaxDimension);
+        return (response.Ok, response.SavedForDelivery, response.StatusCode);
+    }
+    public async Task<(int PublishedCount, bool SavedForDelivery)>
+        SendKreaAnythingToReal1536RetryBatchForSmokeAsync(string retryJobId)
+    {
+        DurableEnhancementBatchResponse response =
+            await TrySendDurableEnhancementBatchCoreAsync(
+            [
+                new DurableEnhancementBatchItem(
+                    null,
+                    retryJobId,
+                    Operation: "photoreal",
+                    AdapterId: KreaV3PhotorealEngineId,
+                    PhotorealMaxDimension:
+                        KreaAnythingToRealAuthorMaxDimension),
+            ]);
+        return (
+            response.PublishedCount,
+            response.Responses.Any(static item => item.SavedForDelivery));
+    }
     public async Task<bool> SendEnhancementEnqueueWithListenerHandoffForSmokeAsync(
         object body,
         Action onBeforePublish)
@@ -4370,11 +4606,14 @@ public partial class MainWindow
     public static bool IsImageEnhancementHealthAcceptedForSmoke(
         JsonElement payload,
         string operation,
-        string? adapterId)
+        string? adapterId,
+        int? photorealMaxDimension = null)
         => CreateImageEnhancementHealthValidator(
             operation,
             adapterId,
-            enqueueNext: false)?.Invoke(payload) is null;
+            enqueueNext: false,
+            photorealMaxDimension: photorealMaxDimension)?.Invoke(payload)
+                is null;
     public static bool HasRecoveredPhotorealSourceUpscaleCapabilityForSmoke(
         JsonElement payload)
         => HasEnhancementCapability(

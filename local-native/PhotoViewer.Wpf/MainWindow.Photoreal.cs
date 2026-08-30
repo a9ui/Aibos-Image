@@ -28,6 +28,7 @@ public partial class MainWindow
     private const string LegacyA1111PhotorealEngineId = "a1111-photoreal";
     private const int DefaultPhotorealSteps = 8;
     private const int DefaultPhotorealMaxDimension = 1280;
+    private const int KreaAnythingToRealAuthorMaxDimension = 1536;
     private const int MaxPhotorealStyleCount = 32;
     private const int MaxPhotorealStyleNameLength = 40;
     private const int MaxPhotorealPromptLength = 2_000;
@@ -63,6 +64,8 @@ public partial class MainWindow
         DefaultPhotorealPreservationScanEnabled;
     private string _photorealEngineId = DefaultPhotorealEngineId;
     private bool _kreaAnimeToRealV1HealthSupported;
+    private bool _kreaAnythingToReal1536HealthSupported;
+    private bool _kreaAnythingToReal1536Selected;
     private bool _photorealSeedFixed;
     private string _photorealSeedValueText = "0";
     private bool _syncingModalPhotorealSettings;
@@ -1481,13 +1484,21 @@ public partial class MainWindow
             _modalPhotorealStrength,
             usesKreaAnimeToReal ? 8 : _modalPhotorealSteps,
             usesKreaAnimeToReal ? 1 : _modalPhotorealCfgScale,
-            usesKreaAnimeToReal ? 1280 : _modalPhotorealMaxDimension,
+            EffectivePhotorealMaxDimension(),
             prompt,
             _modalPhotorealNegativePromptEnabled
                 ? _modalPhotorealNegativePrompt.Trim()
                 : "",
             _photorealPreservationScanEnabled);
     }
+
+    private int EffectivePhotorealMaxDimension()
+        => _photorealEngineId == KreaAnimeToRealV1PhotorealEngineId
+            ? DefaultPhotorealMaxDimension
+            : _photorealEngineId == KreaV3PhotorealEngineId
+                && _kreaAnythingToReal1536Selected
+                    ? KreaAnythingToRealAuthorMaxDimension
+                    : _modalPhotorealMaxDimension;
 
     private bool TryResolvePhotorealSeed(out int? seed, out string error)
     {
@@ -1792,6 +1803,65 @@ public partial class MainWindow
                 ? "Authenticated local AI health recognizes this exact adapter row."
                 : "Connect to a compatible authenticated local AI service before selecting this engine.";
         }
+    }
+
+    private void ApplyKreaAnythingToReal1536HealthCapability(bool supported)
+    {
+        _kreaAnythingToReal1536HealthSupported = supported;
+        SyncKreaAnythingToReal1536Controls();
+    }
+
+    private void SyncKreaAnythingToReal1536Controls()
+    {
+        if (AppPhotorealKreaAnything1536CheckBox is null
+            || ModalPhotorealKreaAnything1536CheckBox is null)
+        {
+            return;
+        }
+
+        bool available = _kreaAnythingToReal1536HealthSupported
+            && _photorealEngineId == KreaV3PhotorealEngineId;
+        bool wasSyncing = _syncingModalPhotorealSettings;
+        _syncingModalPhotorealSettings = true;
+        try
+        {
+            Visibility visibility = available
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            AppPhotorealKreaAnything1536CheckBox.Visibility = visibility;
+            ModalPhotorealKreaAnything1536CheckBox.Visibility = visibility;
+            AppPhotorealKreaAnything1536CheckBox.IsEnabled = available;
+            ModalPhotorealKreaAnything1536CheckBox.IsEnabled = available;
+            AppPhotorealKreaAnything1536CheckBox.IsChecked =
+                available && _kreaAnythingToReal1536Selected;
+            ModalPhotorealKreaAnything1536CheckBox.IsChecked =
+                available && _kreaAnythingToReal1536Selected;
+        }
+        finally
+        {
+            _syncingModalPhotorealSettings = wasSyncing;
+        }
+    }
+
+    private void PhotorealKreaAnything1536_Changed(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_syncingModalPhotorealSettings || sender is not CheckBox checkBox)
+            return;
+
+        _kreaAnythingToReal1536Selected = checkBox.IsChecked == true
+            && _kreaAnythingToReal1536HealthSupported
+            && _photorealEngineId == KreaV3PhotorealEngineId;
+        SyncKreaAnythingToReal1536Controls();
+        RefreshModalPhotorealSettingLabels();
+        RefreshPhotorealStyleSummary();
+        SetPhotorealSettingsStatus(
+            _kreaAnythingToReal1536Selected
+                ? "Anything2Real V3を1536 pxで処理します。小さい画像も長辺1536へ拡大するため、処理とVRAMの負荷が高くなります。"
+                : "Anything2Real V3の1536 px処理を解除しました。通常の解像度設定を使います。");
+        if (!_initializing)
+            SaveState();
     }
 
     private bool CurrentPhotorealEngineSupportsQueuedSettingsUpdate()
@@ -2393,7 +2463,7 @@ public partial class MainWindow
             ? $"WarmBloodAban {Math.Round(_modalPhotorealStrength * 100):0}%"
             : "LoRA OFF";
         AppPhotorealStyleSummaryText.Text =
-            $"現在: {loraSummary} / CFG {_modalPhotorealCfgScale:0.00} / {_modalPhotorealSteps} step / {_modalPhotorealMaxDimension} px";
+            $"現在: {loraSummary} / CFG {_modalPhotorealCfgScale:0.00} / {_modalPhotorealSteps} step / {EffectivePhotorealMaxDimension()} px";
     }
 
     private void SetPhotorealStyleStatus(string message)
@@ -2589,6 +2659,7 @@ public partial class MainWindow
             DefaultPhotorealNegativePromptEnabled);
         RestorePhotorealSeedSettings(null, null);
         RestorePhotorealPreservationScanSetting(null);
+        RestoreKreaAnythingToReal1536Setting(null);
         RefreshPhotorealStyleControls(updateNameFields: true);
         SetPhotorealSettingsStatus("実写化設定を既定値に戻しました。");
         if (!_initializing)
@@ -2727,6 +2798,12 @@ public partial class MainWindow
         SyncModalPhotorealSettingsControls();
     }
 
+    private void RestoreKreaAnythingToReal1536Setting(bool? enabled)
+    {
+        _kreaAnythingToReal1536Selected = enabled == true;
+        SyncKreaAnythingToReal1536Controls();
+    }
+
     private void SyncPhotorealSeedControls()
     {
         bool wasSyncing = _syncingModalPhotorealSettings;
@@ -2786,6 +2863,7 @@ public partial class MainWindow
                 _photorealEngineId);
             ApplyKreaAnimeToRealV1HealthCapability(
                 _kreaAnimeToRealV1HealthSupported);
+            SyncKreaAnythingToReal1536Controls();
             bool usesKlein = _photorealEngineId == DefaultPhotorealEngineId;
             bool usesKrea = !usesKlein;
             bool usesKreaAnimeToReal =
@@ -3142,6 +3220,30 @@ public partial class MainWindow
         => (
             AppPhotorealKreaAnimeToRealV1EngineItem.IsEnabled,
             ModalPhotorealKreaAnimeToRealV1EngineItem.IsEnabled);
+
+    public (
+        bool AppVisible,
+        bool ModalVisible,
+        bool AppEnabled,
+        bool ModalEnabled,
+        bool AppChecked,
+        bool ModalChecked) KreaAnythingToReal1536SelectorForSmoke
+        => (
+            AppPhotorealKreaAnything1536CheckBox.Visibility
+                == Visibility.Visible,
+            ModalPhotorealKreaAnything1536CheckBox.Visibility
+                == Visibility.Visible,
+            AppPhotorealKreaAnything1536CheckBox.IsEnabled,
+            ModalPhotorealKreaAnything1536CheckBox.IsEnabled,
+            AppPhotorealKreaAnything1536CheckBox.IsChecked == true,
+            ModalPhotorealKreaAnything1536CheckBox.IsChecked == true);
+
+    public void ApplyKreaAnythingToReal1536HealthCapabilityForSmoke(
+        bool supported)
+        => ApplyKreaAnythingToReal1536HealthCapability(supported);
+
+    public void SetKreaAnythingToReal1536ForSmoke(bool enabled)
+        => AppPhotorealKreaAnything1536CheckBox.IsChecked = enabled;
 
     public void SelectPhotorealEngineForSmoke(string engineId)
     {

@@ -123,9 +123,20 @@ public partial class App
                         new { error = "unexpected safety-smoke route" }));
                 });
                 window.Show();
+                window.SelectPhotorealEngineForSmoke(
+                    "comfyui-krea2-anything2real-v3-photoreal");
                 initialSelectorsClosed =
                     window.KreaAnimeToRealV1SelectorEnabledForSmoke
-                        is { AppEnabled: false, ModalEnabled: false };
+                        is { AppEnabled: false, ModalEnabled: false }
+                    && window.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppVisible: false,
+                        ModalVisible: false,
+                        AppEnabled: false,
+                        ModalEnabled: false,
+                        AppChecked: false,
+                        ModalChecked: false,
+                    };
 
                 object requestBody = new
                 {
@@ -134,6 +145,17 @@ public partial class App
                     presetId = "photoreal-balanced",
                     adapterId =
                         "comfyui-krea2-anime-to-real-edit-v1-photoreal",
+                };
+                object author1536RequestBody = new
+                {
+                    operation = "photoreal",
+                    sourceId = Path.Combine(
+                        smokeRoot,
+                        "synthetic-author-source.png"),
+                    presetId = "photoreal-balanced",
+                    adapterId =
+                        "comfyui-krea2-anything2real-v3-photoreal",
+                    maxDimension = 1536,
                 };
                 string pendingDirectory =
                     EnhancementEnqueueInboxStore.GetPendingDirectory(jobsPath);
@@ -157,22 +179,47 @@ public partial class App
                     bool createSaved =
                         await window.SendEnhancementEnqueueForSmokeAsync(
                             requestBody);
+                    bool authorCreateSaved =
+                        await window.SendEnhancementEnqueueForSmokeAsync(
+                            author1536RequestBody);
                     var retry =
                         await window.SendKreaAnimeToRealRetryForSmokeAsync(
                             $"{mode}-single-retry");
                     var batch =
                         await window.SendKreaAnimeToRealRetryBatchForSmokeAsync(
                             $"{mode}-batch-retry");
+                    var authorRetry =
+                        await window
+                            .SendKreaAnythingToReal1536RetryForSmokeAsync(
+                                $"{mode}-author-single-retry");
+                    var authorBatch =
+                        await window
+                            .SendKreaAnythingToReal1536RetryBatchForSmokeAsync(
+                                $"{mode}-author-batch-retry");
                     int after = CountPendingPhotorealSafetySmoke(
                         pendingDirectory);
                     bool selectorsClosed =
                         window.KreaAnimeToRealV1SelectorEnabledForSmoke
-                            is { AppEnabled: false, ModalEnabled: false };
+                            is { AppEnabled: false, ModalEnabled: false }
+                        && window.KreaAnythingToReal1536SelectorForSmoke is
+                        {
+                            AppVisible: false,
+                            ModalVisible: false,
+                            AppEnabled: false,
+                            ModalEnabled: false,
+                            AppChecked: false,
+                            ModalChecked: false,
+                        };
                     bool blocked = !createSaved
+                        && !authorCreateSaved
                         && !retry.Ok
                         && !retry.SavedForDelivery
                         && batch.PublishedCount == 0
                         && !batch.SavedForDelivery
+                        && !authorRetry.Ok
+                        && !authorRetry.SavedForDelivery
+                        && authorBatch.PublishedCount == 0
+                        && !authorBatch.SavedForDelivery
                         && before == after
                         && mutationsBefore == enqueueMutationRequests
                         && selectorsClosed;
@@ -186,6 +233,7 @@ public partial class App
                         mutationRequests =
                             enqueueMutationRequests - mutationsBefore,
                         retry.StatusCode,
+                        authorRetryStatusCode = authorRetry.StatusCode,
                         selectorsClosed,
                     });
                 }
@@ -196,14 +244,105 @@ public partial class App
                 healthMode = "valid";
                 int validPendingBefore = CountPendingPhotorealSafetySmoke(
                     pendingDirectory);
-                _ = await window.SendEnhancementEnqueueForSmokeAsync(requestBody);
+                int validMutationsBefore = enqueueMutationRequests;
+                using JsonDocument ambiguousDimensionRequest = JsonDocument.Parse(
+                    "{\"operation\":\"photoreal\",\"sourceId\":\"synthetic\",\"presetId\":\"photoreal-balanced\",\"adapterId\":\"comfyui-krea2-anything2real-v3-photoreal\",\"maxDimension\":1280,\"maxDimension\":1536}");
+                bool ambiguousDimensionBlocked =
+                    !await window.SendEnhancementEnqueueForSmokeAsync(
+                        ambiguousDimensionRequest.RootElement)
+                    && CountPendingPhotorealSafetySmoke(pendingDirectory)
+                        == validPendingBefore
+                    && enqueueMutationRequests == validMutationsBefore;
+                object[] forbiddenDimensionRequests =
+                [
+                    new
+                    {
+                        operation = "photoreal",
+                        sourceId = "synthetic-flux-1536",
+                        presetId = "photoreal-balanced",
+                        adapterId = "comfyui-flux2-photoreal",
+                        maxDimension = 1536,
+                    },
+                    new
+                    {
+                        operation = "photoreal",
+                        sourceId = "synthetic-anime-1536",
+                        presetId = "photoreal-balanced",
+                        adapterId =
+                            "comfyui-krea2-anime-to-real-edit-v1-photoreal",
+                        maxDimension = 1536,
+                    },
+                    new
+                    {
+                        operation = "photoreal",
+                        sourceId = "synthetic-unknown-1536",
+                        presetId = "photoreal-balanced",
+                        adapterId = "comfyui-future-photoreal-v9",
+                        maxDimension = 1536,
+                    },
+                    new
+                    {
+                        operation = "photoreal",
+                        sourceId = "synthetic-v3-2048",
+                        presetId = "photoreal-balanced",
+                        adapterId =
+                            "comfyui-krea2-anything2real-v3-photoreal",
+                        maxDimension = 2048,
+                    },
+                    new
+                    {
+                        operation = "photoreal",
+                        sourceId = "synthetic-missing-adapter-1536",
+                        presetId = "photoreal-balanced",
+                        maxDimension = 1536,
+                    },
+                ];
+                bool forbiddenDimensionsBlocked = true;
+                foreach (object forbidden in forbiddenDimensionRequests)
+                {
+                    forbiddenDimensionsBlocked &=
+                        !await window.SendEnhancementEnqueueForSmokeAsync(
+                            forbidden)
+                        && CountPendingPhotorealSafetySmoke(pendingDirectory)
+                            == validPendingBefore
+                        && enqueueMutationRequests == validMutationsBefore;
+                }
+                bool validAnimeCreate =
+                    await window.SendEnhancementEnqueueForSmokeAsync(requestBody);
+                bool validAuthorCreate =
+                    await window.SendEnhancementEnqueueForSmokeAsync(
+                        author1536RequestBody);
+                var validAuthorRetry =
+                    await window.SendKreaAnythingToReal1536RetryForSmokeAsync(
+                        "valid-author-single-retry");
+                var validAuthorBatch =
+                    await window
+                        .SendKreaAnythingToReal1536RetryBatchForSmokeAsync(
+                            "valid-author-batch-retry");
                 int validPendingAfter = CountPendingPhotorealSafetySmoke(
                     pendingDirectory);
-                validHealthPublished = validPendingAfter
-                    == validPendingBefore + 1;
+                validHealthPublished = ambiguousDimensionBlocked
+                    && forbiddenDimensionsBlocked
+                    && !validAnimeCreate
+                    && !validAuthorCreate
+                    && validAuthorRetry.Ok
+                    && !validAuthorRetry.SavedForDelivery
+                    && validAuthorBatch.PublishedCount == 1
+                    && !validAuthorBatch.SavedForDelivery
+                    && validPendingAfter == validPendingBefore + 4
+                    && enqueueMutationRequests == 4;
                 validHealthEnabledSelectors =
                     window.KreaAnimeToRealV1SelectorEnabledForSmoke
-                        is { AppEnabled: true, ModalEnabled: true };
+                        is { AppEnabled: true, ModalEnabled: true }
+                    && window.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppVisible: true,
+                        ModalVisible: true,
+                        AppEnabled: true,
+                        ModalEnabled: true,
+                        AppChecked: false,
+                        ModalChecked: false,
+                    };
 
                 string[] knownAdapters =
                 [
@@ -244,11 +383,36 @@ public partial class App
                 bool everyModalRowProtected = true;
                 foreach (string status in statuses)
                 {
-                    object job = PhotorealSafetyJob(
+                    unknownJobs.Add(PhotorealSafetyJob(
                         $"unknown-{status}",
                         status,
-                        "comfyui-future-photoreal-v9");
-                    unknownJobs.Add(job);
+                        "comfyui-future-photoreal-v9"));
+                }
+                unknownJobs.AddRange(
+                [
+                    PhotorealSafetyJob(
+                        "invalid-flux-1536",
+                        "failed",
+                        "comfyui-flux2-photoreal",
+                        1536),
+                    PhotorealSafetyJob(
+                        "invalid-anime-1536",
+                        "failed",
+                        "comfyui-krea2-anime-to-real-edit-v1-photoreal",
+                        1536),
+                    PhotorealSafetyJob(
+                        "invalid-unknown-1536",
+                        "failed",
+                        "comfyui-future-photoreal-v9",
+                        1536),
+                    PhotorealSafetyJob(
+                        "invalid-v3-2048",
+                        "failed",
+                        "comfyui-krea2-anything2real-v3-photoreal",
+                        2048),
+                ]);
+                foreach (object job in unknownJobs)
+                {
                     using JsonDocument document = JsonDocument.Parse(
                         JsonSerializer.Serialize(job));
                     PhotorealMutationSurfaceSmokeSnapshot? surface =
@@ -342,6 +506,14 @@ public partial class App
                         "unknown-failed")
                     && !await jobsWindow.RetryEnhancementJobForSmokeAsync(
                         "unknown-canceled")
+                    && !await jobsWindow.RetryEnhancementJobForSmokeAsync(
+                        "invalid-flux-1536")
+                    && !await jobsWindow.RetryEnhancementJobForSmokeAsync(
+                        "invalid-anime-1536")
+                    && !await jobsWindow.RetryEnhancementJobForSmokeAsync(
+                        "invalid-unknown-1536")
+                    && !await jobsWindow.RetryEnhancementJobForSmokeAsync(
+                        "invalid-v3-2048")
                     && !await jobsWindow.DismissEnhancementJobForSmokeAsync(
                         "unknown-failed")
                     && !await jobsWindow.RerunPhotorealJobForSmokeAsync(
@@ -374,6 +546,11 @@ public partial class App
                         "known-krea-failed",
                         "failed",
                         "comfyui-krea2-anime-to-real-edit-v1-photoreal"),
+                    PhotorealSafetyJob(
+                        "known-author-1536-failed",
+                        "failed",
+                        "comfyui-krea2-anything2real-v3-photoreal",
+                        photorealMaxDimension: 1536),
                 };
                 object batchHealth = PhotorealSafetyJobsHealth(knownKreaJobs);
                 bool batchHealthAvailable = true;
@@ -425,13 +602,32 @@ public partial class App
                 bool batchControlInitiallyEnabled =
                     batchWindow.RetryAllFailedEnhancementJobsControlForSmoke;
                 batchHealthAvailable = false;
+                string batchPendingDirectory =
+                    EnhancementEnqueueInboxStore.GetPendingDirectory(
+                        jobsBatchPath);
+                int batchPendingBefore = CountPendingPhotorealSafetySmoke(
+                    batchPendingDirectory);
+                bool savedAuthorSingleRetryBlocked =
+                    !await batchWindow.RetryEnhancementJobForSmokeAsync(
+                        "known-author-1536-failed");
                 int batchRetried =
                     await batchWindow.RetryAllFailedEnhancementJobsForSmokeAsync();
+                int batchPendingAfter = CountPendingPhotorealSafetySmoke(
+                    batchPendingDirectory);
                 authoritativeBatchHealthBlocked = batchControlInitiallyEnabled
+                    && savedAuthorSingleRetryBlocked
                     && batchRetried == 0
+                    && batchPendingBefore == batchPendingAfter
                     && authoritativeMutationRequests == 0
                     && batchWindow.KreaAnimeToRealV1SelectorEnabledForSmoke
-                        is { AppEnabled: false, ModalEnabled: false };
+                        is { AppEnabled: false, ModalEnabled: false }
+                    && batchWindow.KreaAnythingToReal1536SelectorForSmoke is
+                    {
+                        AppVisible: false,
+                        ModalVisible: false,
+                        AppEnabled: false,
+                        ModalEnabled: false,
+                    };
 
                 ok = initialSelectorsClosed
                     && failureMatrixBlocked
@@ -500,29 +696,44 @@ public partial class App
     private static object PhotorealSafetyJob(
         string id,
         string status,
-        string adapterId)
-        => new
+        string adapterId,
+        int? photorealMaxDimension = null)
+    {
+        var job = new Dictionary<string, object?>
         {
-            id,
-            operation = "photoreal",
-            sourceId = Path.Combine(Path.GetTempPath(), "aibos-synthetic-source.png"),
-            sourcePath = Path.Combine(Path.GetTempPath(), "aibos-synthetic-source.png"),
-            presetId = adapterId == "a1111-photoreal"
+            ["id"] = id,
+            ["operation"] = "photoreal",
+            ["sourceId"] = Path.Combine(
+                Path.GetTempPath(),
+                "aibos-synthetic-source.png"),
+            ["sourcePath"] = Path.Combine(
+                Path.GetTempPath(),
+                "aibos-synthetic-source.png"),
+            ["presetId"] = adapterId == "a1111-photoreal"
                 ? "anime-sharp-x2"
                 : "photoreal-balanced",
-            adapterId,
-            status,
-            progress = status == "succeeded" ? 100 : 0,
-            outputPath = status == "succeeded"
+            ["adapterId"] = adapterId,
+            ["status"] = status,
+            ["progress"] = status == "succeeded" ? 100 : 0,
+            ["outputPath"] = status == "succeeded"
                 ? Path.Combine(Path.GetTempPath(), $"{id}.png")
                 : null,
-            errorMessage = status == "failed" ? "synthetic" : null,
-            cancelRequested = false,
-            queueOrder = status == "queued" ? 1 : (int?)null,
-            createdAt = "2026-08-30T00:00:00.000Z",
-            updatedAt = "2026-08-30T00:00:01.000Z",
-            sourceSignature = new { size = 1, mtimeMs = 1d },
+            ["errorMessage"] = status == "failed" ? "synthetic" : null,
+            ["cancelRequested"] = false,
+            ["queueOrder"] = status == "queued" ? 1 : (int?)null,
+            ["createdAt"] = "2026-08-30T00:00:00.000Z",
+            ["updatedAt"] = "2026-08-30T00:00:01.000Z",
+            ["sourceSignature"] = new { size = 1, mtimeMs = 1d },
         };
+        if (photorealMaxDimension is int exactMaxDimension)
+        {
+            job["preset"] = new
+            {
+                options = new { maxDimension = exactMaxDimension },
+            };
+        }
+        return job;
+    }
 
     private static object PhotorealSafetyJobsHealth(IReadOnlyList<object> jobs)
     {
@@ -568,6 +779,7 @@ public partial class App
                 queuedPhotorealSettingsUpdateV1 = true,
                 photorealPromptControlsV2 = true,
                 kreaAnimeToRealV1 = true,
+                kreaAnythingToReal1536V1 = true,
                 atomicImageEnqueueNext = true,
                 terminalHistoryBatchDismissV1 = true,
                 queuedJobsBatchCancelV1 = true,
@@ -599,18 +811,21 @@ public partial class App
                 new { error = "synthetic unavailable" }));
         }
 
-        string kreaMember = mode switch
+        string kreaMembers = mode switch
         {
-            "valid" => ",\"kreaAnimeToRealV1\":true",
-            "false" => ",\"kreaAnimeToRealV1\":false",
-            "malformed" => ",\"kreaAnimeToRealV1\":\"true\"",
+            "valid" =>
+                ",\"kreaAnimeToRealV1\":true,\"kreaAnythingToReal1536V1\":true",
+            "false" =>
+                ",\"kreaAnimeToRealV1\":false,\"kreaAnythingToReal1536V1\":false",
+            "malformed" =>
+                ",\"kreaAnimeToRealV1\":\"true\",\"kreaAnythingToReal1536V1\":\"true\"",
             "duplicate-capability" =>
-                ",\"kreaAnimeToRealV1\":false,\"kreaAnimeToRealV1\":true",
+                ",\"kreaAnimeToRealV1\":false,\"kreaAnimeToRealV1\":true,\"kreaAnythingToReal1536V1\":false,\"kreaAnythingToReal1536V1\":true",
             _ => "",
         };
         string capabilities =
             "{\"durableEnqueueInboxV1\":{\"ready\":true,\"protocolVersion\":1,\"backendGeneration\":\"json-v1\"},\"photorealPromptControlsV2\":true"
-            + kreaMember
+            + kreaMembers
             + "}";
         string json = mode == "duplicate-capabilities"
             ? "{\"capabilities\":" + capabilities

@@ -3036,6 +3036,17 @@
                               Tag="comfyui-krea2-anime-to-real-edit-v1-photoreal"
                               IsEnabled="False"/>
               </ComboBox>
+              <CheckBox x:Name="AppPhotorealKreaAnything1536CheckBox"
+                        Content="Anything2Real V3を1536 pxで処理（試験用・高負荷）"
+                        IsChecked="False"
+                        IsEnabled="False"
+                        Visibility="Collapsed"
+                        Margin="0,0,0,10"
+                        Checked="PhotorealKreaAnything1536_Changed"
+                        Unchecked="PhotorealKreaAnything1536_Changed"
+                        ToolTip="小さい画像も長辺1536 pxへ拡大します。通常より処理時間・VRAM使用量・出力サイズが増えます。"
+                        AutomationProperties.Name="試験用のAnything2Real V3 1536 px処理を使う"
+                        AutomationProperties.HelpText="小さい画像も長辺1536 pxへ拡大する高負荷モードです。対応する認証済みローカルAIでのみ選べます。"/>
               <CheckBox x:Name="AppPhotorealPreservationScanCheckBox"
                         Content="Preservation Scan"
                         IsChecked="False" Margin="0,0,0,5"
@@ -3763,6 +3774,17 @@
                             Tag="comfyui-krea2-anime-to-real-edit-v1-photoreal"
                             IsEnabled="False"/>
             </ComboBox>
+            <CheckBox x:Name="ModalPhotorealKreaAnything1536CheckBox"
+                      Content="Anything2Real V3を1536 pxで処理（試験用・高負荷）"
+                      IsChecked="False"
+                      IsEnabled="False"
+                      Visibility="Collapsed"
+                      Margin="0,0,0,10"
+                      Checked="PhotorealKreaAnything1536_Changed"
+                      Unchecked="PhotorealKreaAnything1536_Changed"
+                      ToolTip="小さい画像も長辺1536 pxへ拡大します。通常より処理時間・VRAM使用量・出力サイズが増えます。"
+                      AutomationProperties.Name="試験用のAnything2Real V3 1536 px処理を使う"
+                      AutomationProperties.HelpText="小さい画像も長辺1536 pxへ拡大する高負荷モードです。対応する認証済みローカルAIでのみ選べます。"/>
             <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalPhotorealStyleComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}"

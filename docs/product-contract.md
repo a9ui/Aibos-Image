@@ -150,6 +150,17 @@ The executable cases for these meanings are routed by
 - A present null, malformed, or unknown operation is reader-only protected. It
   is not coerced, executed, retried, reordered, opened, or deleted through a
   managed-operation path.
+- Upscale mutation controls require one exact JSON boolean
+  `upscaleMutationSafeV1: true` in the compact writer projection. Missing,
+  false, null, non-boolean, or duplicate members leave the row visible but
+  reader-only across cancel, retry, dismiss, reorder, output deletion, and
+  bulk mutation surfaces. The validated gate is part of WPF immutable row
+  identity; WPF never passively backfills or rewrites it.
+- `upscaleMutationSafeV1` is presentation permission, not execution authority.
+  The authenticated Companion still revalidates current durable executability
+  for every mutation. Rows written before the gate remain readable without a
+  passive migration and can become mutable only through an explicit,
+  separately reviewed writer projection update.
 - Every job snapshots the effective request needed for deterministic retry.
   Later settings changes do not silently rewrite queued or running jobs.
 - The photoreal Engine selector is independent from Style. Missing or unknown
@@ -162,6 +173,22 @@ The executable cases for these meanings are routed by
   separate. Its engine LoRA is fixed on at strength 1.0, its execution schedule
   is fixed at 8 steps and CFG 1, and generic photoreal Strength is compatibility
   input rather than Krea denoise authority.
+- The Krea Anything-to-Real V3 1536 author workflow is an explicit,
+  Style-independent option whose missing local state and reset value are OFF.
+  It is shown and enabled only after authenticated health contains one exact
+  boolean `kreaAnythingToReal1536V1: true` member. Losing that capability does
+  not rewrite the saved choice or silently downgrade a requested 1536 Job;
+  create and saved retry publication remain blocked until exact support is
+  proved again. Passive health discovery never creates, retries, wakes, or
+  starts a Job.
+- Only exact adapter
+  `comfyui-krea2-anything2real-v3-photoreal` may snapshot `maxDimension: 1536`.
+  That selection resamples the source, including a smaller source, to a
+  16-aligned aspect-preserving canvas whose long edge is exactly 1536 and whose
+  pixel area is at most 1536 squared. The existing default and every selection
+  through 1280 retain their no-upscale, one-megapixel bound. Anime-to-Real,
+  FLUX, unknown adapters, and incomplete durable identities cannot publish or
+  retry a 1536 reservation. No 2048 author mode is defined.
 - The revision 1 WPF photoreal mutation reader recognizes exactly
   `comfyui-flux2-photoreal`, `comfyui-krea2-anything2real-v3-photoreal`,
   `comfyui-krea2-anime-to-real-edit-v1-photoreal`, and legacy
@@ -269,6 +296,14 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   not reorder or update the waiting row. Readiness is reconsidered only at an
   explicit pump, recovery, resume, enqueue, or Companion restart; passive Jobs
   and health reads never monitor assets, start a worker, or wake the queue.
+- With exact `fairGpuFamilyDispatchV1`, the one shared GPU lane alternates
+  runnable image and video families whenever both are waiting. Each family
+  keeps reader order, durable `queueOrder` is never rewritten by selection,
+  and the previous family is derived from exact durable start timestamps so
+  restart and recovery need no passive scheduler-state write. Deferred backend
+  skip is applied first, so an unavailable Krea row remains byte-equivalent
+  while a later runnable image can prevent a long video backlog from starving
+  image work. The existing physical GPU lease still permits only one worker.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
   ComfyUI, or GPU side effect.
 - The durable `progress` field is the companion-owned percentage of completed
@@ -295,8 +330,15 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - Queued or running records discovered during ordinary WPF startup do not by
   themselves enable the three-second catalog-revision timer. That timer starts
   only after this WPF session explicitly activates authenticated durable
-  Enhancement work, remains single-flight, and stops when no active work
-  remains.
+  Enhancement work and remains single-flight. `SavedForDelivery` arms a local,
+  read-only adoption watch across a pre-recovery zero-active snapshot until the
+  first post-arm validated snapshot introduces a previously unobserved valid
+  queued or running Job, with both probe-count and elapsed-time bounds.
+  Unrelated zero-active revisions and updates to Jobs already active at arm do
+  not discharge the watch. The watch sends no API request, recovery, wake, or
+  queue mutation. If adoption reveals queued or running work, ordinary active
+  watching continues; after terminal or zero-active adoption, or either bound,
+  it stops.
 - Managed outputs stay below the selected output root and operation folder.
   Lexical and canonical ownership checks apply before open, Favorite, retry,
   deletion, or producer reuse.
