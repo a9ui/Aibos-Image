@@ -25564,6 +25564,9 @@ public partial class App : Application
                 recoveryWin.Close();
                 recoveryWin = null;
                 File.WriteAllText(jobsPath, jobsSeed);
+                _ = win.RefreshEnhancedStateIfChangedForSmoke();
+                refreshedSucceeded &=
+                    await win.RefreshModalEnhancementForSmokeAsync();
 
                 deletedOutput = await win.DeleteModalEnhancedOutputForSmokeAsync();
                 originalPreserved = File.Exists(sourcePath);

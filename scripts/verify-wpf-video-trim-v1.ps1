@@ -189,7 +189,8 @@ foreach ($token in @(
         throw "The focused Video Trim v1 smoke is missing $token."
     }
 }
-if ($smoke -match 'Process\.Start|Start-Process|Desktop\\Tools|AibosImage-Companion') {
+$privateToolsPattern = 'Desktop' + [regex]::Escape('\') + 'Tools'
+if ($smoke -match "Process\.Start|Start-Process|$privateToolsPattern|AibosImage-Companion") {
     throw 'The focused Video Trim v1 smoke must not launch a live Companion or embed a private path.'
 }
 $remuxJapaneseToken = 'remux' + [char]0x3067
