@@ -3031,6 +3031,7 @@
                         AutomationProperties.HelpText="Engine changes only newly added jobs and is not stored in Styles.">
                 <ComboBoxItem Content="FLUX.2 Klein（標準）" Tag="comfyui-flux2-photoreal"/>
                 <ComboBoxItem Content="Krea 2 + Anything2Real V3（試験用）" Tag="comfyui-krea2-anything2real-v3-photoreal"/>
+                <ComboBoxItem Content="Krea Anime→Real V1（試験用）" Tag="comfyui-krea2-anime-to-real-edit-v1-photoreal"/>
               </ComboBox>
               <CheckBox x:Name="AppPhotorealPreservationScanCheckBox"
                         Content="Preservation Scan"
@@ -3041,15 +3042,16 @@
                         AutomationProperties.HelpText="ONの新規Jobだけ、Qwenが元画像に見えている目・視線・口・眉・手足・服・構図を補助確認します。画像は変更せず、判定失敗時は従来どおり元画像参照だけで続行します。"/>
               <TextBlock Text="見えている特徴だけを補助確認。元画像は変更せず、失敗時は通常処理へ戻ります。" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,10"/>
               <CheckBox x:Name="AppPhotorealLoraEnabledCheckBox"
-                        Content="WarmBloodAban Anything-to-Real LoRA（比較用）"
                         IsChecked="False" Margin="0,0,0,6"
                         Checked="PhotorealLoraEnabled_Changed" Unchecked="PhotorealLoraEnabled_Changed"
                         AutomationProperties.Name="Use WarmBloodAban Anything-to-Real LoRA for comparison by default"
-                        AutomationProperties.HelpText="標準はOFF。比較時は25%または40%を目安にします。80%は顔や表情を均しやすいため非推奨です。"/>
-              <TextBlock Text="標準はOFF。比較は25%／40%が目安、80%は非推奨。" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,9"/>
+                        AutomationProperties.HelpText="標準はOFF。比較時は25%または40%を目安にします。80%は顔や表情を均しやすいため非推奨です。">
+                <TextBlock x:Name="AppPhotorealLoraLabelText" Text="WarmBloodAban Anything-to-Real LoRA（比較用）" TextWrapping="Wrap"/>
+              </CheckBox>
+              <TextBlock x:Name="AppPhotorealLoraHelpText" Text="標準はOFF。比較は25%／40%が目安、80%は非推奨。" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,9"/>
               <DockPanel Margin="0,0,0,3">
                 <TextBlock x:Name="AppPhotorealStrengthValue" DockPanel.Dock="Right" Text="40%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
-                <TextBlock Text="LoRAの強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
+                <TextBlock x:Name="AppPhotorealStrengthLabelText" Text="LoRAの強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
               </DockPanel>
               <Slider x:Name="AppPhotorealStrengthSlider" Minimum="20" Maximum="80" Value="40" TickFrequency="1" IsSnapToTickEnabled="True"
                       AutoToolTipPlacement="TopLeft" ValueChanged="AppPhotorealSetting_ValueChanged"
@@ -3753,6 +3755,7 @@
                       AutomationProperties.HelpText="Engine changes only newly added jobs and is not stored in Styles.">
               <ComboBoxItem Content="FLUX.2 Klein（標準）" Tag="comfyui-flux2-photoreal"/>
               <ComboBoxItem Content="Krea 2 + Anything2Real V3（試験用）" Tag="comfyui-krea2-anything2real-v3-photoreal"/>
+              <ComboBoxItem Content="Krea Anime→Real V1（試験用）" Tag="comfyui-krea2-anime-to-real-edit-v1-photoreal"/>
             </ComboBox>
             <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalPhotorealStyleComboBox"
@@ -3861,17 +3864,17 @@
               <TextBlock Text="Preservation Scan" TextWrapping="Wrap"/>
             </CheckBox>
             <TextBlock Text="見えている特徴だけを補助確認。Styleとは独立して保存されます。" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,3"/>
-            <CheckBox x:Name="ModalPhotorealLoraEnabledCheckBox"
+              <CheckBox x:Name="ModalPhotorealLoraEnabledCheckBox"
                       IsChecked="False" Margin="0,10,0,6"
                       Checked="PhotorealLoraEnabled_Changed" Unchecked="PhotorealLoraEnabled_Changed"
                       AutomationProperties.Name="Use WarmBloodAban Anything-to-Real LoRA for comparison"
                       AutomationProperties.HelpText="標準はOFF。比較時は25%または40%を目安にします。80%は顔や表情を均しやすいため非推奨です。">
-              <TextBlock Text="WarmBloodAban Anything-to-Real LoRA（比較用）" TextWrapping="Wrap"/>
+              <TextBlock x:Name="ModalPhotorealLoraLabelText" Text="WarmBloodAban Anything-to-Real LoRA（比較用）" TextWrapping="Wrap"/>
             </CheckBox>
-            <TextBlock Text="標準はOFF。比較は25%／40%が目安、80%は非推奨。" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,9"/>
+            <TextBlock x:Name="ModalPhotorealLoraHelpText" Text="標準はOFF。比較は25%／40%が目安、80%は非推奨。" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,9"/>
             <DockPanel Margin="0,0,0,3">
               <TextBlock x:Name="ModalPhotorealStrengthValue" DockPanel.Dock="Right" Text="40%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
-              <TextBlock Text="LoRAの強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
+              <TextBlock x:Name="ModalPhotorealStrengthLabelText" Text="LoRAの強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
             </DockPanel>
             <Slider x:Name="ModalPhotorealStrengthSlider" Minimum="20" Maximum="80" Value="40" TickFrequency="1" IsSnapToTickEnabled="True"
                     AutoToolTipPlacement="TopLeft" ValueChanged="ModalPhotorealSetting_ValueChanged"

@@ -38,6 +38,7 @@ public partial class MainWindow
         [
             "comfyui-flux2-photoreal",
             "comfyui-krea2-anything2real-v3-photoreal",
+            "comfyui-krea2-anime-to-real-edit-v1-photoreal",
             "a1111-photoreal",
         ];
 
@@ -984,6 +985,11 @@ public partial class MainWindow
             mtimeMs,
             presetHash,
             adapterId);
+
+    public static bool IsRecoveredPhotorealAdapterForSmoke(string adapterId)
+        => RecoveredPhotorealAdapterIds.Contains(
+            adapterId,
+            StringComparer.Ordinal);
 
     public RecoveredEnhancementReferenceSmokeSnapshot
         InspectRecoveredEnhancementReferencesForSmoke(

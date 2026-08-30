@@ -301,6 +301,7 @@ public partial class App
             {
                 queuedPhotorealSettingsUpdateV1 = false,
                 photorealPromptControlsV2 = true,
+                kreaAnimeToRealV1 = true,
                 atomicImageEnqueueNext = true,
                 terminalHistoryBatchDismissV1 = true,
                 queuedJobsBatchCancelV1 = true,
