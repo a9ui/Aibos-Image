@@ -10295,6 +10295,9 @@ public partial class MainWindow : Window
         Func<JsonElement, string?>? healthValidator =
             CreateImageEnhancementHealthValidator(
                 normalizedOperation,
+                normalizedOperation == "photoreal"
+                    ? photoreal.AdapterId
+                    : upscaleAdapterId,
                 enqueueNext,
                 requiresPhotorealSourceUpscale:
                     requestSource.UsesPhotorealSource,
@@ -10380,8 +10383,12 @@ public partial class MainWindow : Window
 
         ApplyActiveEnhancementQueueJobToVisibleCatalog(queuedJob, tile);
         string placementLabel = enqueueNext ? "現在の処理の次" : "キュー";
+        bool executionDeferred = normalizedOperation == "photoreal"
+            && IsPhotorealExecutionDeferred(payload);
         SetTransientStatusToast(
-            normalizedOperation == "photoreal"
+            executionDeferred
+                ? $"{tile.FileName}: 実写化をキューへ追加しました。Kreaの準備後にResumeまたは再接続すると処理を開始します。"
+                : normalizedOperation == "photoreal"
                 ? $"{tile.FileName}: AI実写化を{placementLabel}に追加しました。"
                 : requestSource.UsesPhotorealSource
                     ? $"{tile.FileName}: AI実写高画質化のみを{placementLabel}に追加しました。"
@@ -20286,16 +20293,6 @@ public partial class MainWindow : Window
         UpdateModalEnhancementActionControls();
         try
         {
-            Func<JsonElement, string?>? healthValidator =
-                CreateImageEnhancementHealthValidator(
-                    normalizedOperation,
-                    enqueueNext: false,
-                    requiresPhotorealSourceUpscale:
-                        requestSource.UsesPhotorealSource,
-                    requiresRecoveredPhotorealSourceUpscale:
-                        requestSource.UsesRecoveredPhotorealSource,
-                    requiresPhotorealSeedControl:
-                        !retry && photorealSeed.HasValue);
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
 
@@ -20317,6 +20314,21 @@ public partial class MainWindow : Window
                 if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                     return;
             }
+            Func<JsonElement, string?>? healthValidator =
+                CreateImageEnhancementHealthValidator(
+                    normalizedOperation,
+                    normalizedOperation == "photoreal"
+                        ? retry
+                            ? _modalEnhancementAdapterId
+                            : photoreal.AdapterId
+                        : upscaleAdapterId,
+                    enqueueNext: false,
+                    requiresPhotorealSourceUpscale:
+                        requestSource.UsesPhotorealSource,
+                    requiresRecoveredPhotorealSourceUpscale:
+                        requestSource.UsesRecoveredPhotorealSource,
+                    requiresPhotorealSeedControl:
+                        !retry && photorealSeed.HasValue);
             string? originalPromptSnapshot = normalizedOperation == "upscale"
                 && !requestSource.UsesPhotorealSource
                 ? ResolveOriginalPromptSnapshot(tile, sourceIdentity)
@@ -20421,10 +20433,13 @@ public partial class MainWindow : Window
             ApplyModalEnhancementJob(tile, ParseModalEnhancementJob(jobElement));
             ApplyActiveEnhancementQueueJobToVisibleCatalog(jobElement, tile);
             QueueEnhancedStateRefreshIfChanged();
-            SetTransientStatusToast(
-                $"{tile.FileName}: Jobsの待機列へ追加しました。");
+            bool executionDeferred = normalizedOperation == "photoreal"
+                && IsPhotorealExecutionDeferred(payload);
+            SetTransientStatusToast(executionDeferred
+                ? $"{tile.FileName}: 実写化を待機列へ追加しました。Kreaの準備後にResumeまたは再接続すると処理を開始します。"
+                : $"{tile.FileName}: Jobsの待機列へ追加しました。");
             ShowModalInteractionFeedback(normalizedOperation == "photoreal"
-                ? "AI実写化を開始しました"
+                ? "実写化を待機列に追加しました"
                 : requestSource.UsesPhotorealSource
                     ? "実写HQを開始しました"
                     : "AI高画質化を開始しました");

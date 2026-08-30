@@ -21,6 +21,7 @@ public partial class MainWindow
     private const string LegacyNextCompanionLauncherFileName =
         "prod_launcher.js";
     private const string PhotorealPromptControlsCapability = "photorealPromptControlsV2";
+    private const string KreaAnimeToRealV1Capability = "kreaAnimeToRealV1";
     private const string AtomicImageEnqueueNextCapability = "atomicImageEnqueueNext";
     private const string PhotorealSourceUpscaleCapability = "photorealSourceUpscale";
     private const string RecoveredPhotorealSourceUpscaleCapability =
@@ -699,6 +700,7 @@ public partial class MainWindow
 
     private static Func<JsonElement, string?>? CreateImageEnhancementHealthValidator(
         string operation,
+        string? adapterId,
         bool enqueueNext,
         bool requiresPhotorealSourceUpscale = false,
         bool requiresRecoveredPhotorealSourceUpscale = false,
@@ -708,6 +710,11 @@ public partial class MainWindow
             operation,
             "photoreal",
             StringComparison.Ordinal);
+        bool needsKreaAnimeToRealV1 = needsPhotorealControls
+            && string.Equals(
+                adapterId,
+                KreaAnimeToRealV1PhotorealEngineId,
+                StringComparison.Ordinal);
         if (!needsPhotorealControls
             && !enqueueNext
             && !requiresPhotorealSourceUpscale
@@ -719,11 +726,16 @@ public partial class MainWindow
 
         return payload =>
         {
-            var missingCapabilities = new List<string>(5);
+            var missingCapabilities = new List<string>(6);
             if (needsPhotorealControls
                 && !HasEnhancementCapability(payload, PhotorealPromptControlsCapability))
             {
                 missingCapabilities.Add("this photoreal settings format");
+            }
+            if (needsKreaAnimeToRealV1
+                && !HasEnhancementCapability(payload, KreaAnimeToRealV1Capability))
+            {
+                missingCapabilities.Add("the Krea Anime-to-Real V1 adapter row");
             }
             if (enqueueNext
                 && !HasEnhancementCapability(payload, AtomicImageEnqueueNextCapability))
@@ -4211,6 +4223,14 @@ public partial class MainWindow
     }
     public static bool HasPhotorealPromptControlsCapabilityForSmoke(JsonElement payload)
         => HasPhotorealPromptControlsCapability(payload);
+    public static bool IsImageEnhancementHealthAcceptedForSmoke(
+        JsonElement payload,
+        string operation,
+        string? adapterId)
+        => CreateImageEnhancementHealthValidator(
+            operation,
+            adapterId,
+            enqueueNext: false)?.Invoke(payload) is null;
     public static bool HasRecoveredPhotorealSourceUpscaleCapabilityForSmoke(
         JsonElement payload)
         => HasEnhancementCapability(

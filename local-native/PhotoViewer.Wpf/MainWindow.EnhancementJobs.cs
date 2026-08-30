@@ -1474,7 +1474,8 @@ public partial class MainWindow
             && job.CanCancel);
 
     private bool CanUpdateAllQueuedPhotorealPrompts()
-        => _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported
+        => CurrentPhotorealEngineSupportsQueuedSettingsUpdate()
+            && _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported
             && _enhancementWorkspaceJobs.Any(static job =>
                 job.CanUpdatePhotorealPrompts);
 
@@ -3084,8 +3085,13 @@ public partial class MainWindow
     private void ApplyQueuedPhotorealPromptUpdateCapability(bool supported)
     {
         _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported = supported;
+        bool currentSettingsAreFlux =
+            CurrentPhotorealEngineSupportsQueuedSettingsUpdate();
         foreach (EnhancementWorkspaceJobView job in _enhancementWorkspaceJobs)
-            job.QueuedPhotorealPromptUpdateCapabilitySafe = supported;
+        {
+            job.QueuedPhotorealPromptUpdateCapabilitySafe =
+                supported && currentSettingsAreFlux;
+        }
         RefreshEnhancementQueueBulkControls();
     }
 
@@ -3157,7 +3163,8 @@ public partial class MainWindow
             // that already-observed capability state authoritative for rows
             // that appear for the first time in the following inventory.
             candidate.QueuedPhotorealPromptUpdateCapabilitySafe =
-                _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported;
+                _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported
+                && CurrentPhotorealEngineSupportsQueuedSettingsUpdate();
             candidate.PhotorealEnqueueNextCapabilitySafe =
                 _enhancementWorkspacePhotorealEnqueueNextSupported;
             if (existingById.TryGetValue(candidate.Id, out EnhancementWorkspaceJobView? existing)
@@ -5728,6 +5735,7 @@ public partial class MainWindow
         RoutedEventArgs e)
     {
         if (sender is not Button { Tag: EnhancementWorkspaceJobView job }
+            || !CurrentPhotorealEngineSupportsQueuedSettingsUpdate()
             || !job.CanUpdatePhotorealPrompts)
         {
             return;
@@ -7034,12 +7042,6 @@ public partial class MainWindow
         long generation = _enhancementWorkspaceGeneration;
         try
         {
-            Func<JsonElement, string?>? healthValidator =
-                CreateImageEnhancementHealthValidator(
-                    "photoreal",
-                    enqueueNext,
-                    requiresPhotorealSeedControl: photorealSeed.HasValue);
-
             ModalPhotorealRequestSettings settings;
             try
             {
@@ -7052,6 +7054,12 @@ public partial class MainWindow
                 EnhancementJobsStatusText.Text = ex.Message;
                 return;
             }
+            Func<JsonElement, string?>? healthValidator =
+                CreateImageEnhancementHealthValidator(
+                    "photoreal",
+                    settings.AdapterId,
+                    enqueueNext,
+                    requiresPhotorealSeedControl: photorealSeed.HasValue);
             EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
                 CreatePhotorealRequestBody(
                     sourceIdentity,
@@ -7078,9 +7086,13 @@ public partial class MainWindow
                 return;
             }
 
-            EnhancementJobsStatusText.Text = enqueueNext
-                ? "現在のPositive・Negative・LoRA・強さ・CFG・品質・解像度で、実写化を現在の処理の次へ追加しました。"
-                : "現在のPositive・Negative・LoRA・強さ・CFG・品質・解像度で再実写化を待機列へ追加しました。";
+            bool executionDeferred = response.Payload is JsonElement payload
+                && IsPhotorealExecutionDeferred(payload);
+            EnhancementJobsStatusText.Text = executionDeferred
+                ? "実写化を待機列へ追加しました。Kreaの準備後にResumeまたは再接続すると処理を開始します。"
+                : enqueueNext
+                    ? "現在の実写化設定で、現在の処理の次へ追加しました。"
+                    : "現在の実写化設定で待機列へ追加しました。";
             await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
         }
         finally
@@ -8527,6 +8539,14 @@ public partial class MainWindow
                 StringComparison.Ordinal))
         {
             return CreateMiniMaxH3VideoHealthValidator();
+        }
+
+        if (string.Equals(operation, "photoreal", StringComparison.Ordinal))
+        {
+            return CreateImageEnhancementHealthValidator(
+                operation,
+                adapterId,
+                enqueueNext: false);
         }
 
         if (!string.Equals(operation, "i2i", StringComparison.Ordinal))
@@ -10140,6 +10160,9 @@ public partial class MainWindow
                 AutomationProperties.GetName(
                     EnhancementJobsUpdateQueuedPromptsButton));
 
+    public bool CurrentPhotorealEngineSupportsQueuedSettingsUpdateForSmoke
+        => CurrentPhotorealEngineSupportsQueuedSettingsUpdate();
+
     public async Task<bool> CancelAllQueuedEnhancementJobsForSmokeAsync()
     {
         if (!CanCancelAllQueuedEnhancementJobs())
@@ -11028,13 +11051,19 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool CanRerunI2iV3Next =>
         CanRerunI2iV3 && PhotorealEnqueueNextCapabilitySafe;
     public bool CanEditI2iV3Settings => CanRerunI2iV3;
+    private static bool IsQueuedPhotorealSettingsUpdateAdapter(string adapterId)
+        => adapterId == "comfyui-flux2-photoreal";
+
+    public static bool IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
+        string adapterId)
+        => IsQueuedPhotorealSettingsUpdateAdapter(adapterId);
+
     public bool CanUpdatePhotorealPrompts =>
         !_isBusy
         && !CancelRequested
         && Status == "queued"
         && Operation == "photoreal"
-        && AdapterId is "comfyui-flux2-photoreal"
-            or "comfyui-krea2-anything2real-v3-photoreal"
+        && IsQueuedPhotorealSettingsUpdateAdapter(AdapterId)
         && QueuedPhotorealPromptUpdateCapabilitySafe;
     public bool QueuedPhotorealPromptUpdateCapabilitySafe
     {
@@ -11579,6 +11608,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             "Balanced · FLUX.2 Photoreal",
         ("photoreal-balanced", "comfyui-krea2-anything2real-v3-photoreal") =>
             "Balanced · Krea V3（試験用）",
+        ("photoreal-balanced", "comfyui-krea2-anime-to-real-edit-v1-photoreal") =>
+            "Balanced · Krea Anime→Real V1（試験用）",
         ("photo-detail-x4", "realesrgan-ncnn") =>
             "Photo Detail 4x · Real-ESRGAN",
         ("anime-sharp-x2", "realesrgan-ncnn") =>

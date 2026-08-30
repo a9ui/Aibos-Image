@@ -17,7 +17,7 @@ public partial class MainWindow
     private const int MaxPhotorealPromptMappingCount = 256;
     private const int MaxPhotorealPromptMappingTagLength = 160;
     private const int MaxPhotorealPromptMappingOutputLength = 400;
-    private const int CurrentPhotorealPromptMappingDefaultsRevision = 8;
+    private const int CurrentPhotorealPromptMappingDefaultsRevision = 9;
     private readonly List<PhotorealPromptMappingState> _photorealPromptMappings = [];
     private int _photorealPromptMappingDefaultsRevision =
         CurrentPhotorealPromptMappingDefaultsRevision;
@@ -49,9 +49,19 @@ public partial class MainWindow
             }));
         }
 
-        AddMapped("表情・顔（比較用）", false,
-            ("troubled eyebrows", "barely raised inner brow ends, relaxed forehead"),
-            ("trouble_eyebrows", "barely raised inner brow ends, relaxed forehead"));
+        const string worriedBrowsPrompt =
+            "preserve the exact source eyebrow curvature and inner-brow height; do not neutralize or intensify the expression or add forehead wrinkles";
+        const string torogaoPrompt =
+            "do not change the facial expression already visible in the source: preserve the exact eyebrow curvature, eyelid openness, gaze, mouth opening, and cheek flush; treat torogao only as metadata describing the source, not as an instruction to add fear, surprise, smiling, blankness, or forehead wrinkles";
+        const string anguishPrompt =
+            "preserve the exact source anguish through the existing eyebrow curvature, eyelid tension, gaze, and mouth shape; do not intensify, neutralize, smile, or add forehead wrinkles";
+        const string invertedNipplesPrompt =
+            "preserve the exact visible source nipple and areola geometry, including any central nipple inversion; do not flatten, erase, blur, merge, protrude, or otherwise redesign it";
+        AddMapped("表情・顔（現実的な感情変換）", true,
+            ("troubled eyebrows", worriedBrowsPrompt),
+            ("trouble_eyebrows", worriedBrowsPrompt),
+            ("torogao", torogaoPrompt),
+            ("anguish", anguishPrompt));
         AddMapped("表情・顔（弱い形状）", true,
             ("narrowed eyes", "slightly narrowed eyes"),
             ("upturned eyes", "slightly upward-tilted outer eye corners"),
@@ -89,12 +99,14 @@ public partial class MainWindow
             ("one eye closed", "one eye fully closed and the other eye open"),
             ("covered mouth", "mouth visibly occluded"));
         Add("表情・顔（比較用）", false,
-            "torogao", "embarrassed", "shy", "humiliation", "female orgasm",
-            "craving", "anguish", "in_heat", "in heat", "forced orgasm",
+            "embarrassed", "shy", "humiliation", "female orgasm",
+            "craving", "in_heat", "in heat", "forced orgasm",
             "aroused", "fucked silly", "heavy breathing",
             "claving", "cute", "seductive", "CuteSeductive");
+        AddMapped("成人形状（実写形状変換）", true,
+            ("inverted nipples", invertedNipplesPrompt));
         Add("成人形状", true,
-            "puffy nipples", "huge nipples", "inverted nipples", "erect_nipple",
+            "puffy nipples", "huge nipples", "erect_nipple",
             "covered nipples", "areola slip", "large penis", "clitoris",
             "spread pussy");
         Add("成人形状（参照優先）", false,
@@ -249,6 +261,8 @@ public partial class MainWindow
                 ApplyPromptMappingDefaultsRevision3(upgraded);
             if (persistedDefaultsRevision < 4)
                 ApplyPromptMappingDefaultsRevision4(upgraded);
+            if (persistedDefaultsRevision < 9)
+                ApplyPromptMappingDefaultsRevision9(upgraded);
             var knownSources = new HashSet<string>(
                 upgraded.Select(static row =>
                     NormalizeA1111PromptTag(row.SourceTag)),
@@ -378,6 +392,70 @@ public partial class MainWindow
             "trouble eyebrows",
             "trouble eyebrows",
             "barely raised inner brow ends, relaxed forehead");
+    }
+
+    private static void ApplyPromptMappingDefaultsRevision9(
+        List<PhotorealPromptMappingState> mappings)
+    {
+        ReplaceKnownDefaultMapping(
+            mappings,
+            "troubled eyebrows",
+            "preserve the exact source eyebrow curvature and inner-brow height; do not neutralize or intensify the expression or add forehead wrinkles",
+            "troubled eyebrows",
+            "slightly raised inner eyebrow ends",
+            "barely raised inner brow ends, relaxed forehead",
+            "clearly worried eyebrows with raised inner brow ends and mild brow tension, preserving the source emotion without deep forehead wrinkles");
+        ReplaceKnownDefaultMapping(
+            mappings,
+            "trouble_eyebrows",
+            "preserve the exact source eyebrow curvature and inner-brow height; do not neutralize or intensify the expression or add forehead wrinkles",
+            "trouble_eyebrows",
+            "barely raised inner brow ends, relaxed forehead",
+            "clearly worried eyebrows with raised inner brow ends and mild brow tension, preserving the source emotion without deep forehead wrinkles");
+        ReplaceKnownDefaultMapping(
+            mappings,
+            "torogao",
+            "do not change the facial expression already visible in the source: preserve the exact eyebrow curvature, eyelid openness, gaze, mouth opening, and cheek flush; treat torogao only as metadata describing the source, not as an instruction to add fear, surprise, smiling, blankness, or forehead wrinkles",
+            "torogao",
+            "a source-faithful strained and overwhelmed adult expression with worried brows, tense eyelids, the source eye directions and openness, naturally parted or open lips matching the source, and diffuse cheek flushing; no blank stare, broad smile, or deep forehead wrinkles");
+        ReplaceKnownDefaultMapping(
+            mappings,
+            "anguish",
+            "preserve the exact source anguish through the existing eyebrow curvature, eyelid tension, gaze, and mouth shape; do not intensify, neutralize, smile, or add forehead wrinkles",
+            "anguish",
+            "a clearly visible but natural anguished expression with worried brows, tense eyelids, and mouth tension matching the source; no blank stare or exaggerated forehead wrinkles");
+        ReplaceKnownDefaultMapping(
+            mappings,
+            "inverted nipples",
+            "preserve the exact visible source nipple and areola geometry, including any central nipple inversion; do not flatten, erase, blur, merge, protrude, or otherwise redesign it",
+            "inverted nipples",
+            "anatomically realistic inverted nipples with a visible central indentation, preserving the source-side inversion without flattening, erasing, or merging the nipple and areola structure");
+    }
+
+    private static void ReplaceKnownDefaultMapping(
+        IEnumerable<PhotorealPromptMappingState> mappings,
+        string sourceTag,
+        string replacement,
+        params string[] knownOutputs)
+    {
+        PhotorealPromptMappingState? mapping = mappings.FirstOrDefault(row =>
+            string.Equals(
+                NormalizeA1111PromptTag(row.SourceTag),
+                NormalizeA1111PromptTag(sourceTag),
+                StringComparison.OrdinalIgnoreCase));
+        if (mapping is null)
+            return;
+
+        string output = NormalizeA1111PromptTag(mapping.OutputPrompt);
+        if (!knownOutputs.Any(known => string.Equals(
+                output,
+                NormalizeA1111PromptTag(known),
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        mapping.OutputPrompt = replacement;
     }
 
     private static void DisableKnownDefaultMapping(

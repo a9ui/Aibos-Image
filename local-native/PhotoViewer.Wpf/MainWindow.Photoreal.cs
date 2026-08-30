@@ -23,6 +23,8 @@ public partial class MainWindow
     private const string DefaultPhotorealEngineId = "comfyui-flux2-photoreal";
     private const string KreaV3PhotorealEngineId =
         "comfyui-krea2-anything2real-v3-photoreal";
+    private const string KreaAnimeToRealV1PhotorealEngineId =
+        "comfyui-krea2-anime-to-real-edit-v1-photoreal";
     private const int DefaultPhotorealSteps = 8;
     private const int DefaultPhotorealMaxDimension = 1280;
     private const int MaxPhotorealStyleCount = 32;
@@ -131,6 +133,14 @@ public partial class MainWindow
             + "hairstyle, hair color, body shape, pose, clothing, camera angle, "
             + "framing, and background layout. "
             + styleDirection;
+
+    private static bool IsPhotorealExecutionDeferred(JsonElement payload)
+        => payload.ValueKind == JsonValueKind.Object
+            && HasSingleProperty(payload, "executionDeferred")
+            && payload.TryGetProperty(
+                "executionDeferred",
+                out JsonElement deferred)
+            && deferred.ValueKind == JsonValueKind.True;
 
     private static BuiltInPhotorealStyle? FindBuiltInPhotorealStyle(
         string? selectionKey)
@@ -1452,14 +1462,18 @@ public partial class MainWindow
         string prompt = _modalPhotorealPrompt.Trim();
         if (prompt.Length == 0)
             prompt = _modalPhotorealEmptyPrompt.Trim();
+        bool usesKreaAnimeToReal =
+            _photorealEngineId == KreaAnimeToRealV1PhotorealEngineId;
 
         return new(
             _photorealEngineId,
-            _modalPhotorealLoraEnabled,
+            _photorealEngineId == DefaultPhotorealEngineId
+                ? _modalPhotorealLoraEnabled
+                : true,
             _modalPhotorealStrength,
-            _modalPhotorealSteps,
-            _modalPhotorealCfgScale,
-            _modalPhotorealMaxDimension,
+            usesKreaAnimeToReal ? 8 : _modalPhotorealSteps,
+            usesKreaAnimeToReal ? 1 : _modalPhotorealCfgScale,
+            usesKreaAnimeToReal ? 1280 : _modalPhotorealMaxDimension,
             prompt,
             _modalPhotorealNegativePromptEnabled
                 ? _modalPhotorealNegativePrompt.Trim()
@@ -1720,18 +1734,32 @@ public partial class MainWindow
         string? requested = (comboBox.SelectedItem as ComboBoxItem)?.Tag as string;
         _photorealEngineId = NormalizePhotorealEngineId(requested);
         SyncModalPhotorealSettingsControls();
-        SetPhotorealSettingsStatus(
-            _photorealEngineId == KreaV3PhotorealEngineId
-                ? "Krea 2 + Anything2Real V3（試験用）を保存しました。LoRAは固定1.0、kv_cacheは修正版のONです。"
-                : "FLUX.2 Kleinを保存しました。次に追加する実写化ジョブから使われます。");
+        ApplyQueuedPhotorealPromptUpdateCapability(
+            _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported);
+        SetPhotorealSettingsStatus(_photorealEngineId switch
+        {
+            KreaV3PhotorealEngineId =>
+                "Krea 2 + Anything2Real V3（試験用）を保存しました。LoRAは固定1.0、kv_cacheは修正版のONです。次の新規ジョブから使われます。",
+            KreaAnimeToRealV1PhotorealEngineId =>
+                "Krea Anime→Real V1（試験用）を保存しました。Engine LoRAは固定1.0です。写真らしさ優先のため、強い表情や衣装形状が変わる場合があります。次の新規ジョブから使われます。",
+            _ =>
+                "FLUX.2 Kleinを保存しました。次に追加する実写化ジョブから使われます。",
+        });
         if (!_initializing)
             SaveState();
     }
 
     private static string NormalizePhotorealEngineId(string? engineId)
-        => engineId == KreaV3PhotorealEngineId
-            ? KreaV3PhotorealEngineId
-            : DefaultPhotorealEngineId;
+        => engineId switch
+        {
+            KreaV3PhotorealEngineId => KreaV3PhotorealEngineId,
+            KreaAnimeToRealV1PhotorealEngineId =>
+                KreaAnimeToRealV1PhotorealEngineId,
+            _ => DefaultPhotorealEngineId,
+        };
+
+    private bool CurrentPhotorealEngineSupportsQueuedSettingsUpdate()
+        => _photorealEngineId == DefaultPhotorealEngineId;
 
     private static void SelectPhotorealEngine(
         ComboBox comboBox,
@@ -2721,10 +2749,48 @@ public partial class MainWindow
                 AppPhotorealEngineComboBox,
                 _photorealEngineId);
             bool usesKlein = _photorealEngineId == DefaultPhotorealEngineId;
-            ModalPhotorealLoraEnabledCheckBox.IsChecked = _modalPhotorealLoraEnabled;
-            AppPhotorealLoraEnabledCheckBox.IsChecked = _modalPhotorealLoraEnabled;
+            bool usesKrea = !usesKlein;
+            bool usesKreaAnimeToReal =
+                _photorealEngineId == KreaAnimeToRealV1PhotorealEngineId;
+            double effectiveCfgScale = usesKreaAnimeToReal
+                ? 1
+                : _modalPhotorealCfgScale;
+            int effectiveSteps = usesKreaAnimeToReal ? 8 : _modalPhotorealSteps;
+            int effectiveMaxDimension = usesKreaAnimeToReal
+                ? 1280
+                : _modalPhotorealMaxDimension;
+            ModalPhotorealLoraEnabledCheckBox.IsChecked =
+                usesKrea || _modalPhotorealLoraEnabled;
+            AppPhotorealLoraEnabledCheckBox.IsChecked =
+                usesKrea || _modalPhotorealLoraEnabled;
             ModalPhotorealLoraEnabledCheckBox.IsEnabled = usesKlein;
             AppPhotorealLoraEnabledCheckBox.IsEnabled = usesKlein;
+            string loraLabel = usesKrea
+                ? "Engine LoRA（固定 1.0）"
+                : "WarmBloodAban Anything-to-Real LoRA（比較用）";
+            string loraHelp = usesKrea
+                ? "このEngineではLoRAが1.0に固定されます。変更できません。"
+                : "標準はOFF。比較は25%／40%が目安、80%は非推奨。";
+            AppPhotorealLoraLabelText.Text = loraLabel;
+            ModalPhotorealLoraLabelText.Text = loraLabel;
+            AppPhotorealLoraHelpText.Text = loraHelp;
+            ModalPhotorealLoraHelpText.Text = loraHelp;
+            AutomationProperties.SetName(
+                AppPhotorealLoraEnabledCheckBox,
+                usesKrea
+                    ? "Engine LoRA fixed at 1.0 for new Krea photorealization jobs"
+                    : "Use WarmBloodAban Anything-to-Real LoRA for comparison by default");
+            AutomationProperties.SetName(
+                ModalPhotorealLoraEnabledCheckBox,
+                usesKrea
+                    ? "Engine LoRA fixed at 1.0 for this Krea photorealization"
+                    : "Use WarmBloodAban Anything-to-Real LoRA for comparison");
+            AutomationProperties.SetHelpText(
+                AppPhotorealLoraEnabledCheckBox,
+                loraHelp);
+            AutomationProperties.SetHelpText(
+                ModalPhotorealLoraEnabledCheckBox,
+                loraHelp);
             ModalPhotorealPreservationScanCheckBox.IsChecked =
                 _photorealPreservationScanEnabled;
             AppPhotorealPreservationScanCheckBox.IsChecked =
@@ -2736,9 +2802,14 @@ public partial class MainWindow
             ModalPhotorealStrengthSlider.Value = _modalPhotorealStrength * 100;
             ModalPhotorealStrengthSlider.IsEnabled =
                 usesKlein && _modalPhotorealLoraEnabled;
-            ModalPhotorealCfgScaleSlider.Value = _modalPhotorealCfgScale * 100;
-            SelectIntegerTag(ModalPhotorealStepsComboBox, _modalPhotorealSteps);
-            SelectIntegerTag(ModalPhotorealSizeComboBox, _modalPhotorealMaxDimension);
+            ModalPhotorealStrengthSlider.Visibility =
+                usesKrea ? Visibility.Collapsed : Visibility.Visible;
+            ModalPhotorealCfgScaleSlider.Value = effectiveCfgScale * 100;
+            ModalPhotorealCfgScaleSlider.IsEnabled = !usesKreaAnimeToReal;
+            SelectIntegerTag(ModalPhotorealStepsComboBox, effectiveSteps);
+            ModalPhotorealStepsComboBox.IsEnabled = !usesKreaAnimeToReal;
+            SelectIntegerTag(ModalPhotorealSizeComboBox, effectiveMaxDimension);
+            ModalPhotorealSizeComboBox.IsEnabled = !usesKreaAnimeToReal;
             ModalPhotorealPromptTextBox.Text = _modalPhotorealPrompt;
             ModalPhotorealEmptyPromptTextBox.Text = _modalPhotorealEmptyPrompt;
             ModalPhotorealNegativePromptTextBox.Text = _modalPhotorealNegativePrompt;
@@ -2748,13 +2819,24 @@ public partial class MainWindow
                 AppPhotorealStrengthSlider.Value = _modalPhotorealStrength * 100;
                 AppPhotorealStrengthSlider.IsEnabled =
                     usesKlein && _modalPhotorealLoraEnabled;
+                AppPhotorealStrengthSlider.Visibility =
+                    usesKrea ? Visibility.Collapsed : Visibility.Visible;
             }
             if (AppPhotorealCfgScaleSlider is not null)
-                AppPhotorealCfgScaleSlider.Value = _modalPhotorealCfgScale * 100;
+            {
+                AppPhotorealCfgScaleSlider.Value = effectiveCfgScale * 100;
+                AppPhotorealCfgScaleSlider.IsEnabled = !usesKreaAnimeToReal;
+            }
             if (AppPhotorealStepsComboBox is not null)
-                SelectIntegerTag(AppPhotorealStepsComboBox, _modalPhotorealSteps);
+            {
+                SelectIntegerTag(AppPhotorealStepsComboBox, effectiveSteps);
+                AppPhotorealStepsComboBox.IsEnabled = !usesKreaAnimeToReal;
+            }
             if (AppPhotorealSizeComboBox is not null)
-                SelectIntegerTag(AppPhotorealSizeComboBox, _modalPhotorealMaxDimension);
+            {
+                SelectIntegerTag(AppPhotorealSizeComboBox, effectiveMaxDimension);
+                AppPhotorealSizeComboBox.IsEnabled = !usesKreaAnimeToReal;
+            }
             SyncPhotorealSeedControls();
             RefreshModalPhotorealSettingLabels();
             RefreshPhotorealStyleSummary();
@@ -2767,14 +2849,47 @@ public partial class MainWindow
 
     private void RefreshModalPhotorealSettingLabels()
     {
+        bool usesKrea = _photorealEngineId != DefaultPhotorealEngineId;
+        double effectiveCfgScale =
+            _photorealEngineId == KreaAnimeToRealV1PhotorealEngineId
+                ? 1
+                : _modalPhotorealCfgScale;
         if (ModalPhotorealStrengthValue is not null)
-            ModalPhotorealStrengthValue.Text = $"{Math.Round(_modalPhotorealStrength * 100):0}%";
+            ModalPhotorealStrengthValue.Text = usesKrea
+                ? "1.0（固定）"
+                : $"{Math.Round(_modalPhotorealStrength * 100):0}%";
         if (ModalPhotorealCfgScaleValue is not null)
-            ModalPhotorealCfgScaleValue.Text = _modalPhotorealCfgScale.ToString("0.00", CultureInfo.InvariantCulture);
+            ModalPhotorealCfgScaleValue.Text = effectiveCfgScale.ToString("0.00", CultureInfo.InvariantCulture);
         if (AppPhotorealStrengthValue is not null)
-            AppPhotorealStrengthValue.Text = $"{Math.Round(_modalPhotorealStrength * 100):0}%";
+            AppPhotorealStrengthValue.Text = usesKrea
+                ? "1.0（固定）"
+                : $"{Math.Round(_modalPhotorealStrength * 100):0}%";
         if (AppPhotorealCfgScaleValue is not null)
-            AppPhotorealCfgScaleValue.Text = _modalPhotorealCfgScale.ToString("0.00", CultureInfo.InvariantCulture);
+            AppPhotorealCfgScaleValue.Text = effectiveCfgScale.ToString("0.00", CultureInfo.InvariantCulture);
+        if (ModalPhotorealStrengthLabelText is not null)
+            ModalPhotorealStrengthLabelText.Text = usesKrea
+                ? "Engine LoRA"
+                : "LoRAの強さ";
+        if (AppPhotorealStrengthLabelText is not null)
+            AppPhotorealStrengthLabelText.Text = usesKrea
+                ? "Engine LoRA"
+                : "LoRAの強さ";
+        if (ModalPhotorealStrengthSlider is not null)
+        {
+            AutomationProperties.SetName(
+                ModalPhotorealStrengthSlider,
+                usesKrea
+                    ? "Engine LoRA fixed at 1.0"
+                    : "Anything-to-Real LoRA strength");
+        }
+        if (AppPhotorealStrengthSlider is not null)
+        {
+            AutomationProperties.SetName(
+                AppPhotorealStrengthSlider,
+                usesKrea
+                    ? "Default engine LoRA fixed at 1.0"
+                    : "Default Anything-to-Real LoRA strength");
+        }
     }
 
     public (bool LoraEnabled, double Strength, int Steps, double CfgScale, int MaxDimension, string Prompt, string EmptyPrompt, string NegativePrompt, bool NegativePromptEnabled, string EffectivePrompt, string EffectiveNegativePrompt) ModalPhotorealSettingsForSmoke
@@ -2979,12 +3094,23 @@ public partial class MainWindow
             AutomationProperties.GetName(ModalPhotorealEngineComboBox)
                 == "AI photorealization engine");
 
+    public (string? AppEngineId, string? ModalEngineId) PhotorealEngineSelectionForSmoke
+        => (
+            (AppPhotorealEngineComboBox.SelectedItem as ComboBoxItem)?.Tag as string,
+            (ModalPhotorealEngineComboBox.SelectedItem as ComboBoxItem)?.Tag as string);
+
     public void SelectPhotorealEngineForSmoke(string engineId)
     {
         SelectPhotorealEngine(
             ModalPhotorealEngineComboBox,
             NormalizePhotorealEngineId(engineId));
     }
+
+    public string CreateCurrentPhotorealRequestBodyForSmoke(string sourceIdentity)
+        => JsonSerializer.Serialize(CreatePhotorealRequestBody(
+            sourceIdentity,
+            CurrentModalPhotorealRequestSettings(),
+            seed: null));
 
     public (bool AppChecked, bool ModalChecked) PhotorealPreservationScanForSmoke
         => (
@@ -3000,6 +3126,34 @@ public partial class MainWindow
             ModalPhotorealLoraEnabledCheckBox.IsChecked == true,
             AppPhotorealStrengthSlider.IsEnabled,
             ModalPhotorealStrengthSlider.IsEnabled);
+
+    public bool KreaFixedLoraPresentationForSmoke
+        => AppPhotorealLoraEnabledCheckBox.IsChecked == true
+            && ModalPhotorealLoraEnabledCheckBox.IsChecked == true
+            && !AppPhotorealLoraEnabledCheckBox.IsEnabled
+            && !ModalPhotorealLoraEnabledCheckBox.IsEnabled
+            && AppPhotorealLoraLabelText.Text == "Engine LoRA（固定 1.0）"
+            && ModalPhotorealLoraLabelText.Text == "Engine LoRA（固定 1.0）"
+            && AppPhotorealStrengthValue.Text == "1.0（固定）"
+            && ModalPhotorealStrengthValue.Text == "1.0（固定）"
+            && AppPhotorealStrengthSlider.Visibility == Visibility.Collapsed
+            && ModalPhotorealStrengthSlider.Visibility == Visibility.Collapsed
+            && AutomationProperties.GetName(AppPhotorealLoraEnabledCheckBox)
+                == "Engine LoRA fixed at 1.0 for new Krea photorealization jobs"
+            && AutomationProperties.GetName(ModalPhotorealLoraEnabledCheckBox)
+                == "Engine LoRA fixed at 1.0 for this Krea photorealization";
+
+    public bool FluxWarmBloodLoraPresentationForSmoke
+        => AppPhotorealLoraLabelText.Text
+                == "WarmBloodAban Anything-to-Real LoRA（比較用）"
+            && ModalPhotorealLoraLabelText.Text
+                == "WarmBloodAban Anything-to-Real LoRA（比較用）"
+            && AppPhotorealStrengthSlider.Visibility == Visibility.Visible
+            && ModalPhotorealStrengthSlider.Visibility == Visibility.Visible
+            && AutomationProperties.GetName(AppPhotorealLoraEnabledCheckBox)
+                == "Use WarmBloodAban Anything-to-Real LoRA for comparison by default"
+            && AutomationProperties.GetName(ModalPhotorealLoraEnabledCheckBox)
+                == "Use WarmBloodAban Anything-to-Real LoRA for comparison";
 
     public bool PhotorealStyleSurfaceForSmoke
         => ModalPhotorealStyleComboBox is not null

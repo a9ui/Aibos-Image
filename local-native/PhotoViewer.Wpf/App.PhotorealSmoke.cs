@@ -78,6 +78,7 @@ public partial class App
             bool galleryEnqueueNextContract = false;
             bool modalEnqueueNextDisplayedPhotorealContract = false;
             bool legacyPhotorealCapabilitySafe = false;
+            bool kreaAnimeToRealCapabilityGateContract = false;
             bool modalPhotorealOperation = false;
             bool recoveredReferenceExact = false;
             bool recoveredReferenceValidEmptyJobs = false;
@@ -713,6 +714,7 @@ public partial class App
                                         backendGeneration = "json-v1",
                                     },
                                     photorealPromptControlsV2 = true,
+                                    kreaAnimeToRealV1 = true,
                                     atomicImageEnqueueNext = true,
                                     photorealSourceUpscale = true,
                                     recoveredPhotorealSourceUpscaleV1 = true,
@@ -988,31 +990,77 @@ public partial class App
                     && styleApplied
                     && styleDeleted
                     && !window.PhotorealStyleNamesForSmoke.Contains(styleName, StringComparer.OrdinalIgnoreCase);
-                const string kreaEngineId =
+                const string legacyKreaEngineId =
                     "comfyui-krea2-anything2real-v3-photoreal";
-                window.SelectPhotorealEngineForSmoke(kreaEngineId);
-                bool kreaSelected = window.PhotorealEngineForSmoke is
-                    (kreaEngineId, true, true);
+                const string kreaAnimeToRealEngineId =
+                    "comfyui-krea2-anime-to-real-edit-v1-photoreal";
+                window.SelectPhotorealEngineForSmoke(legacyKreaEngineId);
+                bool legacyKreaSelected = window.PhotorealEngineForSmoke is
+                    (legacyKreaEngineId, true, true)
+                    && window.KreaFixedLoraPresentationForSmoke;
+                window.SelectPhotorealEngineForSmoke(kreaAnimeToRealEngineId);
+                bool kreaAnimeToRealSelected = window.PhotorealEngineForSmoke is
+                    (kreaAnimeToRealEngineId, true, true)
+                    && window.KreaFixedLoraPresentationForSmoke
+                    && window.PhotorealEngineSelectionForSmoke is
+                        (kreaAnimeToRealEngineId, kreaAnimeToRealEngineId)
+                    && !window.CurrentPhotorealEngineSupportsQueuedSettingsUpdateForSmoke
+                    && EnhancementWorkspaceJobView
+                        .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
+                            "comfyui-flux2-photoreal")
+                    && !EnhancementWorkspaceJobView
+                        .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
+                            legacyKreaEngineId)
+                    && !EnhancementWorkspaceJobView
+                        .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
+                            kreaAnimeToRealEngineId);
                 bool builtInStyleSelectedWithKrea =
                     window.SelectBuiltInPhotorealStyleForSmoke(
                         "soft-beauty-glamour");
                 bool styleDidNotChangeEngine =
-                    window.PhotorealEngineForSmoke.EngineId == kreaEngineId;
+                    window.PhotorealEngineForSmoke.EngineId
+                        == kreaAnimeToRealEngineId;
+                using JsonDocument kreaAnimeToRealRequest = JsonDocument.Parse(
+                    window.CreateCurrentPhotorealRequestBodyForSmoke(sourcePath));
+                JsonElement kreaAnimeToRealRequestBody =
+                    kreaAnimeToRealRequest.RootElement;
+                bool kreaAnimeToRealRequestContract =
+                    kreaAnimeToRealRequestBody.GetProperty("adapterId").GetString()
+                        == kreaAnimeToRealEngineId
+                    && kreaAnimeToRealRequestBody.GetProperty("loraEnabled")
+                        .GetBoolean()
+                    && kreaAnimeToRealRequestBody.GetProperty("steps").GetInt32()
+                        == 8
+                    && kreaAnimeToRealRequestBody.GetProperty("cfgScale")
+                        .GetDouble() == 1
+                    && kreaAnimeToRealRequestBody.GetProperty("maxDimension")
+                        .GetInt32() == 1280
+                    && PhotoViewer.Wpf.MainWindow
+                        .IsRecoveredPhotorealAdapterForSmoke(
+                        kreaAnimeToRealEngineId);
                 window.FlushStateForSmoke();
                 var engineReloadWindow = new MainWindow();
                 try
                 {
                     engineReloadWindow.SuppressStatePersistence();
-                    photorealEngineContract = kreaSelected
+                    photorealEngineContract = legacyKreaSelected
+                        && kreaAnimeToRealSelected
                         && builtInStyleSelectedWithKrea
                         && styleDidNotChangeEngine
+                        && kreaAnimeToRealRequestContract
                         && engineReloadWindow.PhotorealEngineForSmoke.EngineId
-                            == kreaEngineId;
+                            == kreaAnimeToRealEngineId;
                 }
                 finally
                 {
                     engineReloadWindow.Close();
                 }
+                window.SelectPhotorealEngineForSmoke("unsupported-future-engine");
+                photorealEngineContract = photorealEngineContract
+                    && window.PhotorealEngineForSmoke.EngineId
+                        == "comfyui-flux2-photoreal"
+                    && window.CurrentPhotorealEngineSupportsQueuedSettingsUpdateForSmoke
+                    && window.FluxWarmBloodLoraPresentationForSmoke;
                 window.SelectPhotorealEngineForSmoke(
                     "comfyui-flux2-photoreal");
                 window.ConfigureModalPhotorealSettingsForSmoke(
@@ -1316,8 +1364,27 @@ public partial class App
                     && migratedMappings.Any(static row =>
                         !row.Enabled
                         && row.SourceTag == "troubled eyebrows"
-                        && row.OutputPrompt ==
-                            "barely raised inner brow ends, relaxed forehead")
+                        && row.OutputPrompt.Contains(
+                            "do not neutralize or intensify",
+                            StringComparison.Ordinal))
+                    && migratedMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "torogao"
+                        && row.OutputPrompt.Contains(
+                            "metadata describing the source",
+                            StringComparison.Ordinal))
+                    && migratedMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "anguish"
+                        && row.OutputPrompt.Contains(
+                            "do not intensify, neutralize",
+                            StringComparison.Ordinal))
+                    && migratedMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "inverted nipples"
+                        && row.OutputPrompt.Contains(
+                            "including any central nipple inversion",
+                            StringComparison.Ordinal))
                     && migratedMappings.Any(static row =>
                         row.SourceTag == "profile"
                         && row.OutputPrompt == "face shown in side profile")
@@ -1358,6 +1425,29 @@ public partial class App
                         !row.Enabled
                         && row.SourceTag == "light smile"
                         && row.OutputPrompt == "light smile");
+                window.RestorePhotorealPromptMappingsForSmoke(
+                    [
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = false,
+                            Category = "表情・顔",
+                            SourceTag = "trouble_eyebrows",
+                            OutputPrompt =
+                                "barely raised inner brow ends, relaxed forehead",
+                        },
+                    ],
+                    defaultsRevision: 8);
+                IReadOnlyList<PhotorealPromptMappingState>
+                    revisionNineDisabledMappings =
+                        window.SnapshotPhotorealPromptMappingsForSmoke();
+                promptMappingDefaultsMigrationContract =
+                    promptMappingDefaultsMigrationContract
+                    && revisionNineDisabledMappings.Any(static row =>
+                        !row.Enabled
+                        && row.SourceTag == "trouble_eyebrows"
+                        && row.OutputPrompt.Contains(
+                            "do not neutralize or intensify",
+                            StringComparison.Ordinal));
                 window.RestorePhotorealPromptMappingsForSmoke(
                     [
                         new PhotorealPromptMappingState
@@ -2182,6 +2272,52 @@ public partial class App
                 legacyPhotorealCapabilitySafe =
                     !PhotoViewer.Wpf.MainWindow.HasPhotorealPromptControlsCapabilityForSmoke(
                         legacyHealth.RootElement);
+                using JsonDocument kreaCapabilityMissing = JsonDocument.Parse(
+                    "{\"capabilities\":{\"photorealPromptControlsV2\":true}}");
+                using JsonDocument kreaCapabilityPresent = JsonDocument.Parse(
+                    "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnimeToRealV1\":true}}");
+                using JsonDocument kreaCapabilityFalse = JsonDocument.Parse(
+                    "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnimeToRealV1\":false}}");
+                using JsonDocument kreaCapabilityMalformed = JsonDocument.Parse(
+                    "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnimeToRealV1\":\"true\"}}");
+                using JsonDocument kreaCapabilityOldSpelling = JsonDocument.Parse(
+                    "{\"capabilities\":{\"photorealPromptControlsV2\":true,\"kreaAnimeToReal\":true}}");
+                kreaAnimeToRealCapabilityGateContract =
+                    !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            kreaCapabilityMissing.RootElement,
+                            "photoreal",
+                            "comfyui-krea2-anime-to-real-edit-v1-photoreal")
+                    && PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            kreaCapabilityPresent.RootElement,
+                            "photoreal",
+                            "comfyui-krea2-anime-to-real-edit-v1-photoreal")
+                    && !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            kreaCapabilityFalse.RootElement,
+                            "photoreal",
+                            "comfyui-krea2-anime-to-real-edit-v1-photoreal")
+                    && !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            kreaCapabilityMalformed.RootElement,
+                            "photoreal",
+                            "comfyui-krea2-anime-to-real-edit-v1-photoreal")
+                    && !PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            kreaCapabilityOldSpelling.RootElement,
+                            "photoreal",
+                            "comfyui-krea2-anime-to-real-edit-v1-photoreal")
+                    && PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            kreaCapabilityMissing.RootElement,
+                            "photoreal",
+                            "comfyui-krea2-anything2real-v3-photoreal")
+                    && PhotoViewer.Wpf.MainWindow
+                        .IsImageEnhancementHealthAcceptedForSmoke(
+                            kreaCapabilityMissing.RootElement,
+                            "photoreal",
+                            "comfyui-flux2-photoreal");
 
                 using JsonDocument document = JsonDocument.Parse(
                     randomPhotorealBody);
@@ -2583,6 +2719,7 @@ public partial class App
                     && galleryEnqueueNextContract
                     && modalEnqueueNextDisplayedPhotorealContract
                     && legacyPhotorealCapabilitySafe
+                    && kreaAnimeToRealCapabilityGateContract
                     && sharedQueueRoute
                     && sourceUntouched
                     && modalPhotorealOperation
@@ -2677,6 +2814,7 @@ public partial class App
                     galleryEnqueueNextContract,
                     modalEnqueueNextDisplayedPhotorealContract,
                     legacyPhotorealCapabilitySafe,
+                    kreaAnimeToRealCapabilityGateContract,
                     modalPhotorealOperation,
                     sharedQueueRoute,
                     sourceUntouched,

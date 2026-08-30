@@ -20844,6 +20844,7 @@ public partial class App : Application
                         capabilities["queuedPhotorealSettingsUpdateV1"] = true;
                     }
                     capabilities["photorealPromptControlsV2"] = true;
+                    capabilities["kreaAnimeToRealV1"] = true;
                     capabilities["atomicImageEnqueueNext"] = true;
                     capabilities["terminalHistoryBatchDismissV1"] = true;
                     capabilities["queuedJobsBatchCancelV1"] = true;
