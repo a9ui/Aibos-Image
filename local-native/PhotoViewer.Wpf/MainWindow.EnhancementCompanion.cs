@@ -131,7 +131,17 @@ public partial class MainWindow
     private sealed record DurableEnhancementBatchItem(
         object? Body,
         string? RetryJobId,
-        Func<IDisposable?>? DurablePublishLeaseFactory = null);
+        Func<IDisposable?>? DurablePublishLeaseFactory = null,
+        string? Operation = null,
+        string? AdapterId = null);
+    private readonly record struct DurableEnhancementAdapterIdentity(
+        string Operation,
+        string AdapterId)
+    {
+        internal bool IsComplete =>
+            !string.IsNullOrWhiteSpace(Operation)
+            && !string.IsNullOrWhiteSpace(AdapterId);
+    }
     private sealed class DurablePublishLease(
         params IDisposable[] leases) : IDisposable
     {
@@ -693,10 +703,69 @@ public partial class MainWindow
 
     private static bool HasEnhancementCapability(JsonElement payload, string capability)
         => payload.ValueKind == JsonValueKind.Object
+            && HasSingleProperty(payload, "capabilities")
             && payload.TryGetProperty("capabilities", out JsonElement capabilities)
             && capabilities.ValueKind == JsonValueKind.Object
+            && HasSingleProperty(capabilities, capability)
             && capabilities.TryGetProperty(capability, out JsonElement supported)
             && supported.ValueKind == JsonValueKind.True;
+
+    private static DurableEnhancementAdapterIdentity
+        ReadDurableEnhancementAdapterIdentity(object? body)
+    {
+        if (body is null)
+            return default;
+        try
+        {
+            JsonElement root = JsonSerializer.SerializeToElement(body);
+            if (root.ValueKind != JsonValueKind.Object
+                || !HasSingleProperty(root, "operation")
+                || !root.TryGetProperty("operation", out JsonElement operation)
+                || operation.ValueKind != JsonValueKind.String
+                || !HasSingleProperty(root, "adapterId")
+                || !root.TryGetProperty("adapterId", out JsonElement adapterId)
+                || adapterId.ValueKind != JsonValueKind.String)
+            {
+                return default;
+            }
+
+            return new DurableEnhancementAdapterIdentity(
+                operation.GetString() ?? "",
+                adapterId.GetString() ?? "");
+        }
+        catch (Exception ex) when (ex is ArgumentException
+            or InvalidOperationException
+            or JsonException
+            or NotSupportedException)
+        {
+            return default;
+        }
+    }
+
+    private static bool RequiresExactKreaAnimeToRealV1Health(
+        DurableEnhancementAdapterIdentity identity)
+        => string.Equals(
+                identity.Operation,
+                "photoreal",
+                StringComparison.Ordinal)
+            && string.Equals(
+                identity.AdapterId,
+                KreaAnimeToRealV1PhotorealEngineId,
+                StringComparison.Ordinal);
+
+    private static EnhancementApiResponse? ValidateRequiredAdapterHealth(
+        EnhancementEnqueueProbe probe,
+        DurableEnhancementAdapterIdentity identity)
+        => !RequiresExactKreaAnimeToRealV1Health(identity)
+            ? null
+            : ValidateEnhancementEnqueueProbe(
+                probe,
+                static payload => HasEnhancementCapability(
+                        payload,
+                        KreaAnimeToRealV1Capability)
+                    ? null
+                    : "The Aibos Image local AI service cannot prove the exact Krea Anime-to-Real V1 adapter row. Restart the local AI service first; no job was added.",
+                requireExactHealthValidation: true);
 
     private static Func<JsonElement, string?>? CreateImageEnhancementHealthValidator(
         string operation,
@@ -1281,11 +1350,16 @@ public partial class MainWindow
             "api/enhance/health",
             token: token,
             timeoutMilliseconds: DurableEnqueueActionDeadlineMilliseconds);
+        EnhancementEnqueueBackendMode mode = EnhancementEnqueueProbePolicy.Classify(
+            health.Ok,
+            health.StatusCode,
+            health.Payload);
+        ApplyKreaAnimeToRealV1HealthCapability(
+            mode == EnhancementEnqueueBackendMode.Durable
+            && health.Payload is JsonElement payload
+            && HasEnhancementCapability(payload, KreaAnimeToRealV1Capability));
         return new EnhancementEnqueueProbe(
-            EnhancementEnqueueProbePolicy.Classify(
-                health.Ok,
-                health.StatusCode,
-                health.Payload),
+            mode,
             health.Payload,
             deadline);
     }
@@ -1342,8 +1416,23 @@ public partial class MainWindow
         Func<CancellationToken, Task<string?>>?
             asyncPrePublishValidator = null,
         Func<EnhancementEnqueueInboxItem, IDisposable?>?
-            onBeforeDurablePublish = null)
+            onBeforeDurablePublish = null,
+        string? durableRetryOperation = null,
+        string? durableRetryAdapterId = null)
     {
+        DurableEnhancementAdapterIdentity adapterIdentity = retryJobId is null
+            ? ReadDurableEnhancementAdapterIdentity(body)
+            : new DurableEnhancementAdapterIdentity(
+                durableRetryOperation ?? "",
+                durableRetryAdapterId ?? "");
+        if (retryJobId is not null && !adapterIdentity.IsComplete)
+        {
+            return new EnhancementApiResponse(
+                false,
+                409,
+                null,
+                "The saved adapter identity cannot be verified. The retry reservation was not published.");
+        }
         if (_usingDefaultModalEnhancementSender)
         {
             EnhancementApiResponse readiness =
@@ -1361,6 +1450,9 @@ public partial class MainWindow
                 probe,
                 healthValidator,
                 requireExactHealthValidation);
+        validationFailure ??= ValidateRequiredAdapterHealth(
+            probe,
+            adapterIdentity);
         if (validationFailure is not null)
             return validationFailure;
         EnhancementEnqueueInboxItem item;
@@ -1493,7 +1585,9 @@ public partial class MainWindow
                     job.Id,
                     job.IsVideoOperation
                         ? () => PinVideoRetrySourceForDurablePublish(job)
-                        : null)).ToArray(),
+                        : null,
+                    job.Operation,
+                    job.AdapterId)).ToArray(),
             "last",
             token,
             itemHealthValidators: validators,
@@ -1568,13 +1662,29 @@ public partial class MainWindow
         var publishIndices = new List<int>(items.Count);
         for (int index = 0; index < items.Count; index++)
         {
+            DurableEnhancementBatchItem item = items[index];
+            DurableEnhancementAdapterIdentity adapterIdentity =
+                item.RetryJobId is null
+                    ? ReadDurableEnhancementAdapterIdentity(item.Body)
+                    : new DurableEnhancementAdapterIdentity(
+                        item.Operation ?? "",
+                        item.AdapterId ?? "");
             EnhancementApiResponse? itemValidationFailure =
-                itemHealthValidators is null
+                item.RetryJobId is not null && !adapterIdentity.IsComplete
+                    ? new EnhancementApiResponse(
+                        false,
+                        409,
+                        null,
+                        "The saved adapter identity cannot be verified. The retry reservation was not published.")
+                : itemHealthValidators is null
                     ? null
                     : ValidateEnhancementEnqueueProbe(
                         probe,
                         itemHealthValidators[index],
                         requireExactItemHealthValidation);
+            itemValidationFailure ??= ValidateRequiredAdapterHealth(
+                probe,
+                adapterIdentity);
             if (itemValidationFailure is null)
                 publishIndices.Add(index);
             else
@@ -4092,6 +4202,32 @@ public partial class MainWindow
         EnhancementApiResponse response = await SendEnhancementEnqueueAsync(body);
         return response.SavedForDelivery;
     }
+    public async Task<(bool Ok, bool SavedForDelivery, int StatusCode)>
+        SendKreaAnimeToRealRetryForSmokeAsync(string retryJobId)
+    {
+        EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+            body: null,
+            retryJobId: retryJobId,
+            durableRetryOperation: "photoreal",
+            durableRetryAdapterId: KreaAnimeToRealV1PhotorealEngineId);
+        return (response.Ok, response.SavedForDelivery, response.StatusCode);
+    }
+    public async Task<(int PublishedCount, bool SavedForDelivery)>
+        SendKreaAnimeToRealRetryBatchForSmokeAsync(string retryJobId)
+    {
+        DurableEnhancementBatchResponse response =
+            await TrySendDurableEnhancementBatchCoreAsync(
+            [
+                new DurableEnhancementBatchItem(
+                    null,
+                    retryJobId,
+                    Operation: "photoreal",
+                    AdapterId: KreaAnimeToRealV1PhotorealEngineId),
+            ]);
+        return (
+            response.PublishedCount,
+            response.Responses.Any(static item => item.SavedForDelivery));
+    }
     public async Task<bool> SendEnhancementEnqueueWithListenerHandoffForSmokeAsync(
         object body,
         Action onBeforePublish)
@@ -4125,8 +4261,16 @@ public partial class MainWindow
         DurableEnhancementBatchResponse response =
             await TrySendDurableEnhancementBatchCoreAsync(
             [
-                new DurableEnhancementBatchItem(null, "capability-rejected-video-job"),
-                new DurableEnhancementBatchItem(null, "capability-accepted-image-job"),
+                new DurableEnhancementBatchItem(
+                    null,
+                    "capability-rejected-video-job",
+                    Operation: "video",
+                    AdapterId: "synthetic-video-adapter"),
+                new DurableEnhancementBatchItem(
+                    null,
+                    "capability-accepted-image-job",
+                    Operation: "upscale",
+                    AdapterId: "synthetic-image-adapter"),
             ],
             itemHealthValidators:
             [

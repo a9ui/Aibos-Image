@@ -3590,6 +3590,7 @@ public partial class MainWindow
             presetId: MiniMaxH3VideoPresetId,
             adapterId: MiniMaxH3VideoBackendId,
             operation: "video",
+            photorealMutationSafe: false,
             videoMutationSafe: true,
             queueReorderSafe: false,
             i2iMutationSafe: false,

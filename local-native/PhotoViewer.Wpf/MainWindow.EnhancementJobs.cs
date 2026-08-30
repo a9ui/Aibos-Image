@@ -1483,13 +1483,26 @@ public partial class MainWindow
         => _enhancementWorkspaceJobs.Count(job => job.Status == status)
             == EnhancementWorkspaceTotalStatusCount(status);
 
+    private bool HasReaderOnlyPhotorealTerminalRows(string status)
+        => _enhancementWorkspaceJobs.Any(job =>
+            job.Status == status
+            && MatchesEnhancementWorkspaceOperationFilter(job)
+            && job.IsPhotorealReaderOnly);
+
+    private bool TerminalBatchMayIncludePhotorealRows()
+        => _enhancementWorkspaceOperationFilter is "all" or "photoreal";
+
     private bool CanRetryAllTerminalEnhancementJobs(string status)
     {
+        if (HasReaderOnlyPhotorealTerminalRows(status))
+            return false;
         bool historyIsComplete =
             EnhancementWorkspaceHasCompleteTerminalHistory(status);
         if (!historyIsComplete)
         {
             return _enhancementWorkspaceTerminalHistoryBatchRetrySupported
+                && (!TerminalBatchMayIncludePhotorealRows()
+                    || _kreaAnimeToRealV1HealthSupported)
                 && EnhancementWorkspaceTotalStatusCount(status) > 0;
         }
         return _enhancementWorkspaceJobs.Any(job =>
@@ -1517,6 +1530,8 @@ public partial class MainWindow
 
     private bool CanClearAllTerminalEnhancementJobs(string status)
     {
+        if (HasReaderOnlyPhotorealTerminalRows(status))
+            return false;
         int loadedStatusCount = _enhancementWorkspaceJobs.Count(job =>
             job.Status == status);
         int totalStatusCount = EnhancementWorkspaceTotalStatusCount(status);
@@ -2717,6 +2732,7 @@ public partial class MainWindow
         bool queuedJobsBatchReorder = false;
         bool terminalHistoryTargets = false;
         bool terminalHistoryBatchRetry = false;
+        bool kreaAnimeToRealV1 = false;
         MiniMaxH3VideoCapabilityState? miniMaxH3Capability =
             TryParseMiniMaxH3VideoCapability(
                 payload,
@@ -2727,128 +2743,47 @@ public partial class MainWindow
                 "capabilities",
                 out JsonElement capabilitiesElement))
         {
-            if (capabilitiesElement.ValueKind != JsonValueKind.Object)
+            if (!HasSingleProperty(payload, "capabilities")
+                || capabilitiesElement.ValueKind != JsonValueKind.Object)
                 return false;
-            if (capabilitiesElement.TryGetProperty(
+            if (!TryReadOptionalBooleanCapability(
+                    capabilitiesElement,
                     "queuedPhotorealSettingsUpdateV1",
-                    out JsonElement promptUpdateElement))
-            {
-                if (promptUpdateElement.ValueKind is
-                    JsonValueKind.True or JsonValueKind.False)
-                {
-                    queuedPhotorealPromptUpdate =
-                        promptUpdateElement.GetBoolean();
-                }
-                else if (promptUpdateElement.ValueKind != JsonValueKind.Null)
-                {
-                    return false;
-                }
-            }
-            if (capabilitiesElement.TryGetProperty(
+                    out queuedPhotorealPromptUpdate)
+                || !TryReadOptionalBooleanCapability(
+                    capabilitiesElement,
                     "terminalHistoryBatchDismissV1",
-                    out JsonElement terminalHistoryBatchDismissElement))
-            {
-                if (terminalHistoryBatchDismissElement.ValueKind is
-                    JsonValueKind.True or JsonValueKind.False)
-                {
-                    terminalHistoryBatchDismiss =
-                        terminalHistoryBatchDismissElement.GetBoolean();
-                }
-                else if (terminalHistoryBatchDismissElement.ValueKind != JsonValueKind.Null)
-                {
-                    return false;
-                }
-            }
-            if (capabilitiesElement.TryGetProperty(
+                    out terminalHistoryBatchDismiss)
+                || !TryReadOptionalBooleanCapability(
+                    capabilitiesElement,
                     "queuedJobsBatchCancelV1",
-                    out JsonElement queuedJobsBatchCancelElement))
-            {
-                if (queuedJobsBatchCancelElement.ValueKind is
-                    JsonValueKind.True or JsonValueKind.False)
-                {
-                    queuedJobsBatchCancel =
-                        queuedJobsBatchCancelElement.GetBoolean();
-                }
-                else if (queuedJobsBatchCancelElement.ValueKind != JsonValueKind.Null)
-                {
-                    return false;
-                }
-            }
-            if (capabilitiesElement.TryGetProperty(
+                    out queuedJobsBatchCancel)
+                || !TryReadOptionalBooleanCapability(
+                    capabilitiesElement,
                     "queuedJobsBatchReorderV1",
-                    out JsonElement queuedJobsBatchReorderElement))
-            {
-                if (queuedJobsBatchReorderElement.ValueKind is
-                    JsonValueKind.True or JsonValueKind.False)
-                {
-                    queuedJobsBatchReorder =
-                        queuedJobsBatchReorderElement.GetBoolean();
-                }
-                else if (queuedJobsBatchReorderElement.ValueKind
-                    != JsonValueKind.Null)
-                {
-                    return false;
-                }
-            }
-            if (capabilitiesElement.TryGetProperty(
+                    out queuedJobsBatchReorder)
+                || !TryReadOptionalBooleanCapability(
+                    capabilitiesElement,
                     "terminalHistoryTargetsV1",
-                    out JsonElement terminalHistoryTargetsElement))
-            {
-                if (terminalHistoryTargetsElement.ValueKind is
-                    JsonValueKind.True or JsonValueKind.False)
-                {
-                    terminalHistoryTargets =
-                        terminalHistoryTargetsElement.GetBoolean();
-                }
-                else if (terminalHistoryTargetsElement.ValueKind
-                    != JsonValueKind.Null)
-                {
-                    return false;
-                }
-            }
-            if (capabilitiesElement.TryGetProperty(
+                    out terminalHistoryTargets)
+                || !TryReadOptionalBooleanCapability(
+                    capabilitiesElement,
                     "terminalHistoryBatchRetryV1",
-                    out JsonElement terminalHistoryBatchRetryElement))
-            {
-                if (terminalHistoryBatchRetryElement.ValueKind is
-                    JsonValueKind.True or JsonValueKind.False)
-                {
-                    terminalHistoryBatchRetry =
-                        terminalHistoryBatchRetryElement.GetBoolean();
-                }
-                else if (terminalHistoryBatchRetryElement.ValueKind
-                    != JsonValueKind.Null)
-                {
-                    return false;
-                }
-            }
-            if (capabilitiesElement.TryGetProperty(
+                    out terminalHistoryBatchRetry)
+                || !TryReadOptionalBooleanCapability(
+                    capabilitiesElement,
                     "photorealPromptControlsV2",
-                    out JsonElement photorealControlsElement))
-            {
-                if (photorealControlsElement.ValueKind is
-                    JsonValueKind.True or JsonValueKind.False)
-                {
-                    photorealPromptControls = photorealControlsElement.GetBoolean();
-                }
-                else if (photorealControlsElement.ValueKind != JsonValueKind.Null)
-                {
-                    return false;
-                }
-            }
-            if (capabilitiesElement.TryGetProperty(
+                    out photorealPromptControls)
+                || !TryReadOptionalBooleanCapability(
+                    capabilitiesElement,
                     "atomicImageEnqueueNext",
-                    out JsonElement enqueueNextElement))
+                    out atomicImageEnqueueNext)
+                || !TryReadOptionalBooleanCapability(
+                    capabilitiesElement,
+                    KreaAnimeToRealV1Capability,
+                    out kreaAnimeToRealV1))
             {
-                if (enqueueNextElement.ValueKind is
-                    JsonValueKind.True or JsonValueKind.False)
-                {
-                    atomicImageEnqueueNext = enqueueNextElement.GetBoolean();
-                }
-                else if (enqueueNextElement.ValueKind != JsonValueKind.Null)
-                {
-                    return false;
-                }
+                return false;
             }
         }
 
@@ -2900,6 +2835,7 @@ public partial class MainWindow
             queueRecoveryRequired,
             queuedPhotorealPromptUpdate,
             photorealPromptControls && atomicImageEnqueueNext,
+            kreaAnimeToRealV1,
             terminalHistoryBatchDismiss,
             queuedJobsBatchCancel,
             queuedJobsBatchReorder,
@@ -2911,6 +2847,30 @@ public partial class MainWindow
             currentProgress,
             currentUpdatedAt);
         return true;
+    }
+
+    private static bool TryReadOptionalBooleanCapability(
+        JsonElement capabilities,
+        string propertyName,
+        out bool value)
+    {
+        value = false;
+        int propertyCount = capabilities.EnumerateObject().Count(property =>
+            property.NameEquals(propertyName));
+        if (propertyCount == 0)
+            return true;
+        if (propertyCount != 1
+            || !capabilities.TryGetProperty(propertyName, out JsonElement element))
+        {
+            return false;
+        }
+
+        if (element.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            value = element.GetBoolean();
+            return true;
+        }
+        return element.ValueKind == JsonValueKind.Null;
     }
 
     private static bool TryReadNonNegativeCount(
@@ -2996,6 +2956,7 @@ public partial class MainWindow
         ApplyQueuedPhotorealPromptUpdateCapability(
             health.QueuedPhotorealPromptUpdate);
         ApplyPhotorealEnqueueNextCapability(health.PhotorealEnqueueNext);
+        ApplyKreaAnimeToRealV1HealthCapability(health.KreaAnimeToRealV1);
         _enhancementWorkspaceTerminalHistoryBatchDismissSupported =
             health.TerminalHistoryBatchDismiss;
         _enhancementWorkspaceQueuedJobsBatchCancelSupported =
@@ -3035,6 +2996,7 @@ public partial class MainWindow
         _enhancementWorkspaceQueueRecoveryRequired = false;
         ApplyQueuedPhotorealPromptUpdateCapability(false);
         ApplyPhotorealEnqueueNextCapability(false);
+        ApplyKreaAnimeToRealV1HealthCapability(false);
         _enhancementWorkspaceTerminalHistoryBatchDismissSupported = false;
         _enhancementWorkspaceQueuedJobsBatchCancelSupported = false;
         _enhancementWorkspaceQueuedJobsBatchReorderSupported = false;
@@ -4180,6 +4142,10 @@ public partial class MainWindow
             updatedAt = createdAt == default ? DateTimeOffset.MinValue : createdAt;
 
         string operation = ReadEnhancementOperation(element);
+        bool photorealMutationSafe = operation == "photoreal"
+            && HasSingleProperty(element, "operation")
+            && HasSingleProperty(element, "adapterId")
+            && IsKnownPhotorealAdapterId(adapterId);
         bool i2iV2EnvelopeClaimed = ClaimsI2iV2Envelope(element);
         I2iV2JobInfo? i2iV2Info = operation == "i2i"
             && TryReadI2iV2JobInfo(element, out I2iV2JobInfo parsedI2iV2)
@@ -4247,7 +4213,8 @@ public partial class MainWindow
             || videoTrimV1Snapshot is not null
             || !videoToolsEnvelopeClaimed
                 && !videoTrimEnvelopeClaimed
-                && (operation is "upscale" or "photoreal"
+                && (operation == "upscale"
+                    || photorealMutationSafe
                     || (operation == "i2i" && i2iMutationSafe)
                     || structurallySafeVideo);
         string resolvedPresetId = presetId ?? "Default preset";
@@ -4261,6 +4228,7 @@ public partial class MainWindow
             resolvedPresetId,
             resolvedAdapterId,
             operation,
+            photorealMutationSafe,
             videoMutationSafe,
             queueReorderSafe,
             i2iMutationSafe,
@@ -6081,6 +6049,8 @@ public partial class MainWindow
     private async Task<int> RetryAllTerminalEnhancementJobsAsync(
         string terminalStatus)
     {
+        if (HasReaderOnlyPhotorealTerminalRows(terminalStatus))
+            return 0;
         if (_enhancementWorkspaceTerminalHistoryBatchRetrySupported)
         {
             return await RetryAllTerminalEnhancementJobsBatchAsync(
@@ -6253,9 +6223,28 @@ public partial class MainWindow
             terminalStatus);
         if (_enhancementWorkspaceMutationPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible
-            || totalStatusCount == 0)
+            || totalStatusCount == 0
+            || HasReaderOnlyPhotorealTerminalRows(terminalStatus))
         {
             return 0;
+        }
+
+        if (TerminalBatchMayIncludePhotorealRows())
+        {
+            EnhancementEnqueueProbe probe =
+                await ProbeEnhancementEnqueueBackendAsync(CancellationToken.None);
+            EnhancementApiResponse? exactHealthFailure =
+                ValidateRequiredAdapterHealth(
+                    probe,
+                    new DurableEnhancementAdapterIdentity(
+                        "photoreal",
+                        KreaAnimeToRealV1PhotorealEngineId));
+            if (exactHealthFailure is not null)
+            {
+                EnhancementJobsStatusText.Text =
+                    "実写化履歴を含む一括再試行は、exact Krea adapter healthを確認できないため実行しませんでした。";
+                return 0;
+            }
         }
 
         string terminalLabel = terminalStatus == "failed"
@@ -6493,6 +6482,7 @@ public partial class MainWindow
             _enhancementWorkspaceTerminalHistoryTargetsSupported;
         if (_enhancementWorkspaceMutationPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible
+            || HasReaderOnlyPhotorealTerminalRows(terminalStatus)
             || useExactTargetPlan && totalStatusCount == 0
             || !useExactTargetPlan && dismissibleIds.Length == 0)
         {
@@ -8170,7 +8160,9 @@ public partial class MainWindow
                 && !job.IsExactCurrentVideoTrimV1
                 ? _ => AcquireVideoDurablePublishLease(
                     () => PinVideoRetrySourceForDurablePublish(job))
-                : null);
+                : null,
+            durableRetryOperation: job.Operation,
+            durableRetryAdapterId: job.AdapterId);
     }
 
     private static string EnhancementApiErrorCode(
@@ -9628,6 +9620,7 @@ public partial class MainWindow
                     ? "comfyui-wan22-ti2v"
                     : "synthetic-adapter",
                 operation,
+                photorealMutationSafe: operation == "photoreal",
                 videoMutationSafe: operation == "video",
                 queueReorderSafe: true,
                 i2iMutationSafe: operation == "i2i",
@@ -10103,7 +10096,9 @@ public partial class MainWindow
             queuePlacement: "last",
             retryJobId: id,
             healthValidator: healthValidator,
-            requireExactHealthValidation: true);
+            requireExactHealthValidation: true,
+            durableRetryOperation: "video",
+            durableRetryAdapterId: MiniMaxH3VideoBackendId);
         return (
             response.Ok,
             response.SavedForDelivery,
@@ -10592,7 +10587,7 @@ public partial class MainWindow
             .ToArray();
         return new EnhancementJobLifecycleSmokeSnapshot(
             view.IsExactCurrentVideoToolsV2,
-            view.IsVideoToolsReaderOnly,
+            view.IsProtectedReaderOnly,
             view.IsSupportedMutationOperation,
             view.VideoToolsKind,
             view.Status,
@@ -10600,6 +10595,37 @@ public partial class MainWindow
             view.CanRetry,
             view.CanDismiss,
             view.CanReorder,
+            view.CanUseOutput,
+            view.CanDeleteOutput,
+            visibleActions);
+    }
+
+    public static PhotorealMutationSurfaceSmokeSnapshot?
+        ReadPhotorealMutationSurfaceForSmoke(JsonElement job)
+    {
+        EnhancementWorkspaceJobView? view = ParseEnhancementWorkspaceJob(job, 0);
+        if (view is null || view.Operation != "photoreal")
+            return null;
+        if (view.Status == "queued")
+            view.ApplyQueuePresentation(2, 3, view.QueueOrder ?? 1);
+        view.QueuedPhotorealPromptUpdateCapabilitySafe = true;
+        view.PhotorealEnqueueNextCapabilitySafe = true;
+        string[] visibleActions = new[]
+            { view.Action1, view.Action2, view.Action3, view.Action4,
+                view.Action5, view.DangerAction }
+            .Where(static action => action.Visible)
+            .Select(static action => action.Kind)
+            .ToArray();
+        return new PhotorealMutationSurfaceSmokeSnapshot(
+            view.IsPhotorealReaderOnly,
+            view.IsSupportedMutationOperation,
+            view.CanCancel,
+            view.CanRetry,
+            view.CanDismiss,
+            view.CanReorder,
+            view.CanRerunWithCurrentSettings,
+            view.CanRerunNextWithCurrentSettings,
+            view.CanUpdatePhotorealPrompts,
             view.CanUseOutput,
             view.CanDeleteOutput,
             visibleActions);
@@ -10832,6 +10858,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         string presetId,
         string adapterId,
         string operation,
+        bool photorealMutationSafe,
         bool videoMutationSafe,
         bool queueReorderSafe,
         bool i2iMutationSafe,
@@ -10871,6 +10898,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         PresetId = presetId;
         AdapterId = adapterId;
         Operation = operation;
+        PhotorealMutationSafe = photorealMutationSafe;
         VideoMutationSafe = videoMutationSafe;
         QueueReorderSafe = queueReorderSafe;
         I2iMutationSafe = i2iMutationSafe;
@@ -10911,6 +10939,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string PresetId { get; }
     public string AdapterId { get; }
     public string Operation { get; }
+    public bool PhotorealMutationSafe { get; }
     public bool VideoMutationSafe { get; private set; }
     public bool QueueReorderSafe { get; }
     public bool I2iMutationSafe { get; }
@@ -10934,6 +10963,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         VideoTrimEnvelopeClaimed && !IsExactCurrentVideoTrimV1;
     public bool IsProtectedVideoReaderOnly =>
         IsVideoToolsReaderOnly || IsVideoTrimReaderOnly;
+    public bool IsPhotorealReaderOnly =>
+        Operation == "photoreal" && !PhotorealMutationSafe;
+    public bool IsProtectedReaderOnly =>
+        IsProtectedVideoReaderOnly || IsPhotorealReaderOnly;
     public string Status { get; private set; }
     public bool CancelRequested { get; private set; }
     public int Progress { get; private set; }
@@ -10958,7 +10991,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         IsExactCurrentVideoToolsV2
         || IsExactCurrentVideoTrimV1
         || !IsProtectedVideoReaderOnly
-            && (Operation is "upscale" or "photoreal"
+            && !IsPhotorealReaderOnly
+            && (Operation == "upscale"
+                || Operation == "photoreal" && PhotorealMutationSafe
                 || (Operation == "i2i" && I2iMutationSafe)
                 || (IsVideoOperation && VideoMutationSafe));
     public bool OutputDependencyProtected { get; set; }
@@ -10967,6 +11002,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         !_isBusy
         && !CancelRequested
         && !IsProtectedVideoReaderOnly
+        && !IsPhotorealReaderOnly
         && (Status is "queued" or "running"
             ? IsKnownOperation
             : !IsExactCurrentVideoToolsV2
@@ -10975,6 +11011,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                 && IsSupportedMutationOperation);
     public bool ShowCancelAction =>
         !IsProtectedVideoReaderOnly
+        && !IsPhotorealReaderOnly
         && (Status is "queued" or "running"
             ? IsKnownOperation
             : !IsExactCurrentVideoToolsV2
@@ -11032,6 +11069,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool CanRerunWithCurrentSettings =>
         !_isBusy
         && Operation == "photoreal"
+        && PhotorealMutationSafe
         && Status is "succeeded" or "failed" or "canceled";
     public bool CanRerunNextWithCurrentSettings =>
         CanRerunWithCurrentSettings && PhotorealEnqueueNextCapabilitySafe;
@@ -11063,6 +11101,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && !CancelRequested
         && Status == "queued"
         && Operation == "photoreal"
+        && PhotorealMutationSafe
         && IsQueuedPhotorealSettingsUpdateAdapter(AdapterId)
         && QueuedPhotorealPromptUpdateCapabilitySafe;
     public bool QueuedPhotorealPromptUpdateCapabilitySafe
@@ -11196,7 +11235,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             nameof(RequestDetailsLoaded)));
     }
     public EnhancementJobActionPresentation Action1 =>
-        IsProtectedVideoReaderOnly
+        IsProtectedReaderOnly
         ? IsVideoToolsReaderOnly && CanUseVideoToolsV2Output
             ? JobAction(
                 "open-output",
@@ -11255,7 +11294,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         _ => EnhancementJobActionPresentation.Hidden,
     };
     public EnhancementJobActionPresentation Action2 =>
-        IsProtectedVideoReaderOnly
+        IsProtectedReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : CanEditMiniMaxH3VideoPrompt
         ? JobAction(
@@ -11305,7 +11344,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             144),
         _ => EnhancementJobActionPresentation.Hidden,
     };
-    public EnhancementJobActionPresentation Action3 => IsProtectedVideoReaderOnly
+    public EnhancementJobActionPresentation Action3 => IsProtectedReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : CanRerunI2iV3
             ? JobAction(
@@ -11349,7 +11388,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         _ => EnhancementJobActionPresentation.Hidden,
     };
     public EnhancementJobActionPresentation Action4 =>
-        IsProtectedVideoReaderOnly
+        IsProtectedReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : I2iV3Snapshot is not null && Status == "succeeded"
         ? JobAction(
@@ -11377,7 +11416,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             144),
         _ => EnhancementJobActionPresentation.Hidden,
     };
-    public EnhancementJobActionPresentation Action5 => IsProtectedVideoReaderOnly
+    public EnhancementJobActionPresentation Action5 => IsProtectedReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : Status == "queued"
         ? JobAction(
@@ -11389,7 +11428,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             76)
         : EnhancementJobActionPresentation.Hidden;
     public EnhancementJobActionPresentation DangerAction =>
-        IsProtectedVideoReaderOnly
+        IsProtectedReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : Status switch
     {
@@ -12129,6 +12168,20 @@ public sealed record EnhancementJobLifecycleSmokeSnapshot(
     bool CanDeleteOutput,
     string[] VisibleActionKinds);
 
+public sealed record PhotorealMutationSurfaceSmokeSnapshot(
+    bool ReaderOnly,
+    bool SupportedMutation,
+    bool CanCancel,
+    bool CanRetry,
+    bool CanDismiss,
+    bool CanReorder,
+    bool CanRerunWithCurrentSettings,
+    bool CanRerunNextWithCurrentSettings,
+    bool CanUpdateCurrentSettings,
+    bool CanUseOutput,
+    bool CanDeleteOutput,
+    string[] VisibleActionKinds);
+
 public sealed record MiniMaxH3VideoWorkspaceSnapshot(
     string ProfileId,
     int NominalDurationSeconds,
@@ -12157,6 +12210,7 @@ internal readonly record struct EnhancementQueueHealthView(
     bool QueueRecoveryRequired,
     bool QueuedPhotorealPromptUpdate,
     bool PhotorealEnqueueNext,
+    bool KreaAnimeToRealV1,
     bool TerminalHistoryBatchDismiss,
     bool QueuedJobsBatchCancel,
     bool QueuedJobsBatchReorder,

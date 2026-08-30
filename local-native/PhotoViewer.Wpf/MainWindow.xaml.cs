@@ -482,6 +482,8 @@ public partial class MainWindow : Window
     private bool _galleryContextEnhancementRequestPending;
     private string? _modalEnhancementJobId;
     private string? _modalEnhancementJobStatus;
+    private string _modalEnhancementJobAdapterId = "";
+    private bool _modalEnhancementJobMutationSafe = true;
     private int _modalEnhancementProgress;
     private string? _modalEnhancementError;
     private bool _modalEnhancementCancelRequested;
@@ -1797,6 +1799,8 @@ public partial class MainWindow : Window
     private sealed record ModalEnhancementJobSnapshot(
         string Id,
         string Operation,
+        string AdapterId,
+        bool PhotorealMutationSafe,
         string SourceId,
         string SourcePath,
         string Status,
@@ -1814,7 +1818,8 @@ public partial class MainWindow : Window
         string Operation,
         ManagedEnhancedOutput Output,
         DateTimeOffset? CompletedAtUtc = null,
-        bool Recovered = false);
+        bool Recovered = false,
+        bool MutationSafe = true);
 
     private readonly record struct ManagedEnhancementQueueActivity(
         bool UpscaleActive = false,
@@ -5505,11 +5510,17 @@ public partial class MainWindow : Window
                 }
 
                 TryGetStringProperty(job, "id", out string? jobId);
+                TryGetStringProperty(job, "adapterId", out string? adapterId);
+                bool mutationSafe = operation != "photoreal"
+                    || HasSingleProperty(job, "operation")
+                        && HasSingleProperty(job, "adapterId")
+                        && IsKnownPhotorealAdapterId(adapterId);
                 var version = new ManagedEnhancementVersion(
                     jobId ?? "",
                     operation,
                     output,
-                    ReadEnhancementActivityAtUtc(job));
+                    ReadEnhancementActivityAtUtc(job),
+                    MutationSafe: mutationSafe);
                 if (operation == "photoreal"
                     && !string.IsNullOrWhiteSpace(jobId)
                     && !ambiguousJobIds.Contains(jobId))
@@ -19866,6 +19877,7 @@ public partial class MainWindow : Window
 
         TryGetStringProperty(job, "sourceId", out string? sourceId);
         TryGetStringProperty(job, "sourcePath", out string? sourcePath);
+        TryGetStringProperty(job, "adapterId", out string? adapterId);
         TryGetStringProperty(job, "outputPath", out string? outputPath);
         TryGetStringProperty(job, "errorMessage", out string? errorMessage);
         bool cancelRequested = job.TryGetProperty("cancelRequested", out JsonElement cancelRequestedElement)
@@ -19886,9 +19898,16 @@ public partial class MainWindow : Window
                 && mtimeElement.TryGetDouble(out double parsedMtimeMs))
                 sourceMtimeMs = parsedMtimeMs;
         }
+        string operation = ReadEnhancementOperation(job);
+        bool photorealMutationSafe = operation == "photoreal"
+            && HasSingleProperty(job, "operation")
+            && HasSingleProperty(job, "adapterId")
+            && IsKnownPhotorealAdapterId(adapterId);
         return new ModalEnhancementJobSnapshot(
             id!,
-            ReadEnhancementOperation(job),
+            operation,
+            adapterId ?? "",
+            photorealMutationSafe,
             sourceId ?? "",
             sourcePath ?? "",
             status!,
@@ -20018,6 +20037,10 @@ public partial class MainWindow : Window
 
         _modalEnhancementJobId = job?.Id;
         _modalEnhancementOperation = job?.Operation ?? "upscale";
+        _modalEnhancementJobAdapterId = job?.AdapterId ?? "";
+        _modalEnhancementJobMutationSafe = job is null
+            || job.Operation != "photoreal"
+            || job.PhotorealMutationSafe;
         _modalEnhancementJobStatus = job?.Status;
         _modalEnhancementProgress = job?.Progress ?? 0;
         _modalEnhancementError = job?.ErrorMessage;
@@ -20130,8 +20153,12 @@ public partial class MainWindow : Window
                 || _recoveredPhotorealSourceUpscaleSupported == true);
         bool active = _modalEnhancementJobStatus is "queued" or "running";
         bool canceling = active && _modalEnhancementCancelRequested;
+        bool readerOnlyPhotoreal = _modalEnhancementOperation == "photoreal"
+            && !string.IsNullOrWhiteSpace(_modalEnhancementJobId)
+            && !_modalEnhancementJobMutationSafe;
         bool retryable = _modalEnhancementOperation is "upscale" or "photoreal"
-            && _modalEnhancementJobStatus is "failed" or "canceled";
+            && _modalEnhancementJobStatus is "failed" or "canceled"
+            && !readerOnlyPhotoreal;
         bool currentIsPhotoreal = _modalEnhancementOperation == "photoreal";
         bool currentIsI2i = _modalEnhancementOperation == "i2i";
         bool displayedVersionIsPhotoreal = CurrentModalEnhancementVersionIsPhotoreal();
@@ -20140,7 +20167,10 @@ public partial class MainWindow : Window
             && currentUpscaleSourceSupported
             && !_modalEnhancementRequestPending
             && !active;
-        ModalPhotorealButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
+        ModalPhotorealButton.IsEnabled = hasRealSource
+            && !_modalEnhancementRequestPending
+            && !active
+            && !readerOnlyPhotoreal;
         ModalPhotorealUpscaleButton.IsEnabled = hasPhotorealUpscaleSource
             && !_modalEnhancementRequestPending
             && !active;
@@ -20176,7 +20206,10 @@ public partial class MainWindow : Window
             ModalEnhanceCancelButton,
             ModalEnhanceCancelButtonLabel.Text);
         ModalEnhanceCancelButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        ModalEnhanceCancelButton.IsEnabled = active && !_modalEnhancementRequestPending && !canceling;
+        ModalEnhanceCancelButton.IsEnabled = active
+            && !_modalEnhancementRequestPending
+            && !canceling
+            && !readerOnlyPhotoreal;
         ModalEnhanceCancelButton.ToolTip = canceling
             ? "Waiting for the local AI process to stop"
             : "Cancel the running enhancement job";
@@ -20242,6 +20275,17 @@ public partial class MainWindow : Window
         string? requestJobId = _modalEnhancementJobId;
         string previousOperation = _modalEnhancementOperation;
         string normalizedOperation = requestedOperation;
+        bool readerOnlyPhotoreal = previousOperation == "photoreal"
+            && !string.IsNullOrWhiteSpace(requestJobId)
+            && !_modalEnhancementJobMutationSafe;
+        if (normalizedOperation == "photoreal" && readerOnlyPhotoreal)
+        {
+            _modalEnhancementError =
+                "This photoreal job uses an unknown adapter revision and is presentation-only.";
+            SetStatusToast(_modalEnhancementError);
+            UpdateModalEnhancementActionControls();
+            return;
+        }
         bool retry = !requirePhotorealSource
             && (_modalEnhancementJobStatus is "failed" or "canceled")
             && string.Equals(previousOperation, normalizedOperation, StringComparison.Ordinal)
@@ -20319,7 +20363,7 @@ public partial class MainWindow : Window
                     normalizedOperation,
                     normalizedOperation == "photoreal"
                         ? retry
-                            ? _modalEnhancementAdapterId
+                            ? _modalEnhancementJobAdapterId
                             : photoreal.AdapterId
                         : upscaleAdapterId,
                     enqueueNext: false,
@@ -20357,7 +20401,13 @@ public partial class MainWindow : Window
                 retryJobId: retry ? requestJobId : null,
                 healthValidator: healthValidator,
                 recoverySourceIdentity: sourceIdentity,
-                prePublishValidator: prePublishValidator);
+                prePublishValidator: prePublishValidator,
+                durableRetryOperation: retry ? normalizedOperation : null,
+                durableRetryAdapterId: retry
+                    ? normalizedOperation == "photoreal"
+                        ? _modalEnhancementJobAdapterId
+                        : upscaleAdapterId
+                    : null);
 
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
@@ -20455,6 +20505,7 @@ public partial class MainWindow : Window
     {
         if (_modalEnhancementRequestPending
             || string.IsNullOrWhiteSpace(_modalEnhancementJobId)
+            || !_modalEnhancementJobMutationSafe
             || !TryGetModalSourceTile(out Tile tile))
         {
             return;
@@ -20601,6 +20652,8 @@ public partial class MainWindow : Window
             RemoveModalEnhancementVersion(tile, requestJobId);
             _modalEnhancementJobId = null;
             _modalEnhancementOperation = "upscale";
+            _modalEnhancementJobAdapterId = "";
+            _modalEnhancementJobMutationSafe = true;
             _modalEnhancementJobStatus = null;
             _modalEnhancementProgress = 0;
             _modalEnhancementError = null;
@@ -20785,6 +20838,8 @@ public partial class MainWindow : Window
         _modalEnhancementRequestPending = false;
         _modalEnhancementJobId = null;
         _modalEnhancementOperation = "upscale";
+        _modalEnhancementJobAdapterId = "";
+        _modalEnhancementJobMutationSafe = true;
         _modalEnhancementJobStatus = null;
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
@@ -31169,6 +31224,13 @@ public partial class MainWindow : Window
     }
 
     public bool ModalEnhancementCancelRequestedForSmoke => _modalEnhancementCancelRequested;
+
+    public static bool IsModalPhotorealJobMutationSafeForSmoke(JsonElement job)
+        => ParseModalEnhancementJob(job) is
+        {
+            Operation: "photoreal",
+            PhotorealMutationSafe: true,
+        };
 
     public async Task<bool> DeleteModalEnhancedOutputForSmokeAsync()
     {
