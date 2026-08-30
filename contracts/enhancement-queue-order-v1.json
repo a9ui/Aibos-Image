@@ -3,6 +3,28 @@
   "contractId": "PV-ENHANCE-QUEUE-001",
   "protocol": "aibos.enhancement-queue-order/v1",
   "jobStoreVersion": 1,
+  "photorealAdapterClassification": {
+    "readerRevision": 1,
+    "comparison": "exact ordinal adapterId match on an exact single operation=photoreal and exact single adapterId member",
+    "knownMutationAdapterIds": [
+      "comfyui-flux2-photoreal",
+      "comfyui-krea2-anything2real-v3-photoreal",
+      "comfyui-krea2-anime-to-real-edit-v1-photoreal",
+      "a1111-photoreal"
+    ],
+    "unknownOrFutureAdapter": "preserve and present the row as photoreal reader-only without coercing it to a known adapter",
+    "readerOnlyMutations": [
+      "cancel",
+      "retry",
+      "dismiss",
+      "reorder",
+      "rerun",
+      "delete output",
+      "update current settings",
+      "bulk cancel, retry, dismiss, reorder, or settings update"
+    ],
+    "bulkRule": "a loaded reader-only photoreal row is never included in an id-targeted mutation; a broader authoritative target plan is not requested when the loaded matching scope contains one"
+  },
   "queueOrder": {
     "field": "queueOrder",
     "appliesTo": "queued jobs",
