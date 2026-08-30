@@ -12,10 +12,9 @@ public partial class App
         string[] args)
     {
         string fullResultPath = Path.GetFullPath(resultPath);
-        string smokeRoot = Path.Combine(
-            Path.GetTempPath(),
-            "aibos-wpf-video-tools-v2-inventory-smoke-"
-                + Guid.NewGuid().ToString("N"));
+        string smokeRoot = Directory.CreateTempSubdirectory(
+                "aibos-wpf-video-tools-v2-inventory-smoke-")
+            .FullName;
         object result;
         bool succeeded = false;
         MainWindow? window = null;
@@ -50,9 +49,6 @@ public partial class App
             string rootOutput = Path.GetFullPath(Path.Combine(videosRoot, "root.mp4"));
             string editOutput = Path.GetFullPath(Path.Combine(videosRoot, "edit.mp4"));
             string finishOutput = Path.GetFullPath(Path.Combine(videosRoot, "finish.mp4"));
-            foreach (string path in new[] { rootOutput, editOutput, finishOutput })
-                File.WriteAllBytes(path, [9, 8, 7, 6]);
-
             using JsonDocument root = CreateInventoryJob(
                 finishFixture,
                 rootId,
@@ -63,6 +59,9 @@ public partial class App
                     video["source"]!["originalCanonicalPath"] = originalPath;
                     video["source"]!["stagingCanonicalPath"] = stagingPath;
                 });
+            rootOutput = MaterializeInventoryOutput(
+                root,
+                [9, 8, 7, 6]);
             using JsonDocument edit = CreateInventoryJob(
                 editFixture,
                 editId,
@@ -78,6 +77,9 @@ public partial class App
                     video["requested"]!["source"]!["sourceVideoJobId"] = rootId;
                 },
                 job => job["sourceVideoJobId"] = rootId);
+            editOutput = MaterializeInventoryOutput(
+                edit,
+                [9, 8, 7, 6]);
             using JsonDocument finish = CreateManagedFinishInventoryJob(
                 finishFixture,
                 finishId,
@@ -85,6 +87,9 @@ public partial class App
                 editOutput,
                 finishOutput,
                 "succeeded");
+            finishOutput = MaterializeInventoryOutput(
+                finish,
+                [9, 8, 7, 6]);
 
             using JsonDocument presentation = JsonDocument.Parse(
                 finish.RootElement.GetRawText());
@@ -95,9 +100,11 @@ public partial class App
                     out bool writerMutation,
                     out bool canUseOutput,
                     out string[] actionKinds)
-                && !writerMutation
+                && writerMutation
                 && canUseOutput
-                && actionKinds.SequenceEqual(["open-output"], StringComparer.Ordinal);
+                && actionKinds.SequenceEqual(
+                    ["open-output", "delete-output"],
+                    StringComparer.Ordinal);
             bool passiveRead = presented
                 && fixtureBefore.AsSpan().SequenceEqual(File.ReadAllBytes(fixturePath))
                 && File.ReadAllBytes(finishOutput).SequenceEqual(new byte[] { 9, 8, 7, 6 });
@@ -351,9 +358,9 @@ public partial class App
                 && arguments.SequenceEqual(
                     [$"/select,{finishOutput}"],
                     StringComparer.Ordinal);
-            bool writerClosed = !writerMutation;
+            bool writerCapabilityExact = writerMutation;
             bool ok = exactInventory && ancestry && failClosed && labelsExact
-                && openOutput && passiveRead && writerClosed;
+                && openOutput && passiveRead && writerCapabilityExact;
             succeeded = ok;
             result = new
             {
@@ -365,7 +372,7 @@ public partial class App
                 labels = labelsExact,
                 openOutput,
                 passiveRead,
-                writerClosed,
+                writerCapabilityExact,
                 kinds,
                 roots,
                 outputs,
@@ -409,23 +416,43 @@ public partial class App
         Action<JsonObject> mutateVideo,
         Action<JsonObject>? mutateJob = null)
     {
-        JsonObject job = JsonNode.Parse(fixture.GetProperty("job").GetRawText())!.AsObject();
-        JsonObject video = JsonNode.Parse(fixture.GetProperty("video").GetRawText())!.AsObject();
-        mutateVideo(video);
-        using (JsonDocument videoDocument = JsonDocument.Parse(video.ToJsonString()))
+        using JsonDocument envelope = CreateVideoToolsV2WorkspaceJob(
+            fixture,
+            id,
+            status,
+            mutateVideo,
+            mutateJob,
+            refreshPresetHash: true);
+        JsonObject job = JsonNode.Parse(envelope.RootElement.GetRawText())!
+            .AsObject();
+        if (status == "succeeded")
         {
-            job["presetHash"] = PhotoViewer.Wpf.MainWindow
-                .ComputeVideoToolsSnapshotHashForSmoke(videoDocument.RootElement);
+            string generatedOutput = job["outputPath"]!.GetValue<string>();
+            string outputDirectory = Path.GetFullPath(
+                Path.GetDirectoryName(outputPath)
+                    ?? throw new InvalidDataException(
+                        "Inventory output directory is missing."));
+            job["outputPath"] = Path.Combine(
+                outputDirectory,
+                Path.GetFileName(generatedOutput));
         }
-        job["id"] = id;
-        job["status"] = status;
-        job["progress"] = status == "succeeded" ? 100 : 0;
-        job["outputPath"] = outputPath;
-        job["createdAt"] = "2026-08-24T00:00:00.000Z";
-        job["updatedAt"] = "2026-08-24T00:00:01.000Z";
-        job["video"] = video;
-        mutateJob?.Invoke(job);
+        else
+        {
+            job["outputPath"] = outputPath;
+        }
         return JsonDocument.Parse(job.ToJsonString());
+    }
+
+    private static string MaterializeInventoryOutput(
+        JsonDocument job,
+        byte[] contents)
+    {
+        string path = job.RootElement.GetProperty("outputPath").GetString()
+            ?? throw new InvalidDataException(
+                "Inventory output path is missing.");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, contents);
+        return path;
     }
 
     private static JsonDocument CreateManagedFinishInventoryJob(

@@ -82,8 +82,10 @@ public partial class App
                 && editKind == "edit"
                 && editFilter == "edit"
                 && editOperation.Contains("AI動画編集", StringComparison.Ordinal)
-                && editSummary.Contains("[100, 130)", StringComparison.Ordinal)
-                && editSummary.Contains("非破壊child clip", StringComparison.Ordinal)
+                && editSummary.Contains("Frame 100–129", StringComparison.Ordinal)
+                && editRequestDetails.Contains(
+                    "非破壊child clip",
+                    StringComparison.Ordinal)
                 && editDetail.Contains("管理動画", StringComparison.Ordinal)
                 && editMutation
                 && editCanUseOutput
@@ -895,9 +897,11 @@ public partial class App
                 && v1RetakeSummary.Contains(
                     "区間を作り直す",
                     StringComparison.Ordinal)
-                && v1RetakeOperation.Contains("RETAKE", StringComparison.Ordinal)
+                && v1RetakeOperation.Contains(
+                    "区間を作り直す",
+                    StringComparison.Ordinal)
                 && v1RetakeDetail.Contains(
-                    "Retake snapshot",
+                    "Legacy Video Tools",
                     StringComparison.Ordinal)
                 && !v1RetakeMutation
                 && v1RetakeActions.Length == 0
@@ -906,9 +910,11 @@ public partial class App
                 && v1FinishSummary.Contains(
                     "動画高画質化 2x",
                     StringComparison.Ordinal)
-                && v1FinishOperation.Contains("VIDEO HQ", StringComparison.Ordinal)
+                && v1FinishOperation.Contains(
+                    "動画高画質化",
+                    StringComparison.Ordinal)
                 && v1FinishDetail.Contains(
-                    "Video Finish 2x snapshot",
+                    "Legacy Video Tools",
                     StringComparison.Ordinal)
                 && !v1FinishMutation
                 && v1FinishActions.Length == 0
@@ -1609,6 +1615,7 @@ public partial class App
               "sourcePath": "C:\\synthetic\\source.png",
               "presetId": "anime-sharp-x2",
               "adapterId": "realesrgan-ncnn",
+              "upscaleMutationSafeV1": true,
               "progress": 0,
               "queueOrder": 2,
               "createdAt": "2026-08-24T00:00:00.000Z",

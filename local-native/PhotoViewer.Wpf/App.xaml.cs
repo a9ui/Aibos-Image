@@ -18661,8 +18661,8 @@ public partial class App : Application
                         [
                             "Original",
                             "実写化 1/1",
-                            "動画化 1/2",
-                            "動画化 2/2",
+                            "生成 1/2",
+                            "生成 2/2",
                         ],
                         StringComparer.Ordinal)
                     && win.ModalDisplayVersionKindForSmoke == "Video";
@@ -18951,8 +18951,12 @@ public partial class App : Application
                     win.SelectFileNameForSmoke(
                         Path.GetFileName(photorealSource))
                     && win.OpenModalForSmoke();
-                bool deleteValidationImageSelected =
+                _ = win.RefreshEnhancedStateIfChangedForSmoke();
+                bool deleteDependencySnapshotRefreshed =
                     deleteValidationModalSelected
+                    && await win.RefreshModalEnhancementForSmokeAsync();
+                bool deleteValidationImageSelected =
+                    deleteDependencySnapshotRefreshed
                     && win.SelectModalEnhancementJobVersionForSmoke(
                         "photoreal-ok");
                 bool imageDeleteVerifiedBeforeTamper =

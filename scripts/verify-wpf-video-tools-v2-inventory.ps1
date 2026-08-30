@@ -104,7 +104,7 @@ try {
         'labels',
         'openOutput',
         'passiveRead',
-        'writerClosed')
+        'writerCapabilityExact')
     $failed = @($required | Where-Object { $result.$_ -ne $true })
     if ($process.ExitCode -ne 0 -or $result.ok -ne $true -or $failed.Count -gt 0) {
         throw ('Inventory smoke failed: ' + ($result | ConvertTo-Json -Depth 8 -Compress) + '; failed=' + ($failed -join ','))
@@ -113,5 +113,16 @@ try {
 }
 finally {
     if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-    if (Test-Path -LiteralPath $runRoot) { Remove-Item -LiteralPath $runRoot -Recurse -Force }
+    if (Test-Path -LiteralPath $runRoot) {
+        for ($attempt = 0; $attempt -lt 10; $attempt++) {
+            try {
+                Remove-Item -LiteralPath $runRoot -Recurse -Force
+                break
+            }
+            catch {
+                if ($attempt -eq 9) { throw }
+                Start-Sleep -Milliseconds 100
+            }
+        }
+    }
 }
