@@ -172,6 +172,7 @@ try {
         'explicitCompanionAutoStart',
         'companionQueueRecoveryAuthenticated',
         'durableListenerHandoffSavedForDelivery',
+        'durableBootstrapRecoveryBeforePublish',
         'durableRecoveryAfterPublish',
         'durableRecoveryCarriedRequestId',
         'durableBatchDefinitiveFailurePerItem',
@@ -199,10 +200,6 @@ try {
         Assert-True ($null -ne $property) "Smoke JSON is missing required property: $propertyName"
         Assert-True ($property.Value -eq $true) "Smoke invariant failed: $propertyName"
     }
-    $recoveryBeforePublish = $result.PSObject.Properties['durableRecoveryBeforePublish']
-    Assert-True ($null -ne $recoveryBeforePublish) 'Smoke JSON is missing required property: durableRecoveryBeforePublish'
-    Assert-True ($recoveryBeforePublish.Value -eq $false) 'Durable enqueue recovered the queue before publishing its reservation.'
-
     & $DotnetPath $dll --modal-photoreal-smoke $recoveryResultPath
     $recoveryChildExitCode = $LASTEXITCODE
     Assert-True (Test-Path -LiteralPath $recoveryResultPath -PathType Leaf) 'Recovered Enhancement reference smoke did not produce JSON.'
@@ -274,7 +271,7 @@ try {
     $appTempStoresRemoved = @($appStorePaths | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0
     Assert-True $appTempStoresRemoved 'The modal enhancement smoke left its internal TEMP stores behind.'
 
-    $allPassed = $requiredTrue.Count -eq 58 `
+    $allPassed = $requiredTrue.Count -eq 59 `
         -and $recoveryAllPassed `
         -and $callerStoresUnchanged `
         -and $metadataSentinelUnchanged `

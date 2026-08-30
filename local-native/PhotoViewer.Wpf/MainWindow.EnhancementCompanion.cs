@@ -87,6 +87,7 @@ public partial class MainWindow
     private string? _enhancementCompanionLaunchError;
     private int _enhancementCompanionLaunchAttemptCount;
     private int _enhancementCompanionDurableWorkActivated;
+    private int _ownedEnhancementCompanionDurableWorkActivated;
     private Func<Uri, (bool Started, string Error)>? _startEnhancementCompanionForSmoke;
     private string? _enhancementCompanionAuthToken;
     private string? _ownedEnhancementCompanionInstanceId;
@@ -216,7 +217,9 @@ public partial class MainWindow
     private async Task<EnhancementApiResponse> EnsureEnhancementCompanionApiReadyAsync(
         string? sourceIdentity = null,
         CancellationToken token = default,
-        bool recoverQueueBeforeHealth = false)
+        bool recoverQueueBeforeHealth = false,
+        string? recoveryIdempotencyKey = null,
+        Action<EnhancementApiResponse>? onQueueRecoveryCompleted = null)
     {
         _ = sourceIdentity;
         const string readinessRoute = "api/enhance/health";
@@ -230,10 +233,12 @@ public partial class MainWindow
                 EnhancementApiResponse recovery = await SendEnhancementApiAsync(
                     HttpMethod.Post,
                     EnhancementCompanionQueueRecoveryRoute,
-                    token: requestToken);
+                    token: requestToken,
+                    idempotencyKey: recoveryIdempotencyKey);
                 if (!recovery.Ok)
                     return recovery;
                 queueRecoveryCompleted = true;
+                onQueueRecoveryCompleted?.Invoke(recovery);
             }
 
             EnhancementApiResponse response = await SendEnhancementApiAsync(
@@ -523,7 +528,10 @@ public partial class MainWindow
             && !_enhancementCompanionOwnershipVerified)
         {
             EnhancementApiResponse readiness =
-                await EnsureEnhancementCompanionApiReadyAsync(token: token);
+                await EnsureEnhancementCompanionApiReadyAsync(
+                    token: token,
+                    recoverQueueBeforeHealth:
+                        IsDurableWorkActivatingCompanionRequest(method));
             if (!readiness.Ok)
                 return readiness;
         }
@@ -541,7 +549,10 @@ public partial class MainWindow
         }
 
         EnhancementApiResponse reconnect =
-            await EnsureEnhancementCompanionApiReadyAsync(token: token);
+            await EnsureEnhancementCompanionApiReadyAsync(
+                token: token,
+                recoverQueueBeforeHealth:
+                    IsDurableWorkActivatingCompanionRequest(method));
         if (!reconnect.Ok)
             return reconnect;
 
@@ -1611,7 +1622,8 @@ public partial class MainWindow
             EnhancementApiResponse readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
                     recoverySourceIdentity,
-                    token);
+                    token,
+                    recoverQueueBeforeHealth: true);
             if (!readiness.Ok)
                 return readiness;
         }
@@ -1793,7 +1805,8 @@ public partial class MainWindow
         {
             EnhancementApiResponse readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
-                    token: token);
+                    token: token,
+                    recoverQueueBeforeHealth: true);
             if (!readiness.Ok)
             {
                 EnhancementApiResponse rejected = new(
@@ -2144,6 +2157,18 @@ public partial class MainWindow
     private void MarkEnhancementCompanionDurableWorkActivated(
         bool awaitSavedDeliveryCatalogAdoption = false)
     {
+        string? ownedInstanceId = _ownedEnhancementCompanionInstanceId;
+        if (!string.IsNullOrWhiteSpace(ownedInstanceId)
+            && string.Equals(
+                ownedInstanceId,
+                _verifiedEnhancementCompanionInstanceId,
+                StringComparison.Ordinal))
+        {
+            Interlocked.Exchange(
+                ref _ownedEnhancementCompanionDurableWorkActivated,
+                1);
+        }
+
         bool newlyActivated = Interlocked.Exchange(
                 ref _enhancementCompanionDurableWorkActivated,
                 1) == 0;
@@ -2184,17 +2209,23 @@ public partial class MainWindow
     {
         for (int attempt = 0; attempt < DurableEnqueueRecoveryAttempts; attempt++)
         {
+            EnhancementApiResponse? bootstrapRecovery = null;
             EnhancementApiResponse readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
                     sourceIdentity,
-                    token);
+                    token,
+                    recoverQueueBeforeHealth: true,
+                    recoveryIdempotencyKey: requestId,
+                    onQueueRecoveryCompleted:
+                        response => bootstrapRecovery = response);
             if (readiness.Ok)
             {
-                EnhancementApiResponse recovery = await SendEnhancementApiAsync(
-                    HttpMethod.Post,
-                    EnhancementCompanionQueueRecoveryRoute,
-                    token: token,
-                    idempotencyKey: requestId);
+                EnhancementApiResponse recovery = bootstrapRecovery
+                    ?? await SendEnhancementApiAsync(
+                        HttpMethod.Post,
+                        EnhancementCompanionQueueRecoveryRoute,
+                        token: token,
+                        idempotencyKey: requestId);
                 if (recovery.Ok
                     && requestId is not null
                     && EnhancementEnqueueProbePolicy.HasMatchingDurableReceipt(
@@ -3321,6 +3352,9 @@ public partial class MainWindow
         {
             return false;
         }
+        Interlocked.Exchange(
+            ref _ownedEnhancementCompanionDurableWorkActivated,
+            0);
         _ownedEnhancementCompanionInstanceId = Base64UrlEncode(
             RandomNumberGenerator.GetBytes(24));
         _enhancementCompanionOwnershipVerified = false;
@@ -3671,6 +3705,9 @@ public partial class MainWindow
     {
         _enhancementCompanionOwnershipVerified = false;
         _ownedEnhancementCompanionInstanceId = null;
+        Interlocked.Exchange(
+            ref _ownedEnhancementCompanionDurableWorkActivated,
+            0);
         EnhancementCompanionProcessObservation? observation =
             Interlocked.Exchange(
                 ref _ownedEnhancementCompanionObservation,
@@ -3706,6 +3743,10 @@ public partial class MainWindow
         // Disposing a Process wrapper does not stop the OS process. Once the
         // loopback companion is ready, it is an independent durable worker so
         // queued/running jobs continue while Aibos is closed.
+        _ownedEnhancementCompanionInstanceId = null;
+        Interlocked.Exchange(
+            ref _ownedEnhancementCompanionDurableWorkActivated,
+            0);
         EnhancementCompanionProcessObservation? observation =
             Interlocked.Exchange(
                 ref _ownedEnhancementCompanionObservation,
@@ -3742,7 +3783,10 @@ public partial class MainWindow
 
     private void CompleteOwnedEnhancementCompanionForApplicationClose()
     {
-        if (Volatile.Read(ref _enhancementCompanionDurableWorkActivated) == 0)
+        if (!ShouldReleaseOwnedEnhancementCompanion(
+                Volatile.Read(ref _enhancementCompanionDurableWorkActivated),
+                Volatile.Read(
+                    ref _ownedEnhancementCompanionDurableWorkActivated)))
         {
             StopOwnedEnhancementCompanion();
             return;
@@ -3757,13 +3801,26 @@ public partial class MainWindow
         // running work even when its response or the following health read
         // fails. Preserve that exact worker; a read-only bootstrap failure can
         // still stop the exact process created by this WPF instance.
-        if (Volatile.Read(ref _enhancementCompanionDurableWorkActivated) == 0)
+        if (!ShouldReleaseOwnedEnhancementCompanion(
+                Volatile.Read(ref _enhancementCompanionDurableWorkActivated),
+                Volatile.Read(
+                    ref _ownedEnhancementCompanionDurableWorkActivated)))
         {
             StopOwnedEnhancementCompanion();
             return;
         }
 
         ReleaseOwnedEnhancementCompanion();
+    }
+
+    private static bool ShouldReleaseOwnedEnhancementCompanion(
+        int sessionDurableWorkActivated,
+        int ownedProcessDurableWorkActivated)
+    {
+        // The session flag drives UI watchers only. Process lifetime must be
+        // decided by work activated during the current exact owned epoch.
+        _ = sessionDurableWorkActivated;
+        return ownedProcessDurableWorkActivated != 0;
     }
 
     private static bool IsDurableWorkActivatingCompanionRequest(
@@ -3985,12 +4042,20 @@ public partial class MainWindow
             !IsDurableWorkActivatingCompanionRequest(HttpMethod.Get)
             && IsDurableWorkActivatingCompanionRequest(HttpMethod.Post)
             && IsDurableWorkActivatingCompanionRequest(HttpMethod.Delete);
+        bool ownedProcessEpochIsolated =
+            !ShouldReleaseOwnedEnhancementCompanion(
+                sessionDurableWorkActivated: 1,
+                ownedProcessDurableWorkActivated: 0)
+            && ShouldReleaseOwnedEnhancementCompanion(
+                sessionDurableWorkActivated: 1,
+                ownedProcessDurableWorkActivated: 1);
         bool allPassed = passiveOwnedStopped
             && repeatedCloseIdempotent
             && durableOwnedReleased
             && exitedOwnedNotSignalled
             && unownedPreserved
-            && requestClassificationExact;
+            && requestClassificationExact
+            && ownedProcessEpochIsolated;
 
         return new(
             allPassed,
@@ -3999,7 +4064,8 @@ public partial class MainWindow
             durableOwnedReleased,
             exitedOwnedNotSignalled,
             unownedPreserved,
-            requestClassificationExact);
+            requestClassificationExact,
+            ownedProcessEpochIsolated);
     }
     public static string? ResolveEnhancementCompanionRootForSmoke()
         => ResolveEnhancementCompanionRoot()?.RootPath;
@@ -5093,7 +5159,8 @@ public sealed record EnhancementCompanionCloseLifecycleSmokeSnapshot(
     bool DurableOwnedReleased,
     bool ExitedOwnedNotSignalled,
     bool UnownedPreserved,
-    bool RequestClassificationExact);
+    bool RequestClassificationExact,
+    bool OwnedProcessEpochIsolated);
 
 public sealed record EnhancementCompanionLaunchContractSmokeSnapshot(
     bool UseShellExecute,

@@ -51,9 +51,15 @@ try {
     $explicitActionAutoStartPreserved =
         $companionSource -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync[\s\S]*?EnsureEnhancementCompanionApiReadyAsync' -and
         $companionSource -match 'TryStartOwnedEnhancementCompanion\(out string startError\)'
+    $explicitDurableBootstrapUnified =
+        $companionSource -match 'SendIdempotentEnhancementMutationAsync[\s\S]{0,3500}recoverQueueBeforeHealth:\s*\r?\n\s*IsDurableWorkActivatingCompanionRequest\(method\)' -and
+        $companionSource -match 'SendEnhancementEnqueueAsync\([\s\S]{0,6000}recoverQueueBeforeHealth:\s*true' -and
+        $companionSource -match 'TrySendDurableEnhancementBatchCoreAsync\([\s\S]{0,5000}recoverQueueBeforeHealth:\s*true' -and
+        $companionSource -match 'RecoverAndWakeDurableEnqueueInboxAsync\([\s\S]{0,1800}recoverQueueBeforeHealth:\s*true'
     Assert-True $ordinaryStartupLazy 'Ordinary WPF startup still references Companion auto-start.'
     Assert-True $passiveReadProbeOnly 'A passive Companion read can start a process.'
     Assert-True $explicitActionAutoStartPreserved 'Explicit Enhancement action lost owned Companion auto-start.'
+    Assert-True $explicitDurableBootstrapUnified 'An explicit durable mutation still reads health before authenticated queue recovery.'
 
     & $DotnetPath build $project -c $Configuration --artifacts-path $artifacts --nologo
     Assert-True ($LASTEXITCODE -eq 0) 'Aibos WPF build failed.'
@@ -74,6 +80,7 @@ try {
     Assert-True ($result.ExitedOwnedNotSignalled -eq $true) 'Exited owned process was signalled.'
     Assert-True ($result.UnownedPreserved -eq $true) 'Unowned process was touched.'
     Assert-True ($result.RequestClassificationExact -eq $true) 'Companion request lifetime classification drifted.'
+    Assert-True ($result.OwnedProcessEpochIsolated -eq $true) 'A stale session activation leaked into a fresh owned Companion process epoch.'
 
     & $DotnetPath $wpfDll --automation-isolation-smoke $automationResultPath
     $automationExitCode = $LASTEXITCODE
@@ -102,9 +109,11 @@ try {
         exitedOwnedNotSignalled = [bool]$result.ExitedOwnedNotSignalled
         unownedPreserved = [bool]$result.UnownedPreserved
         requestClassificationExact = [bool]$result.RequestClassificationExact
+        ownedProcessEpochIsolated = [bool]$result.OwnedProcessEpochIsolated
         ordinaryStartupLazy = $ordinaryStartupLazy
         passiveReadProbeOnly = $passiveReadProbeOnly
         explicitActionAutoStartPreserved = $explicitActionAutoStartPreserved
+        explicitDurableBootstrapUnified = $explicitDurableBootstrapUnified
         automationIsolationPreserved = $true
         lazyResumeExact = $true
         walBootstrapRecoveryExact = $true

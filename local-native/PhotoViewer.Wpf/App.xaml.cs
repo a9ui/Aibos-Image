@@ -24443,7 +24443,7 @@ public partial class App : Application
             bool companionListenerHandoffResponseRejected = false;
             bool companionPassiveReadReconnected = false;
             bool durableListenerHandoffSavedForDelivery = false;
-            bool durableRecoveryBeforePublish = false;
+            bool durableBootstrapRecoveryBeforePublish = false;
             bool durableRecoveryAfterPublish = false;
             bool durableRecoveryCarriedRequestId = false;
             bool durableBatchDefinitiveFailurePerItem = false;
@@ -24918,6 +24918,17 @@ public partial class App : Application
                                     },
                                 });
                         }
+                        if (string.Equals(
+                                inner?.PathAndQuery,
+                                "/api/enhance/queue/recover",
+                                StringComparison.Ordinal)
+                            && inner?.BodyJson is null)
+                        {
+                            return win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new { recovered = true });
+                        }
                         if (inner is not null
                             && string.Equals(
                                 inner.Method,
@@ -25195,6 +25206,14 @@ public partial class App : Application
                         {
                             if (simulateDurableBatchConflict)
                             {
+                                if (string.IsNullOrWhiteSpace(
+                                        inner?.IdempotencyKey))
+                                {
+                                    return win.EnhancementCompanionSecureResponseForSmoke(
+                                        request,
+                                        (int)HttpStatusCode.OK,
+                                        new { recovered = true });
+                                }
                                 if (!durableBatchNudgeObserved)
                                 {
                                     durableBatchNudgeObserved = true;
@@ -25214,7 +25233,7 @@ public partial class App : Application
                             }
                             else
                             {
-                                durableRecoveryBeforePublish = true;
+                                durableBootstrapRecoveryBeforePublish = true;
                             }
                         }
                         if (durableListenerSwapped
@@ -25293,7 +25312,7 @@ public partial class App : Application
                     durableSaved
                     && durableListenerSwapped
                     && durableListenerSawOnlyCiphertext
-                    && !durableRecoveryBeforePublish
+                    && durableBootstrapRecoveryBeforePublish
                     && durableRecoveryAfterPublish
                     && durableRecoveryCarriedRequestId
                     && pendingAfterListenerSwap == pendingBeforeListenerSwap + 1;
@@ -25978,7 +25997,7 @@ public partial class App : Application
                 companionListenerHandoffResponseRejected,
                 companionPassiveReadReconnected,
                 durableListenerHandoffSavedForDelivery,
-                durableRecoveryBeforePublish,
+                durableBootstrapRecoveryBeforePublish,
                 durableRecoveryAfterPublish,
                 durableRecoveryCarriedRequestId,
                 durableBatchDefinitiveFailurePerItem,
