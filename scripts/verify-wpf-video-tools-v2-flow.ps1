@@ -56,7 +56,8 @@ foreach ($token in @(
         throw "The focused Video Tools v2 flow is missing $token."
     }
 }
-if ($smoke -match 'Process\.Start|Start-Process|Desktop\\Tools|AibosImage-Companion') {
+$privateToolsPattern = 'Desktop' + [regex]::Escape('\') + 'Tools'
+if ($smoke -match "Process\.Start|Start-Process|$privateToolsPattern|AibosImage-Companion") {
     throw 'The focused flow must not launch a live Companion or embed a private path.'
 }
 
