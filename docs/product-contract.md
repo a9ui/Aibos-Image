@@ -315,6 +315,12 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   image work. The existing physical GPU lease still permits only one worker.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
   ComfyUI, or GPU side effect.
+- Explicit durable-Inbox consumption scans at most 256 directory entries, 128
+  committed envelopes, and 64 MiB of envelope bytes per poll across pending and
+  processing. Each envelope is opened and read through one stable plain-file
+  identity, oversized input is quarantined without dispatch, and the Inbox root
+  and phase directories must not be links or reparse redirects. Hitting a scan
+  bound or observing identity drift fails closed without Jobs mutation.
 - The durable `progress` field is the companion-owned percentage of completed
   adapter execution stages. A queued row retains lifecycle value `0` but shows
   only its waiting order and no progress bar. A running row alone shows a
