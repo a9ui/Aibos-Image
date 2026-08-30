@@ -11896,6 +11896,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? ErrorMessage
         : CancelRequested && Status == "running"
             ? "中止を受け付けました。現在のGPU処理が安全に終了してから次の処理へ進みます。"
+        : VideoToolsV2Snapshot is { SourceKind: "managed-video-job" }
+            ? "管理動画を入力にしたVideo Tools v2の履歴です。"
+        : VideoToolsV2Snapshot is not null
+            ? "外部動画（Job所有コピー）を入力にしたVideo Tools v2の履歴です。"
         : VideoToolsKind is "retake" or "finish"
             ? "Legacy Video Toolsの履歴のため、読み取り専用で表示しています。"
         : VideoToolsEnvelopeClaimed
