@@ -191,9 +191,11 @@ The executable cases for these meanings are routed by
   retry a 1536 reservation. No 2048 author mode is defined.
 - Krea source preparation keeps a minimum 64-pixel work edge without distorting
   the source. A 1280 workflow therefore accepts source aspect ratios through
-  20:1, and the 1536 workflow accepts ratios through 24:1. A source beyond the
-  applicable inclusive limit fails closed before upload or backend start; it is
-  never squeezed into the minimum edge.
+  20:1, and the 1536 workflow accepts ratios through 24:1. The inclusive aspect
+  limit does not override the default workflow's no-upscale rule: when uniform
+  no-upscale preparation would leave either edge below 64 pixels, the source
+  fails closed rather than being enlarged or squeezed. A source beyond the
+  applicable inclusive limit also fails closed before upload or backend start.
 - The revision 1 WPF photoreal mutation reader recognizes exactly
   `comfyui-flux2-photoreal`, `comfyui-krea2-anything2real-v3-photoreal`,
   `comfyui-krea2-anime-to-real-edit-v1-photoreal`, and legacy
