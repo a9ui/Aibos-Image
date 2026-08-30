@@ -162,6 +162,19 @@ The executable cases for these meanings are routed by
   separate. Its engine LoRA is fixed on at strength 1.0, its execution schedule
   is fixed at 8 steps and CFG 1, and generic photoreal Strength is compatibility
   input rather than Krea denoise authority.
+- The revision 1 WPF photoreal mutation reader recognizes exactly
+  `comfyui-flux2-photoreal`, `comfyui-krea2-anything2real-v3-photoreal`,
+  `comfyui-krea2-anime-to-real-edit-v1-photoreal`, and legacy
+  `a1111-photoreal`. A missing, duplicate, malformed, unknown, or future
+  photoreal `adapterId` remains visible as reader-only state. Cancel, retry,
+  dismiss, reorder, rerun, output deletion, current-settings updates, and bulk
+  mutations are disabled without sending a mutation request.
+- Every durable create, rerun, or retry derives the exact Krea Anime-to-Real v1
+  health requirement from its durable adapter identity before inbox
+  publication. Unknown, unavailable, timed-out, missing, false, malformed, or
+  duplicate capability state fails closed. The matching selector starts
+  disabled and becomes available only after the latest authenticated health
+  contains one exact boolean `true` member.
 - Opening or selecting a native photoreal Style is passive and creates no Job.
   A shipped built-in Style changes only the current positive and blank-positive
   prompt pair; it preserves the current LoRA, strength, CFG, quality,
