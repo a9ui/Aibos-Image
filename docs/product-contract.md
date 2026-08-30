@@ -189,6 +189,11 @@ The executable cases for these meanings are routed by
   through 1280 retain their no-upscale, one-megapixel bound. Anime-to-Real,
   FLUX, unknown adapters, and incomplete durable identities cannot publish or
   retry a 1536 reservation. No 2048 author mode is defined.
+- Krea source preparation keeps a minimum 64-pixel work edge without distorting
+  the source. A 1280 workflow therefore accepts source aspect ratios through
+  20:1, and the 1536 workflow accepts ratios through 24:1. A source beyond the
+  applicable inclusive limit fails closed before upload or backend start; it is
+  never squeezed into the minimum edge.
 - The revision 1 WPF photoreal mutation reader recognizes exactly
   `comfyui-flux2-photoreal`, `comfyui-krea2-anything2real-v3-photoreal`,
   `comfyui-krea2-anime-to-real-edit-v1-photoreal`, and legacy
@@ -296,6 +301,10 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   not reorder or update the waiting row. Readiness is reconsidered only at an
   explicit pump, recovery, resume, enqueue, or Companion restart; passive Jobs
   and health reads never monitor assets, start a worker, or wake the queue.
+  The explicit gate proves the complete sealed Krea inventory, pinned digests,
+  canonical identities, and ACL lease before claim. A readiness or security
+  drift detected between that gate and owned runtime start restores the exact
+  pre-claim queued row instead of settling it failed or changing queue order.
 - With exact `fairGpuFamilyDispatchV1`, the one shared GPU lane alternates
   runnable image and video families whenever both are waiting. Each family
   keeps reader order, durable `queueOrder` is never rewritten by selection,
@@ -306,6 +315,12 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   image work. The existing physical GPU lease still permits only one worker.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
   ComfyUI, or GPU side effect.
+- Explicit durable-Inbox consumption scans at most 256 directory entries, 128
+  committed envelopes, and 64 MiB of envelope bytes per poll across pending and
+  processing. Each envelope is opened and read through one stable plain-file
+  identity, oversized input is quarantined without dispatch, and the Inbox root
+  and phase directories must not be links or reparse redirects. Hitting a scan
+  bound or observing identity drift fails closed without Jobs mutation.
 - The durable `progress` field is the companion-owned percentage of completed
   adapter execution stages. A queued row retains lifecycle value `0` but shows
   only its waiting order and no progress bar. A running row alone shows a

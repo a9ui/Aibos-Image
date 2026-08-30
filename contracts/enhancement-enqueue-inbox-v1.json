@@ -22,7 +22,10 @@
     "maximumEnvelopeUtf8Bytes": 16777216,
     "maximumItemsPerEnvelope": 1000,
     "maximumBodyJsonUtf8Bytes": 8388608,
-    "maximumRequestIdCharacters": 255
+    "maximumRequestIdCharacters": 255,
+    "maximumActivePollCommittedFiles": 128,
+    "maximumActivePollDirectoryEntries": 256,
+    "maximumActivePollUtf8Bytes": 67108864
   },
   "envelope": {
     "requiredFields": [
@@ -98,6 +101,9 @@
   "consumer": {
     "owner": "API-only Enhancement companion",
     "order": "createdAt, then publish mtime, then file name",
+    "activeScan": "each explicit poll bounds pending plus processing to 256 total directory entries, 128 committed envelopes, and 67108864 total UTF-8 bytes; every candidate is a stable opened plain file whose device and inode still match its path",
+    "activeFilesystemBoundary": "enqueue-inbox and v1 plus each active phase directory must be canonical plain directories rather than symlinks, junctions, or reparse redirects; identity drift or a scan-bound breach fails closed without dispatch or Jobs mutation",
+    "oversizedEnvelope": "claim then move to needs-action without reading more than maximumEnvelopeUtf8Bytes plus one byte and without dispatch",
     "claim": "atomic pending-to-processing move",
     "dispatch": "fixed route with exact bodyJson and Idempotency-Key=requestId",
     "success": "matching receipt for the same requestId and jobId",
