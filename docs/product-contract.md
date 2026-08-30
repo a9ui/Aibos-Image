@@ -189,6 +189,11 @@ The executable cases for these meanings are routed by
   through 1280 retain their no-upscale, one-megapixel bound. Anime-to-Real,
   FLUX, unknown adapters, and incomplete durable identities cannot publish or
   retry a 1536 reservation. No 2048 author mode is defined.
+- Krea source preparation keeps a minimum 64-pixel work edge without distorting
+  the source. A 1280 workflow therefore accepts source aspect ratios through
+  20:1, and the 1536 workflow accepts ratios through 24:1. A source beyond the
+  applicable inclusive limit fails closed before upload or backend start; it is
+  never squeezed into the minimum edge.
 - The revision 1 WPF photoreal mutation reader recognizes exactly
   `comfyui-flux2-photoreal`, `comfyui-krea2-anything2real-v3-photoreal`,
   `comfyui-krea2-anime-to-real-edit-v1-photoreal`, and legacy
@@ -296,6 +301,10 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   not reorder or update the waiting row. Readiness is reconsidered only at an
   explicit pump, recovery, resume, enqueue, or Companion restart; passive Jobs
   and health reads never monitor assets, start a worker, or wake the queue.
+  The explicit gate proves the complete sealed Krea inventory, pinned digests,
+  canonical identities, and ACL lease before claim. A readiness or security
+  drift detected between that gate and owned runtime start restores the exact
+  pre-claim queued row instead of settling it failed or changing queue order.
 - With exact `fairGpuFamilyDispatchV1`, the one shared GPU lane alternates
   runnable image and video families whenever both are waiting. Each family
   keeps reader order, durable `queueOrder` is never rewritten by selection,
