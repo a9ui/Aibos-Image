@@ -51,9 +51,15 @@ try {
     $explicitActionAutoStartPreserved =
         $companionSource -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync[\s\S]*?EnsureEnhancementCompanionApiReadyAsync' -and
         $companionSource -match 'TryStartOwnedEnhancementCompanion\(out string startError\)'
+    $explicitRecoveryBoundaryExact =
+        $companionSource -match 'RecoverAndWakeDurableEnqueueInboxAsync\([\s\S]{0,1800}recoverQueueBeforeHealth:\s*true' -and
+        $companionSource -notmatch 'SendIdempotentEnhancementMutationAsync[\s\S]{0,3500}recoverQueueBeforeHealth:\s*true' -and
+        $companionSource -notmatch 'SendEnhancementEnqueueAsync\([\s\S]{0,6000}recoverQueueBeforeHealth:\s*true' -and
+        $companionSource -notmatch 'TrySendDurableEnhancementBatchCoreAsync\([\s\S]{0,5000}recoverQueueBeforeHealth:\s*true'
     Assert-True $ordinaryStartupLazy 'Ordinary WPF startup still references Companion auto-start.'
     Assert-True $passiveReadProbeOnly 'A passive Companion read can start a process.'
     Assert-True $explicitActionAutoStartPreserved 'Explicit Enhancement action lost owned Companion auto-start.'
+    Assert-True $explicitRecoveryBoundaryExact 'Queue recovery escaped Resume or the post-publish durable-inbox boundary.'
 
     & $DotnetPath build $project -c $Configuration --artifacts-path $artifacts --nologo
     Assert-True ($LASTEXITCODE -eq 0) 'Aibos WPF build failed.'
@@ -74,6 +80,7 @@ try {
     Assert-True ($result.ExitedOwnedNotSignalled -eq $true) 'Exited owned process was signalled.'
     Assert-True ($result.UnownedPreserved -eq $true) 'Unowned process was touched.'
     Assert-True ($result.RequestClassificationExact -eq $true) 'Companion request lifetime classification drifted.'
+    Assert-True ($result.OwnedProcessEpochIsolated -eq $true) 'A stale session activation leaked into a fresh owned Companion process epoch.'
 
     & $DotnetPath $wpfDll --automation-isolation-smoke $automationResultPath
     $automationExitCode = $LASTEXITCODE
@@ -89,6 +96,10 @@ try {
     Assert-True ($lazyResumeResult.passiveDidNotStart -eq $true) 'Passive queue UI started the Companion.'
     Assert-True ($lazyResumeResult.explicitResumeExact -eq $true) 'Explicit queue Resume was not exact.'
     Assert-True ($lazyResumeResult.duplicateGuarded -eq $true) 'Duplicate queue Resume was not guarded.'
+    Assert-True ($lazyResumeResult.walFixtureValid -eq $true) 'Queue bootstrap smoke did not create a valid TEMP SQLite WAL fixture.'
+    Assert-True ($lazyResumeResult.recoveryPreservedQueueState -eq $true) 'Queue recovery changed paused/count/order semantics before Resume.'
+    Assert-True ($lazyResumeResult.recoveryBeforeHealth -eq $true) 'Explicit bootstrap did not recover the authenticated queue before its first health read.'
+    Assert-True ($lazyResumeResult.healthBeforeRecoveryRequests -eq 0) 'Explicit bootstrap read health before WAL recovery.'
 
     [pscustomobject]@{
         allPassed = $true
@@ -98,11 +109,14 @@ try {
         exitedOwnedNotSignalled = [bool]$result.ExitedOwnedNotSignalled
         unownedPreserved = [bool]$result.UnownedPreserved
         requestClassificationExact = [bool]$result.RequestClassificationExact
+        ownedProcessEpochIsolated = [bool]$result.OwnedProcessEpochIsolated
         ordinaryStartupLazy = $ordinaryStartupLazy
         passiveReadProbeOnly = $passiveReadProbeOnly
         explicitActionAutoStartPreserved = $explicitActionAutoStartPreserved
+        explicitRecoveryBoundaryExact = $explicitRecoveryBoundaryExact
         automationIsolationPreserved = $true
         lazyResumeExact = $true
+        walBootstrapRecoveryExact = $true
         actualCompanionStarted = $false
     } | ConvertTo-Json -Compress
 }

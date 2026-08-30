@@ -24433,6 +24433,7 @@ public partial class App : Application
             bool idempotentMutationReconnected = false;
             bool idempotentMutationExactReplay = false;
             bool idempotentMutationNoDuplicate = false;
+            bool idempotentMutationRecoverySuppressed = false;
             bool untrustedProbeContainedNoSensitiveData = true;
             bool untrustedDurableReservationSuppressed = false;
             int untrustedProbeCount = 0;
@@ -24858,6 +24859,7 @@ public partial class App : Application
                 int mutationIdentityProbeCount = 0;
                 int mutationRequestCount = 0;
                 int mutationApplyCount = 0;
+                int mutationRecoveryCount = 0;
                 var mutationBodies = new List<string>();
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
                     async (request, token) =>
@@ -24917,6 +24919,18 @@ public partial class App : Application
                                         paused = false,
                                     },
                                 });
+                        }
+                        if (string.Equals(
+                                inner?.PathAndQuery,
+                                "/api/enhance/queue/recover",
+                                StringComparison.Ordinal)
+                            && inner?.BodyJson is null)
+                        {
+                            mutationRecoveryCount++;
+                            return win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new { recovered = true });
                         }
                         if (inner is not null
                             && string.Equals(
@@ -24979,6 +24993,7 @@ public partial class App : Application
                         out JsonElement mutationMissing)
                     && mutationMissing.TryGetInt32(out int mutationMissingCount)
                     && mutationMissingCount == 2;
+                idempotentMutationRecoverySuppressed = mutationRecoveryCount == 0;
 
                 int readinessProbeCount = 0;
                 int readinessJobsRequestCount = 0;
@@ -25195,6 +25210,14 @@ public partial class App : Application
                         {
                             if (simulateDurableBatchConflict)
                             {
+                                if (string.IsNullOrWhiteSpace(
+                                        inner?.IdempotencyKey))
+                                {
+                                    return win.EnhancementCompanionSecureResponseForSmoke(
+                                        request,
+                                        (int)HttpStatusCode.OK,
+                                        new { recovered = true });
+                                }
                                 if (!durableBatchNudgeObserved)
                                 {
                                     durableBatchNudgeObserved = true;
@@ -25817,6 +25840,7 @@ public partial class App : Application
                     && idempotentMutationReconnected
                     && idempotentMutationExactReplay
                     && idempotentMutationNoDuplicate
+                    && idempotentMutationRecoverySuppressed
                     && explicitCompanionAutoStart
                     && companionAuthenticatedRequestHeaders
                     && companionListenerHandoffEncrypted
@@ -25971,6 +25995,7 @@ public partial class App : Application
                 idempotentMutationReconnected,
                 idempotentMutationExactReplay,
                 idempotentMutationNoDuplicate,
+                idempotentMutationRecoverySuppressed,
                 explicitCompanionAutoStart,
                 companionAuthenticatedRequestHeaders,
                 companionQueueRecoveryAuthenticated,

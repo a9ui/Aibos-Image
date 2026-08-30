@@ -169,6 +169,7 @@ try {
         'idempotentMutationReconnected',
         'idempotentMutationExactReplay',
         'idempotentMutationNoDuplicate',
+        'idempotentMutationRecoverySuppressed',
         'explicitCompanionAutoStart',
         'companionQueueRecoveryAuthenticated',
         'durableListenerHandoffSavedForDelivery',
@@ -201,8 +202,7 @@ try {
     }
     $recoveryBeforePublish = $result.PSObject.Properties['durableRecoveryBeforePublish']
     Assert-True ($null -ne $recoveryBeforePublish) 'Smoke JSON is missing required property: durableRecoveryBeforePublish'
-    Assert-True ($recoveryBeforePublish.Value -eq $false) 'Durable enqueue recovered the queue before publishing its reservation.'
-
+    Assert-True ($recoveryBeforePublish.Value -eq $false) 'Durable enqueue recovered or pumped the queue before publishing its reservation.'
     & $DotnetPath $dll --modal-photoreal-smoke $recoveryResultPath
     $recoveryChildExitCode = $LASTEXITCODE
     Assert-True (Test-Path -LiteralPath $recoveryResultPath -PathType Leaf) 'Recovered Enhancement reference smoke did not produce JSON.'
@@ -274,7 +274,7 @@ try {
     $appTempStoresRemoved = @($appStorePaths | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0
     Assert-True $appTempStoresRemoved 'The modal enhancement smoke left its internal TEMP stores behind.'
 
-    $allPassed = $requiredTrue.Count -eq 58 `
+    $allPassed = $requiredTrue.Count -eq 59 `
         -and $recoveryAllPassed `
         -and $callerStoresUnchanged `
         -and $metadataSentinelUnchanged `
@@ -302,6 +302,7 @@ try {
         idempotentMutationReconnected = [bool]$result.idempotentMutationReconnected
         idempotentMutationExactReplay = [bool]$result.idempotentMutationExactReplay
         idempotentMutationNoDuplicate = [bool]$result.idempotentMutationNoDuplicate
+        idempotentMutationRecoverySuppressed = [bool]$result.idempotentMutationRecoverySuppressed
         closeCompleted = [bool]$result.closeCompleted
         environmentRestored = [bool]$result.environmentRestored
         fingerprintsCaptured = [bool]$result.fingerprintsCaptured
