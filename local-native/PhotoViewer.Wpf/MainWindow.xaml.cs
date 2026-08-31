@@ -558,9 +558,9 @@ public partial class MainWindow : Window
     private string? _currentPreviewMetadataPath;
     private string _modalPromptChipSource = "";
     private List<string> _modalPromptChipTags = [];
+    private List<string> _modalPromptCurrentVersionSearchMatches = [];
     private List<string> _modalPromptOriginalSearchMatches = [];
-    private HashSet<string> _modalPromptOriginalSearchFallbackTags = new(
-        StringComparer.OrdinalIgnoreCase);
+    private List<string> _modalPromptOriginalSearchMatchTags = [];
     private int _modalPromptChipNextIndex;
     private long _modalPromptChipGeneration;
     private bool _modalPromptChipRealizationScheduled;
@@ -11672,32 +11672,43 @@ public partial class MainWindow : Window
         => string.Join(", ", ParsePromptTags(prompt));
 
     private sealed record ModalPromptPresentation(
-        List<string> Tags,
-        List<string> OriginalSearchFallbacks);
+        List<string> CurrentVersionTags,
+        List<string> OriginalSearchMatches);
 
     private static ModalPromptPresentation BuildModalPromptPresentation(
         string prompt,
+        IReadOnlyList<string> currentVersionSearchMatches,
         IReadOnlyList<string> originalSearchMatches)
     {
-        List<string> tags = ParsePromptTags(prompt);
-        var originalFallbacks = new List<string>();
+        List<string> currentVersionTags = ParsePromptTags(prompt);
+        foreach (string match in currentVersionSearchMatches)
+        {
+            if (!currentVersionTags.Contains(match, StringComparer.OrdinalIgnoreCase))
+                currentVersionTags.Add(match);
+        }
+        var separatedOriginalMatches = new List<string>();
         foreach (string match in originalSearchMatches)
         {
-            if (tags.Contains(match, StringComparer.OrdinalIgnoreCase))
+            if (currentVersionTags.Contains(match, StringComparer.OrdinalIgnoreCase))
                 continue;
-            tags.Add(match);
-            originalFallbacks.Add(match);
+            separatedOriginalMatches.Add(match);
         }
-        return new ModalPromptPresentation(tags, originalFallbacks);
+        return new ModalPromptPresentation(
+            currentVersionTags,
+            separatedOriginalMatches);
     }
 
     private void SyncModalPromptChips(
         string prompt,
-        IReadOnlyList<string>? originalSearchMatches = null)
+        IReadOnlyList<string>? originalSearchMatches = null,
+        string? searchQuery = null)
     {
         if (ModalPromptChips is null)
             return;
 
+        List<string> currentVersionSearchMatches = PromptSearchMatches(
+            MetadataIndexStore.EncodePrompt(prompt),
+            searchQuery ?? CurrentSearchQuery);
         List<string> normalizedOriginalMatches = (originalSearchMatches ?? [])
             .Where(static match => !string.IsNullOrWhiteSpace(match))
             .Select(static match => match.Trim())
@@ -11708,6 +11719,9 @@ public partial class MainWindow : Window
             .Take(MaxModalPromptTagCount)
             .ToList();
         if (string.Equals(_modalPromptChipSource, prompt, StringComparison.Ordinal)
+            && _modalPromptCurrentVersionSearchMatches.SequenceEqual(
+                currentVersionSearchMatches,
+                StringComparer.OrdinalIgnoreCase)
             && _modalPromptOriginalSearchMatches.SequenceEqual(
                 normalizedOriginalMatches,
                 StringComparer.OrdinalIgnoreCase))
@@ -11718,17 +11732,24 @@ public partial class MainWindow : Window
 
         CancelModalPromptChipRealization();
         _modalPromptChipSource = prompt;
+        _modalPromptCurrentVersionSearchMatches = currentVersionSearchMatches;
         _modalPromptOriginalSearchMatches = normalizedOriginalMatches;
         ModalPromptPresentation presentation = BuildModalPromptPresentation(
             prompt,
+            currentVersionSearchMatches,
             normalizedOriginalMatches);
-        _modalPromptChipTags = presentation.Tags;
-        _modalPromptOriginalSearchFallbackTags = new HashSet<string>(
-            presentation.OriginalSearchFallbacks,
-            StringComparer.OrdinalIgnoreCase);
+        _modalPromptChipTags = presentation.CurrentVersionTags;
+        _modalPromptOriginalSearchMatchTags = presentation.OriginalSearchMatches;
         _modalPromptChipNextIndex = 0;
         ModalPromptChips.Children.Clear();
         ModalPromptEmptyText.Visibility = _modalPromptChipTags.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ModalOriginalPromptSearchMatchesText.Text = string.Join(
+            ", ",
+            _modalPromptOriginalSearchMatchTags);
+        ModalOriginalPromptSearchMatchesPanel.Visibility =
+            _modalPromptOriginalSearchMatchTags.Count == 0
+                ? Visibility.Collapsed
+                : Visibility.Visible;
         StartModalPromptChipRealization();
     }
 
@@ -11759,10 +11780,7 @@ public partial class MainWindow : Window
         int end = Math.Min(_modalPromptChipNextIndex + Math.Max(1, count), _modalPromptChipTags.Count);
         while (_modalPromptChipNextIndex < end)
         {
-            AddModalPromptChip(
-                _modalPromptChipTags[_modalPromptChipNextIndex],
-                _modalPromptOriginalSearchFallbackTags.Contains(
-                    _modalPromptChipTags[_modalPromptChipNextIndex]));
+            AddModalPromptChip(_modalPromptChipTags[_modalPromptChipNextIndex]);
             _modalPromptChipNextIndex++;
         }
 
@@ -11779,32 +11797,24 @@ public partial class MainWindow : Window
             DispatcherPriority.ContextIdle);
     }
 
-    private void AddModalPromptChip(string tag, bool originalSearchFallback)
+    private void AddModalPromptChip(string tag)
     {
         var chip = new Button
         {
-            Content = originalSearchFallback
-                ? $"Original 検索一致 · {tag}"
-                : tag,
+            Content = tag,
             Tag = tag,
             Style = (Style)FindResource("GhostButton"),
             Padding = new Thickness(8, 3, 8, 3),
             Margin = new Thickness(0, 0, 6, 6),
             FontSize = 11.5,
-            ToolTip = originalSearchFallback
-                ? $"Original のプロンプト検索で一致: {tag}"
-                : $"Search for {tag}",
+            ToolTip = $"Search for {tag}",
         };
         System.Windows.Automation.AutomationProperties.SetName(
             chip,
-            originalSearchFallback
-                ? $"Original prompt search match {tag}"
-                : $"Search prompt tag {tag}");
+            $"Search prompt tag {tag}");
         System.Windows.Automation.AutomationProperties.SetHelpText(
             chip,
-            originalSearchFallback
-                ? "This term matched the Original catalog prompt; append it to search without changing displayed-version metadata."
-                : "Append this tag to search, close the modal, and focus search.");
+            "Append this displayed-version prompt tag to search, close the modal, and focus search.");
         chip.Click += ModalPromptTag_Click;
         chip.PreviewKeyDown += ModalPromptTag_PreviewKeyDown;
         AttachModalPromptMappingContextMenu(chip, tag);
@@ -11821,10 +11831,7 @@ public partial class MainWindow : Window
     {
         while (_modalPromptChipNextIndex < _modalPromptChipTags.Count)
         {
-            AddModalPromptChip(
-                _modalPromptChipTags[_modalPromptChipNextIndex],
-                _modalPromptOriginalSearchFallbackTags.Contains(
-                    _modalPromptChipTags[_modalPromptChipNextIndex]));
+            AddModalPromptChip(_modalPromptChipTags[_modalPromptChipNextIndex]);
             _modalPromptChipNextIndex++;
         }
     }
@@ -32613,15 +32620,52 @@ public partial class MainWindow : Window
             string originalPrompt,
             string searchQuery)
     {
+        List<string> displayedMatches = PromptSearchMatches(
+            MetadataIndexStore.EncodePrompt(displayedPrompt),
+            searchQuery);
+        var displayedMatchSet = new HashSet<string>(
+            displayedMatches,
+            StringComparer.OrdinalIgnoreCase);
         List<string> originalMatches = PromptSearchMatches(
             MetadataIndexStore.EncodePrompt(originalPrompt),
             searchQuery);
         ModalPromptPresentation presentation = BuildModalPromptPresentation(
             displayedPrompt,
-            originalMatches);
+            displayedMatches,
+            originalMatches
+                .Where(match => !displayedMatchSet.Contains(match))
+                .ToList());
         return new ModalPromptPresentationSmokeSnapshot(
-            presentation.Tags,
-            presentation.OriginalSearchFallbacks);
+            presentation.CurrentVersionTags,
+            presentation.OriginalSearchMatches);
+    }
+
+    public ModalPromptSurfaceSmokeSnapshot RenderModalPromptPresentationForSmoke(
+        string displayedPrompt,
+        string originalPrompt,
+        string searchQuery)
+    {
+        ModalPromptPresentationSmokeSnapshot presentation =
+            ResolveModalPromptPresentationForSmoke(
+                displayedPrompt,
+                originalPrompt,
+                searchQuery);
+        SyncModalPromptChips(
+            displayedPrompt,
+            presentation.OriginalSearchMatches,
+            searchQuery);
+        return new ModalPromptSurfaceSmokeSnapshot(
+            ModalPromptTagsForSmoke,
+            [.. _modalPromptOriginalSearchMatchTags],
+            ModalOriginalPromptSearchMatchesPanel.Visibility == Visibility.Visible,
+            ModalOriginalPromptSearchMatchesText.Text,
+            !string.IsNullOrWhiteSpace(
+                System.Windows.Automation.AutomationProperties.GetName(
+                    ModalOriginalPromptSearchMatchesText))
+                && !string.IsNullOrWhiteSpace(
+                    System.Windows.Automation.AutomationProperties.GetHelpText(
+                        ModalOriginalPromptSearchMatchesText)),
+            ModalOriginalPromptSearchMatchesText.ContextMenu is null);
     }
 
     public bool ModalPromptTagsAccessibilityReadyForSmoke
@@ -33359,8 +33403,16 @@ public sealed record PromptTagSearchSmokeSnapshot(
     List<string> FilteredNames);
 
 public sealed record ModalPromptPresentationSmokeSnapshot(
-    List<string> Tags,
+    List<string> CurrentVersionTags,
     List<string> OriginalSearchMatches);
+
+public sealed record ModalPromptSurfaceSmokeSnapshot(
+    List<string> CurrentVersionTags,
+    List<string> OriginalSearchMatches,
+    bool OriginalMatchesVisible,
+    string OriginalMatchesText,
+    bool OriginalMatchesAccessibilityReady,
+    bool OriginalMatchesHaveNoPromptMappingContext);
 
 public sealed record FileDragOutSmokeSnapshot(
     bool Built,

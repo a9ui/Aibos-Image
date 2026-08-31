@@ -32512,40 +32512,58 @@ public partial class App : Application
                         "tag-cap-match",
                         "scan-cap-match",
                     }
-                    .All(match => boundedPresentation.Tags.Contains(
+                    .All(match => boundedPresentation.CurrentVersionTags.Contains(
                         match,
                         StringComparer.OrdinalIgnoreCase));
-                bool boundedMatchesExplicitlyOriginal =
-                    boundedPresentation.OriginalSearchMatches.SequenceEqual(
-                        [
-                            "long-segment-match",
-                            "tag-cap-match",
-                            "scan-cap-match",
-                        ],
-                        StringComparer.OrdinalIgnoreCase);
+                bool samePromptHasNoOriginalOnlyMatches =
+                    boundedPresentation.OriginalSearchMatches.Count == 0;
                 ModalPromptPresentationSmokeSnapshot versionSplit =
                     PhotoViewer.Wpf.MainWindow.ResolveModalPromptPresentationForSmoke(
                         "enhanced-version-only",
                         boundedPrompt,
                         boundedQuery);
+                string[] expectedOriginalOnlyMatches =
+                [
+                    "long-segment-match",
+                    "tag-cap-match",
+                    "scan-cap-match",
+                ];
                 bool versionAuthoritiesRemainDistinct =
-                    versionSplit.Tags.Contains(
+                    versionSplit.CurrentVersionTags.SequenceEqual(
+                        ["enhanced-version-only"],
+                        StringComparer.Ordinal)
+                    && versionSplit.CurrentVersionTags.Contains(
                         "enhanced-version-only",
                         StringComparer.Ordinal)
-                    && !versionSplit.Tags.Contains(
+                    && !versionSplit.CurrentVersionTags.Contains(
                         "tag-000",
                         StringComparer.Ordinal)
                     && versionSplit.OriginalSearchMatches.SequenceEqual(
-                        [
-                            "long-segment-match",
-                            "tag-cap-match",
-                            "scan-cap-match",
-                        ],
+                        expectedOriginalOnlyMatches,
                         StringComparer.OrdinalIgnoreCase)
                     && versionSplit.OriginalSearchMatches.All(match =>
-                        versionSplit.Tags.Contains(
+                        !versionSplit.CurrentVersionTags.Contains(
                             match,
                             StringComparer.OrdinalIgnoreCase));
+                ModalPromptSurfaceSmokeSnapshot versionSplitSurface =
+                    win.RenderModalPromptPresentationForSmoke(
+                        "enhanced-version-only",
+                        boundedPrompt,
+                        boundedQuery);
+                bool originalMatchesRenderedSeparately =
+                    versionSplitSurface.CurrentVersionTags.SequenceEqual(
+                        ["enhanced-version-only"],
+                        StringComparer.Ordinal)
+                    && versionSplitSurface.OriginalSearchMatches.SequenceEqual(
+                        expectedOriginalOnlyMatches,
+                        StringComparer.OrdinalIgnoreCase)
+                    && versionSplitSurface.OriginalMatchesVisible
+                    && string.Equals(
+                        versionSplitSurface.OriginalMatchesText,
+                        string.Join(", ", expectedOriginalOnlyMatches),
+                        StringComparison.Ordinal)
+                    && versionSplitSurface.OriginalMatchesAccessibilityReady
+                    && versionSplitSurface.OriginalMatchesHaveNoPromptMappingContext;
                 win.CloseModalForSmoke();
                 win.SetSearchQuery("", persist: false);
                 PngMetadataSmokeSnapshot missingMetadata = await win.SelectPngMetadataForSmokeAsync(otherName);
@@ -32584,8 +32602,9 @@ public partial class App : Application
                     && clickCommittedSuggestion && backspaceRemovedWholeTerm
                     && coloredSearchTerms && outsideClickDismissesPopup && popupClosed
                     && boundedSearchMatchesVisible
-                    && boundedMatchesExplicitlyOriginal
+                    && samePromptHasNoOriginalOnlyMatches
                     && versionAuthoritiesRemainDistinct
+                    && originalMatchesRenderedSeparately
                     && appended.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && deduped.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && sourceUntouched && searchPersisted
@@ -32597,7 +32616,7 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok
-                        ? "modal prompt tags append a deduped comma query, active search chips expose accessible whole-term removal, and only search state is persisted without source, metadata, or enhancement mutation"
+                        ? "displayed-version prompt tags and Original-only search matches remain separate while search state changes without source, metadata, or enhancement mutation"
                         : "prompt tag search smoke did not meet the modal/search isolation contract",
                     SmokeRoot = smokeRoot,
                     TaggedPath = taggedPath,
@@ -32624,12 +32643,14 @@ public partial class App : Application
                     ColoredSearchTerms = coloredSearchTerms,
                     OutsideClickDismissesPopup = outsideClickDismissesPopup,
                     PopupClosed = popupClosed,
-                    BoundedModalTags = boundedPresentation.Tags,
+                    BoundedModalTags = boundedPresentation.CurrentVersionTags,
                     BoundedSearchMatchesVisible = boundedSearchMatchesVisible,
-                    BoundedMatchesExplicitlyOriginal =
-                        boundedMatchesExplicitlyOriginal,
+                    SamePromptHasNoOriginalOnlyMatches =
+                        samePromptHasNoOriginalOnlyMatches,
                     VersionAuthoritiesRemainDistinct =
                         versionAuthoritiesRemainDistinct,
+                    OriginalMatchesRenderedSeparately =
+                        originalMatchesRenderedSeparately,
                     SourceUntouched = sourceUntouched,
                     SearchPersisted = searchPersisted,
                     ReloadedQuery = reloadedQuery,
@@ -36171,8 +36192,9 @@ public partial class App : Application
         public bool PopupClosed { get; init; }
         public List<string> BoundedModalTags { get; init; } = [];
         public bool BoundedSearchMatchesVisible { get; init; }
-        public bool BoundedMatchesExplicitlyOriginal { get; init; }
+        public bool SamePromptHasNoOriginalOnlyMatches { get; init; }
         public bool VersionAuthoritiesRemainDistinct { get; init; }
+        public bool OriginalMatchesRenderedSeparately { get; init; }
         public bool SourceUntouched { get; init; }
         public bool SearchPersisted { get; init; }
         public string? ReloadedQuery { get; init; }

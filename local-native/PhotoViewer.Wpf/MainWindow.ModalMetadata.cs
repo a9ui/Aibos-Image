@@ -153,10 +153,27 @@ public partial class MainWindow
                 ? _modalVideoVersions[_modalVideoVersionIndex]
                 : null;
 
-    private List<string> CurrentModalOriginalPromptSearchMatches()
-        => TryGetModalSourceTile(out Tile tile)
-            ? PromptSearchMatches(tile.PromptUtf8, CurrentSearchQuery)
-            : [];
+    private List<string> CurrentModalOriginalPromptSearchMatches(
+        string displayedPrompt)
+    {
+        if (!TryGetModalSourceTile(out Tile tile))
+            return [];
+
+        List<string> originalMatches = PromptSearchMatches(
+            tile.PromptUtf8,
+            CurrentSearchQuery);
+        if (originalMatches.Count == 0)
+            return [];
+
+        var displayedMatches = new HashSet<string>(
+            PromptSearchMatches(
+                MetadataIndexStore.EncodePrompt(displayedPrompt),
+                CurrentSearchQuery),
+            StringComparer.OrdinalIgnoreCase);
+        return originalMatches
+            .Where(match => !displayedMatches.Contains(match))
+            .ToList();
+    }
 
     private void SyncModalMetadataSidebarForDisplayedVersion()
     {
@@ -192,7 +209,8 @@ public partial class MainWindow
                 : "このバージョンのPNG parametersを読み込みました";
         SyncModalPromptChips(
             hasPrompt ? metadata!.Prompt : "",
-            CurrentModalOriginalPromptSearchMatches());
+            CurrentModalOriginalPromptSearchMatches(
+                hasPrompt ? metadata!.Prompt : ""));
         ModalPromptText.Text = hasPrompt
             ? string.Join(", ", _modalPromptChipTags)
             : "-";

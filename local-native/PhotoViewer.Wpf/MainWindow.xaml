@@ -5631,6 +5631,12 @@
                 </DockPanel>
                 <WrapPanel x:Name="ModalPromptChips" Margin="0,0,0,12" AutomationProperties.Name="Prompt search tags" AutomationProperties.HelpText="Choose a prompt tag to append it to search, close the modal, and focus search."/>
                 <TextBlock x:Name="ModalPromptEmptyText" Text="{DynamicResource UiNoPromptTags}" Foreground="{StaticResource TextTertiary}" FontSize="12" Margin="0,0,0,12"/>
+                <StackPanel x:Name="ModalOriginalPromptSearchMatchesPanel" Visibility="Collapsed" Margin="0,0,0,12">
+                  <TextBlock Text="ORIGINAL 検索一致" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                  <TextBlock x:Name="ModalOriginalPromptSearchMatchesText" Foreground="{StaticResource TextSecondary}" FontSize="12" TextWrapping="Wrap" LineHeight="18"
+                             AutomationProperties.Name="Original prompt search matches"
+                             AutomationProperties.HelpText="Search terms matched only by the Original prompt. These terms are not part of the displayed version prompt."/>
+                </StackPanel>
                 <TextBlock x:Name="ModalPromptText" Text="-" Visibility="Collapsed"/>
               </StackPanel>
 
