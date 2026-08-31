@@ -256,9 +256,13 @@ The executable cases for these meanings are routed by
   contract requires it, replay-resistant, and bound to one companion epoch.
 - Durable enqueue publishes the bounded inbox item before sending a bodyless
   wake. A post-publication transport failure does not discard the durable item.
-- An authenticated queue resume first restores the configured read-only
-  MiniMax H3 runtime mounts when that seal is unavailable, then completes the
-  companion's one-time recovery before it starts a worker. Queue pause remains
+- An authenticated recovery, durable-Inbox wake, or queue resume completes the
+  companion's one-time interrupted-job recovery and drains the committed Inbox
+  while new claims are deferred. After that drain, the worker passively rereads
+  the final visible durable queue head. Only an exact executable MiniMax H3
+  head may restore the configured read-only H3 runtime mounts before claim; a
+  deeper H3 row, non-H3 head, paused queue, or unknown or malformed head causes
+  no H3 path, runtime-status, seal, or mount access. Queue pause remains
   available during deferred recovery and lets the current job stop at its
   normal boundary.
 - Ordinary WPF launch, passive reads, and startup history access do not start
