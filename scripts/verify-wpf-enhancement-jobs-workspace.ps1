@@ -51,11 +51,17 @@ try {
         $mainWindowXaml.Contains('<TextBlock Text="FILTERS" Foreground="{StaticResource TextTertiary}"')
         $mainWindowXaml.Contains('<TextBlock Text="LOCAL AI" Foreground="{StaticResource TextSecondary}"')
         $mainWindowXaml.Contains('<TextBlock Text="Prompt / Settings" Foreground="{StaticResource TextSecondary}"')
+        $mainWindowXaml.Contains('Content="待機中を現在設定へ"')
         $mainWindowXaml.Contains('Visibility="{Binding ShowProgressBar, Converter={StaticResource BoolToVis}}"')
         $mainWindowXaml.Contains('Visibility="{Binding ShowDetailText, Converter={StaticResource BoolToVis}}"')
         (-not $mainWindowXaml.Contains('AI処理版は元画像とは別に保存しています。'))
         (-not $mainWindowXaml.Contains('AI処理結果は別ファイルに保存します。'))
         $jobsSource.Contains('$"待機中 · {QueuePosition} / {QueueCount}"')
+        $jobsSource.Contains('$"キュー順で表示中 · {counts.Total:N0}件')
+        $jobsSource.Contains('先頭の実写化はエンジン準備待ちです。後続の動画化は開始しません。')
+        $jobsSource.Contains('"設定を更新"')
+        $jobsSource.Contains('queuedKreaPhotorealSettingsUpdateV1')
+        (-not $jobsSource.Contains('実行順で表示中'))
         $jobsSource.Contains('public bool ShowProgressBar => Status == "running";')
         $jobsSource.Contains('RequestDetailsExpanded ? "閉じる" : "Prompt";')
         (-not $jobsSource.Contains('反映中  ·  '))
@@ -86,8 +92,41 @@ try {
             "queued photoreal jobs using comfyui-flux2-photoreal only")
         ($queueContract.queuedPhotorealPromptUpdate.sharesClaimLock -eq $true)
         ($queueContract.queuedPhotorealPromptUpdate.wakesWorker -eq $false)
+        (($queueContract.queuedPhotorealSettingsUpdateV1.adapterIds -join ",") -eq
+            "comfyui-flux2-photoreal,comfyui-krea2-anything2real-v3-photoreal,comfyui-krea2-anime-to-real-edit-v1-photoreal")
+        ($queueContract.queuedPhotorealSettingsUpdateV1.readerCapabilityGate -like
+            "*queuedKreaPhotorealSettingsUpdateV1 exactly true*")
+        ($queueContract.queuedPhotorealSettingsUpdateV1.preserves -contains
+            "adapter identity")
+        ($queueContract.queuedPhotorealSettingsUpdateV1.adapterSemantics.'comfyui-krea2-anything2real-v3-photoreal' -like
+            "*strength 1 and kvCache true*")
+        ($queueContract.queuedPhotorealSettingsUpdateV1.adapterSemantics.'comfyui-krea2-anime-to-real-edit-v1-photoreal' -like
+            "*denoise 100, steps 8, and cfgScale 1*")
+        ($queueContract.queuedPhotorealSettingsUpdateV1.invalidAdapterSettings -like
+            "*return conflict and write nothing*")
         ($queueContract.workerRules.pumpAfterRunningCancel -eq $true)
         ($queueContract.workerRules.pumpAfterStartupRecovery -eq $true)
+        ($queueContract.strictVisibleGlobalFifoV1.authority -like
+            "*single visible global order*")
+        ($queueContract.strictVisibleGlobalFifoV1.claim -like
+            "*without operation-family alternation*")
+        (-not ($queueContract.PSObject.Properties.Name -contains
+            "fairGpuFamilyDispatchV1"))
+        (($queueContract.kreaPhotorealStrictFifoBarrierV1.adapterIds -join ",") -eq
+            "comfyui-krea2-anything2real-v3-photoreal,comfyui-krea2-anime-to-real-edit-v1-photoreal")
+        ($queueContract.kreaPhotorealStrictFifoBarrierV1.unavailableQueueHead -like
+            "*claim no later job including video*")
+        (($queueContract.deferredBackendSkipV1.excludedStrictFifoBarrierAdapters -join ",") -eq
+            "comfyui-krea2-anything2real-v3-photoreal,comfyui-krea2-anime-to-real-edit-v1-photoreal")
+        ($queueContract.deferredBackendSkipV1.recognizedOptionalAdapterIds.Count -eq 0)
+        ($queueContract.deferredBackendSkipV1.currentClassification -like
+            "*classifies no adapter as deferrable*")
+        ($queueContract.deferredBackendSkipV1.appliesTo -like
+            "*recognized optional non-Krea*")
+        ($queueContract.kreaPhotorealStrictFifoBarrierV1.healthIssue -like
+            "*does not by itself report queued-without-pump*")
+        ($queueContract.workerRules.claim -like
+            "*claim no later job when that row is an unavailable recognized Krea*")
         (($queueContract.readerFixture.expectedVisibleOrder -join ",") -eq
             "running,ordered-first,ordered-second,legacy-earlier,invalid-negative,legacy-later")
         ($queueContract.readerFixture.expectedClaimedQueuedJob -eq "ordered-first")
@@ -120,7 +159,38 @@ try {
         ($healthFixture.workingFixture.expectedDisplay.detail -eq "1 running / 4 queued")
         ($healthFixture.workingFixture.expectedDisplay.sourceRevisionPrefix -eq "69684954")
         ($healthFixture.workingFixture.payload.worker.paused -eq $false)
+        (-not ($healthContract.requiredFields -contains
+            "backendAvailability.kreaPhotorealV1.queueHeadBlocked"))
+        ($healthFixture.workingFixture.payload.backendAvailability.kreaPhotorealV1.queueHeadBlocked -eq
+            $false)
+        ($healthFixture.workingFixture.payload.capabilities.deferredBackendSkipV1 -eq
+            $false)
+        (-not ($healthContract.readerRules.PSObject.Properties.Name -contains
+            "fairGpuFamilyDispatchV1"))
+        (-not ($healthFixture.workingFixture.payload.capabilities.PSObject.Properties.Name -contains
+            "fairGpuFamilyDispatchV1"))
+        ($healthContract.readerRules.deferredBackendSkipV1 -like
+            "*optional non-Krea*")
+        ($healthContract.readerRules.kreaPhotorealQueueHeadBlockedV1 -like
+            "*true only when the first queued row*")
+        ($healthContract.readerRules.kreaPhotorealQueueHeadBlockedPumpV1 -like
+            "*only when its cached visible queue head is an exact recognized Krea*")
+        ($healthContract.readerRules.kreaPhotorealQueueHeadBlockedDisplayV1 -like
+            "*loopback trust-boundary issue, takes display priority*")
+        ($healthContract.readerRules.invalidKreaPhotorealQueueHeadBlockedV1 -like
+            "*without making health, Jobs, or unrelated capabilities unavailable*")
         ($healthFixture.workingFixture.payload.capabilities.queuedPhotorealPromptUpdate -eq $true)
+        ($healthFixture.workingFixture.payload.capabilities.queuedKreaPhotorealSettingsUpdateV1 -eq $true)
+        ($healthContract.readerRules.missingQueuedKreaPhotorealSettingsUpdateV1 -like
+            "*compatible FLUX current-settings action readable*")
+        ($healthContract.readerRules.inventoryRevision -like
+            "*progress or heartbeat may advance it without a full Jobs reload*")
+        ($healthContract.readerRules.inventoryRevision -like
+            "*throttled passive fallback*")
+        ($healthContract.readerRules.catalogRevision -like
+            "*authoritative for WPF-visible terminal, new-row*")
+        ($healthContract.readerRules.catalogRevision -like
+            "*invalidates that snapshot by the next poll*")
         ($healthContract.readerRules.missingQueuedPhotorealPromptUpdate -eq
             "keep health and jobs readable but hide the queued prompt-update action")
         ($healthContract.readerRules.missingTerminalHistoryBatchDismissV1 -eq
@@ -367,6 +437,17 @@ try {
     [pscustomobject]@{
         ok = $result.ok
         passiveOpen = $result.passiveOpen
+        kreaQueueHeadBlockedVisible = $result.kreaQueueHeadBlockedVisible
+        intentionalKreaQueueWaitNotRecovery = $result.intentionalKreaQueueWaitNotRecovery
+        kreaQueueHeadDoesNotHideTrustIssue = $result.kreaQueueHeadDoesNotHideTrustIssue
+        mismatchedKreaQueueHeadDoesNotSuppressRecovery = $result.mismatchedKreaQueueHeadDoesNotSuppressRecovery
+        malformedKreaQueueHeadBlockedCompatible = $result.malformedKreaQueueHeadBlockedCompatible
+        missingKreaQueueHeadBlockedCompatible = $result.missingKreaQueueHeadBlockedCompatible
+        duplicateKreaQueueHeadBlockedCompatible = $result.duplicateKreaQueueHeadBlockedCompatible
+        progressOnlyInventoryRevisionAvoidedFullRead = $result.progressOnlyInventoryRevisionAvoidedFullRead
+        legacyInventoryFallbackThrottled = $result.legacyInventoryFallbackThrottled
+        catalogRevisionTerminalHandoffRefreshBounded = $result.catalogRevisionTerminalHandoffRefreshBounded
+        kreaCurrentSettingsMutationContract = $result.kreaCurrentSettingsMutationContract
         stableJobViews = $result.stableJobViews
         completedElapsedVisible = $result.completedElapsedVisible
         queueInventoryOrdered = $result.queueInventoryOrdered
@@ -388,6 +469,14 @@ try {
         'legacyHealthFallback',
         'futureHealthFallback',
         'unknownIssueSafe',
+        'kreaQueueHeadBlockedVisible',
+        'kreaQueueHeadBlockedPassive',
+        'intentionalKreaQueueWaitNotRecovery',
+        'kreaQueueHeadDoesNotHideTrustIssue',
+        'mismatchedKreaQueueHeadDoesNotSuppressRecovery',
+        'malformedKreaQueueHeadBlockedCompatible',
+        'missingKreaQueueHeadBlockedCompatible',
+        'duplicateKreaQueueHeadBlockedCompatible',
         'healthRecovered',
         'queuePauseContract',
         'routesOk',
@@ -432,6 +521,9 @@ try {
         'healthOnlyPollAvoidedFullInventory',
         'queueOrderRevisionRefreshesSameCountInventory',
         'catalogRevisionRefreshesSameCountInventory',
+        'progressOnlyInventoryRevisionAvoidedFullRead',
+        'legacyInventoryFallbackThrottled',
+        'catalogRevisionTerminalHandoffRefreshBounded',
         'mutationRefreshDebtContract',
         'cachedReopenAvoidedFullInventory',
         'staleQueueRefreshSuppressed',
@@ -441,6 +533,12 @@ try {
         'rerunSeedContract',
         'queuedPromptUpdateContract',
         'bulkQueuedPromptUpdateContract',
+        'legacyKreaSettingsCapabilitySafe',
+        'malformedKreaSettingsCapabilitySafe',
+        'kreaAnythingCurrentSettingsActionsVisible',
+        'kreaAnimeCurrentSettingsActionsVisible',
+        'kreaCurrentSettingsAdapterMatchFailClosed',
+        'kreaCurrentSettingsMutationContract',
         'clearQueuedIssued',
         'queuedJobsBatchCancelContract',
         'terminalHistoryBatchRetryContract',
