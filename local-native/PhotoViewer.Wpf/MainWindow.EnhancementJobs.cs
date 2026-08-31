@@ -141,12 +141,16 @@ public partial class MainWindow
     private string? _enhancementWorkspaceHealthInventorySignature;
     private bool? _enhancementWorkspaceHealthInventoryRevisionSupported;
     private long? _enhancementWorkspaceLastHealthInventoryRevision;
+    private long? _enhancementWorkspaceBoundInventoryRevision;
+    private long? _enhancementWorkspaceBoundCatalogRevision;
+    private DateTimeOffset _enhancementWorkspaceLastLegacyInventoryFallbackAt;
     private long _enhancementWorkspaceMutationDebtEpoch;
     private long _enhancementWorkspaceReconciledMutationDebtEpoch;
     private long? _enhancementWorkspaceMutationDebtMinimumInventoryRevision;
     private bool? _enhancementWorkspaceQueuePaused;
     private bool _enhancementWorkspaceQueueRecoveryRequired;
     private bool _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported;
+    private bool _enhancementWorkspaceQueuedKreaPhotorealSettingsUpdateSupported;
     private bool _enhancementWorkspacePhotorealEnqueueNextSupported;
     private bool _enhancementWorkspaceTerminalHistoryBatchDismissSupported;
     private bool _enhancementWorkspaceQueuedJobsBatchCancelSupported;
@@ -2209,8 +2213,24 @@ public partial class MainWindow
             }
 
             string? observedSignature = health?.InventorySignature;
+            bool catalogRevisionRequiresRefresh =
+                health?.CatalogRevision is long observedCatalogRevision
+                && (_enhancementWorkspaceBoundCatalogRevision
+                        is not long boundCatalogRevision
+                    || observedCatalogRevision > boundCatalogRevision);
+            bool legacyInventoryFallbackRequiresRefresh =
+                health?.CatalogRevision is null
+                && health?.InventoryRevision is long observedInventoryRevision
+                && (_enhancementWorkspaceBoundInventoryRevision
+                        is not long boundInventoryRevision
+                    || observedInventoryRevision > boundInventoryRevision)
+                && DateTimeOffset.UtcNow
+                    - _enhancementWorkspaceLastLegacyInventoryFallbackAt
+                    >= TimeSpan.FromSeconds(5);
             if (observedSignature is not null
                 && !HasEnhancementWorkspaceMutationDebt
+                && !catalogRevisionRequiresRefresh
+                && !legacyInventoryFallbackRequiresRefresh
                 && string.Equals(
                     observedSignature,
                     _enhancementWorkspaceHealthInventorySignature,
@@ -2218,17 +2238,24 @@ public partial class MainWindow
             {
                 return;
             }
+            if (legacyInventoryFallbackRequiresRefresh)
+            {
+                _enhancementWorkspaceLastLegacyInventoryFallbackAt =
+                    DateTimeOffset.UtcNow;
+            }
 
-            // The compact health payload is enough for idle progress ticks.
-            // Fetch the active queue plus bounded history only when its status
-            // counts/current job changed, or when an older companion cannot
-            // provide health.
+            // The compact health payload is enough for current-job progress and
+            // heartbeat-only inventory revisions. Fetch the active queue plus
+            // bounded history when its visible signature/catalog revision
+            // changes, or through the throttled legacy inventory fallback when
+            // an older companion has no catalog revision.
             await RefreshEnhancementJobsWorkspaceAsync(
                 generation,
                 isPoll: true,
                 refreshHealth: false,
                 observedHealthInventorySignature: observedSignature,
-                observedHealthInventoryRevision: health?.InventoryRevision);
+                observedHealthInventoryRevision: health?.InventoryRevision,
+                observedHealthCatalogRevision: health?.CatalogRevision);
         }
         finally
         {
@@ -2242,6 +2269,7 @@ public partial class MainWindow
         bool refreshHealth = true,
         string? observedHealthInventorySignature = null,
         long? observedHealthInventoryRevision = null,
+        long? observedHealthCatalogRevision = null,
         int healthInventoryCoalesceAttemptsRemaining = 1)
     {
         if ((_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == generation)
@@ -2254,6 +2282,7 @@ public partial class MainWindow
             _enhancementWorkspaceQueuePresentationRevision;
         string? coalescedHealthInventorySignature = null;
         long? coalescedHealthInventoryRevision = null;
+        long? coalescedHealthCatalogRevision = null;
         bool forceHealthPollAfterInventory = false;
         long mutationDebtEpochAtReadStart =
             _enhancementWorkspaceMutationDebtEpoch;
@@ -2284,6 +2313,8 @@ public partial class MainWindow
                     healthBeforeInventory?.InventorySignature;
                 observedHealthInventoryRevision =
                     healthBeforeInventory?.InventoryRevision;
+                observedHealthCatalogRevision =
+                    healthBeforeInventory?.CatalogRevision;
             }
 
             _enhancementWorkspaceGetCount++;
@@ -2367,6 +2398,8 @@ public partial class MainWindow
                             healthAfterInventorySignature;
                         coalescedHealthInventoryRevision =
                             healthAfterInventoryRevision;
+                        coalescedHealthCatalogRevision =
+                            healthAfterInventory?.CatalogRevision;
                     }
                     else
                     {
@@ -2434,7 +2467,7 @@ public partial class MainWindow
                 || !UsesDirectEnhancementJobsSqliteReader();
             RefreshEnhancementQueueBulkControls();
             EnhancementJobsHeaderSummary.Text =
-                $"{counts.Total:N0}件 · 実行中 {runningCount:N0} · 待機 {queuedCount:N0}"
+                $"キュー順で表示中 · {counts.Total:N0}件 · 実行中 {runningCount:N0} · 待機 {queuedCount:N0}"
                 + $" · 完了 {completedCount:N0} · 失敗 {failedCount:N0} · 中止 {canceledCount:N0}"
                 + (loadedHistoryCount < totalHistoryCount
                     ? $" · 履歴 {loadedHistoryCount:N0} / {totalHistoryCount:N0}"
@@ -2459,6 +2492,10 @@ public partial class MainWindow
             {
                 _enhancementWorkspaceHealthInventorySignature =
                     observedHealthInventorySignature;
+                _enhancementWorkspaceBoundInventoryRevision =
+                    observedHealthInventoryRevision;
+                _enhancementWorkspaceBoundCatalogRevision =
+                    observedHealthCatalogRevision;
             }
             }
         }
@@ -2485,6 +2522,8 @@ public partial class MainWindow
                     coalescedHealthInventorySignature,
                 observedHealthInventoryRevision:
                     coalescedHealthInventoryRevision,
+                observedHealthCatalogRevision:
+                    coalescedHealthCatalogRevision,
                 healthInventoryCoalesceAttemptsRemaining:
                     healthInventoryCoalesceAttemptsRemaining - 1);
         }
@@ -2535,7 +2574,7 @@ public partial class MainWindow
         return health;
     }
 
-    private static bool TryParseEnhancementQueueHealth(
+    private bool TryParseEnhancementQueueHealth(
         JsonElement payload,
         out EnhancementQueueHealthView health)
     {
@@ -2569,13 +2608,27 @@ public partial class MainWindow
         {
             return false;
         }
+        bool kreaPhotorealQueueHeadBlocked =
+            ReadKreaPhotorealQueueHeadBlocked(payload);
+        bool kreaQueueHeadRecoverySuppressionSafe =
+            kreaPhotorealQueueHeadBlocked
+            && CachedEnhancementWorkspaceHasRecognizedKreaQueueHead();
 
         string? firstIssueCode = null;
         foreach (JsonElement issueElement in issuesElement.EnumerateArray())
         {
             if (issueElement.ValueKind != JsonValueKind.String)
                 return false;
-            firstIssueCode ??= issueElement.GetString();
+            string? issueCode = issueElement.GetString();
+            if (kreaQueueHeadRecoverySuppressionSafe
+                && string.Equals(
+                    issueCode,
+                    "queued-without-pump",
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+            firstIssueCode ??= issueCode;
         }
 
         if (!TryReadOptionalHealthTimestamp(
@@ -2677,6 +2730,7 @@ public partial class MainWindow
             return false;
         }
         string catalogRevisionSignature = "-";
+        long? catalogRevision = null;
         string queueOrderRevisionSignature = "-";
         long? inventoryRevision = null;
         if (payload.TryGetProperty("store", out JsonElement storeElement))
@@ -2704,12 +2758,14 @@ public partial class MainWindow
                     out JsonElement catalogRevisionElement))
             {
                 if (!catalogRevisionElement.TryGetInt64(
-                        out long catalogRevision)
-                    || catalogRevision is < 0 or > 9_007_199_254_740_991)
+                        out long parsedCatalogRevision)
+                    || parsedCatalogRevision
+                        is < 0 or > 9_007_199_254_740_991)
                 {
                     return false;
                 }
-                catalogRevisionSignature = catalogRevision.ToString(
+                catalogRevision = parsedCatalogRevision;
+                catalogRevisionSignature = parsedCatalogRevision.ToString(
                     CultureInfo.InvariantCulture);
             }
             if (storeElement.TryGetProperty(
@@ -2754,6 +2810,7 @@ public partial class MainWindow
         }
 
         bool queuedPhotorealPromptUpdate = false;
+        bool queuedKreaPhotorealSettingsUpdate = false;
         bool photorealPromptControls = false;
         bool atomicImageEnqueueNext = false;
         bool terminalHistoryBatchDismiss = false;
@@ -2819,6 +2876,10 @@ public partial class MainWindow
             {
                 return false;
             }
+            queuedKreaPhotorealSettingsUpdate =
+                ReadOptionalBooleanCapabilityFailClosed(
+                    capabilitiesElement,
+                    "queuedKreaPhotorealSettingsUpdateV1");
         }
 
         string stateLabel = status switch
@@ -2837,8 +2898,12 @@ public partial class MainWindow
             && miniMaxH3Capability is { Ready: false } unavailableMiniMaxH3
                 ? DescribeMiniMaxH3QueueUnavailable(unavailableMiniMaxH3.ReasonCode)
                 : DescribeEnhancementQueueHealthIssue(firstIssueCode);
-        string detail = status == "needs-attention"
+        string detail = status == "needs-attention" && firstIssueCode is not null
             ? firstIssue ?? "処理待ち列の確認が必要です。"
+            : kreaPhotorealQueueHeadBlocked
+                ? "先頭の実写化はエンジン準備待ちです。後続の動画化は開始しません。"
+            : status == "needs-attention"
+                ? "処理待ち列の確認が必要です。"
             : paused == true && running > 0
                 ? $"実行中 {running:N0}件。待機中 {queued:N0}件は一時停止を維持します"
             : paused == true && queued > 0
@@ -2868,6 +2933,7 @@ public partial class MainWindow
             paused,
             queueRecoveryRequired,
             queuedPhotorealPromptUpdate,
+            queuedKreaPhotorealSettingsUpdate,
             photorealPromptControls && atomicImageEnqueueNext,
             kreaAnimeToRealV1,
             kreaAnythingToReal1536,
@@ -2878,6 +2944,7 @@ public partial class MainWindow
             terminalHistoryBatchRetry,
             inventorySignature,
             inventoryRevision,
+            catalogRevision,
             currentJobId,
             currentProgress,
             currentUpdatedAt);
@@ -2906,6 +2973,58 @@ public partial class MainWindow
             return true;
         }
         return element.ValueKind == JsonValueKind.Null;
+    }
+
+    private static bool ReadOptionalBooleanCapabilityFailClosed(
+        JsonElement capabilities,
+        string propertyName)
+    {
+        int propertyCount = capabilities.EnumerateObject().Count(property =>
+            property.NameEquals(propertyName));
+        return propertyCount == 1
+            && capabilities.TryGetProperty(propertyName, out JsonElement element)
+            && element.ValueKind is JsonValueKind.True or JsonValueKind.False
+            && element.GetBoolean();
+    }
+
+    private static bool ReadKreaPhotorealQueueHeadBlocked(JsonElement payload)
+    {
+        if (!HasSingleProperty(payload, "backendAvailability")
+            || !payload.TryGetProperty(
+                "backendAvailability",
+                out JsonElement backendAvailability)
+            || backendAvailability.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(backendAvailability, "kreaPhotorealV1")
+            || !backendAvailability.TryGetProperty(
+                "kreaPhotorealV1",
+                out JsonElement kreaPhotoreal)
+            || kreaPhotoreal.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(kreaPhotoreal, "queueHeadBlocked")
+            || !kreaPhotoreal.TryGetProperty(
+                "queueHeadBlocked",
+                out JsonElement queueHeadBlockedElement)
+            || queueHeadBlockedElement.ValueKind
+                is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+
+        return queueHeadBlockedElement.GetBoolean();
+    }
+
+    private bool CachedEnhancementWorkspaceHasRecognizedKreaQueueHead()
+    {
+        EnhancementWorkspaceJobView? head =
+            _enhancementWorkspaceJobs.FirstOrDefault(static job =>
+                job.Status == "queued");
+        return head is not null
+            && string.Equals(
+                head.Operation,
+                "photoreal",
+                StringComparison.Ordinal)
+            && head.AdapterId is
+                "comfyui-krea2-anything2real-v3-photoreal"
+                    or "comfyui-krea2-anime-to-real-edit-v1-photoreal";
     }
 
     private static bool TryReadNonNegativeCount(
@@ -2989,7 +3108,8 @@ public partial class MainWindow
         _enhancementWorkspaceQueuePaused = health.Paused;
         _enhancementWorkspaceQueueRecoveryRequired = health.QueueRecoveryRequired;
         ApplyQueuedPhotorealPromptUpdateCapability(
-            health.QueuedPhotorealPromptUpdate);
+            health.QueuedPhotorealPromptUpdate,
+            health.QueuedKreaPhotorealSettingsUpdate);
         ApplyPhotorealEnqueueNextCapability(health.PhotorealEnqueueNext);
         ApplyKreaAnimeToRealV1HealthCapability(health.KreaAnimeToRealV1);
         ApplyKreaAnythingToReal1536HealthCapability(
@@ -3029,9 +3149,12 @@ public partial class MainWindow
         _enhancementWorkspaceHealthInventorySignature = null;
         _enhancementWorkspaceHealthInventoryRevisionSupported = false;
         _enhancementWorkspaceLastHealthInventoryRevision = null;
+        _enhancementWorkspaceBoundInventoryRevision = null;
+        _enhancementWorkspaceBoundCatalogRevision = null;
+        _enhancementWorkspaceLastLegacyInventoryFallbackAt = default;
         _enhancementWorkspaceQueuePaused = null;
         _enhancementWorkspaceQueueRecoveryRequired = false;
-        ApplyQueuedPhotorealPromptUpdateCapability(false);
+        ApplyQueuedPhotorealPromptUpdateCapability(false, false);
         ApplyPhotorealEnqueueNextCapability(false);
         ApplyKreaAnimeToRealV1HealthCapability(false);
         ApplyKreaAnythingToReal1536HealthCapability(false);
@@ -3072,7 +3195,7 @@ public partial class MainWindow
     {
         if (activeCount > 0 && automaticPollingAvailable)
         {
-            return $"実行順で表示中 · 履歴は最新 {_enhancementJobsHistoryLimit:N0}件";
+            return $"キュー順で表示中 · 履歴は最新 {_enhancementJobsHistoryLimit:N0}件";
         }
         if (!automaticPollingAvailable
             && UsesDirectEnhancementJobsSqliteReader())
@@ -3082,15 +3205,22 @@ public partial class MainWindow
         return $"{DateTime.Now:HH:mm:ss} 更新 · 実行中なし";
     }
 
-    private void ApplyQueuedPhotorealPromptUpdateCapability(bool supported)
+    private void ApplyQueuedPhotorealPromptUpdateCapability(
+        bool supported,
+        bool kreaSupported)
     {
         _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported = supported;
-        bool currentSettingsAreFlux =
-            CurrentPhotorealEngineSupportsQueuedSettingsUpdate();
+        _enhancementWorkspaceQueuedKreaPhotorealSettingsUpdateSupported =
+            kreaSupported;
         foreach (EnhancementWorkspaceJobView job in _enhancementWorkspaceJobs)
         {
             job.QueuedPhotorealPromptUpdateCapabilitySafe =
-                supported && currentSettingsAreFlux;
+                supported
+                && CurrentPhotorealEngineMatchesQueuedSettingsUpdateJob(
+                    job.AdapterId)
+                && (!QueuedPhotorealSettingsUpdateRequiresKreaCapability(
+                        job.AdapterId)
+                    || kreaSupported);
         }
         RefreshEnhancementQueueBulkControls();
     }
@@ -3164,7 +3294,11 @@ public partial class MainWindow
             // that appear for the first time in the following inventory.
             candidate.QueuedPhotorealPromptUpdateCapabilitySafe =
                 _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported
-                && CurrentPhotorealEngineSupportsQueuedSettingsUpdate();
+                && CurrentPhotorealEngineMatchesQueuedSettingsUpdateJob(
+                    candidate.AdapterId)
+                && (!QueuedPhotorealSettingsUpdateRequiresKreaCapability(
+                        candidate.AdapterId)
+                    || _enhancementWorkspaceQueuedKreaPhotorealSettingsUpdateSupported);
             candidate.PhotorealEnqueueNextCapabilitySafe =
                 _enhancementWorkspacePhotorealEnqueueNextSupported;
             if (existingById.TryGetValue(candidate.Id, out EnhancementWorkspaceJobView? existing)
@@ -10199,9 +10333,19 @@ public partial class MainWindow
         if (job is null || !job.CanUpdatePhotorealPrompts)
             return false;
 
+        int inventoryReadsBefore = _enhancementWorkspaceGetCount;
         UpdateQueuedPhotorealPrompts_Click(
             new Button { Tag = job },
             new RoutedEventArgs());
+        for (int attempt = 0;
+            attempt < 200
+                && !_enhancementWorkspaceMutationPending
+                && !_enhancementWorkspaceRefreshPending
+                && _enhancementWorkspaceGetCount == inventoryReadsBefore;
+            attempt++)
+        {
+            await Task.Delay(10);
+        }
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
         return true;
     }
@@ -10226,8 +10370,35 @@ public partial class MainWindow
                 AutomationProperties.GetName(
                     EnhancementJobsUpdateQueuedPromptsButton));
 
+    public bool QueuedPhotorealCurrentSettingsActionsForSmoke(string id)
+    {
+        EnhancementWorkspaceJobView? job =
+            _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+        EnhancementJobActionPresentation? action = job?.Action4;
+        return job is not null
+            && Equals(
+                EnhancementJobsUpdateQueuedPromptsButton.Content,
+                "待機中を現在設定へ")
+            && EnhancementJobsUpdateQueuedPromptsButton.IsEnabled
+            && action is not null
+            && action.Visible
+            && action.Enabled
+            && string.Equals(
+                action.Kind,
+                "update-prompts",
+                StringComparison.Ordinal)
+            && string.Equals(
+                action.Label,
+                "設定を更新",
+                StringComparison.Ordinal);
+    }
+
     public bool CurrentPhotorealEngineSupportsQueuedSettingsUpdateForSmoke
         => CurrentPhotorealEngineSupportsQueuedSettingsUpdate();
+
+    public void AllowLegacyInventoryFallbackForSmoke()
+        => _enhancementWorkspaceLastLegacyInventoryFallbackAt =
+            DateTimeOffset.UtcNow.Subtract(TimeSpan.FromSeconds(6));
 
     public async Task<bool> CancelAllQueuedEnhancementJobsForSmokeAsync()
     {
@@ -11238,7 +11409,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         CanRerunI2iV3 && PhotorealEnqueueNextCapabilitySafe;
     public bool CanEditI2iV3Settings => CanRerunI2iV3;
     private static bool IsQueuedPhotorealSettingsUpdateAdapter(string adapterId)
-        => adapterId == "comfyui-flux2-photoreal";
+        => adapterId is "comfyui-flux2-photoreal"
+            or "comfyui-krea2-anything2real-v3-photoreal"
+            or "comfyui-krea2-anime-to-real-edit-v1-photoreal";
 
     public static bool IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
         string adapterId)
@@ -12378,6 +12551,7 @@ internal readonly record struct EnhancementQueueHealthView(
     bool? Paused,
     bool QueueRecoveryRequired,
     bool QueuedPhotorealPromptUpdate,
+    bool QueuedKreaPhotorealSettingsUpdate,
     bool PhotorealEnqueueNext,
     bool KreaAnimeToRealV1,
     bool KreaAnythingToReal1536,
@@ -12388,6 +12562,7 @@ internal readonly record struct EnhancementQueueHealthView(
     bool TerminalHistoryBatchRetry,
     string InventorySignature,
     long? InventoryRevision,
+    long? CatalogRevision,
     string? CurrentJobId,
     int? CurrentProgress,
     DateTimeOffset? CurrentUpdatedAt);

@@ -60,6 +60,7 @@
       },
       "backendAvailability": {
         "kreaPhotorealV1": {
+          "queueHeadBlocked": false,
           "allQueuedJobsWaiting": false,
           "engines": [
             {
@@ -81,11 +82,11 @@
           ]
         }
       },
-        "capabilities": {
-          "deferredBackendSkipV1": true,
-          "fairGpuFamilyDispatchV1": true,
+      "capabilities": {
+        "deferredBackendSkipV1": false,
         "queuedPhotorealPromptUpdate": true,
         "queuedPhotorealSettingsUpdateV1": true,
+        "queuedKreaPhotorealSettingsUpdateV1": true,
         "terminalHistoryBatchDismissV1": true,
         "queuedJobsBatchCancelV1": true,
         "queuedJobsBatchReorderV1": true,

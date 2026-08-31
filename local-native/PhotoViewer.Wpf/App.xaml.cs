@@ -20351,6 +20351,8 @@ public partial class App : Application
                 bool canceledRetryCreated = false;
                 bool rerunCreated = false;
                 bool queueLaterFirst = false;
+                bool terminalHandoffApplied = false;
+                int preTerminalHandoffHealthReadsRemaining = 0;
                 TaskCompletionSource<bool>? queueMoveGate = null;
                 TaskCompletionSource<bool>? queueOrderRequestEntered = null;
                 long catalogRevision = 0;
@@ -20381,6 +20383,8 @@ public partial class App : Application
                 int healthProcessId = 1234;
                 string healthBuildId = "aibos-health-smoke";
                 bool queuePaused = false;
+                bool kreaQueueHeadBlocked = false;
+                bool kreaQueueHeadFixture = false;
                 var queueControlBodies = new List<string>();
                 string? openedOutput = null;
                 string? openedVideoOutput = null;
@@ -20391,6 +20395,7 @@ public partial class App : Application
                 bool photorealSeedCapabilityAvailable = true;
                 string queuedPromptUpdateBody = "";
                 var queuedPromptUpdateBodies = new List<(string Route, string Body)>();
+                string queuedSettingsAdapterId = "comfyui-flux2-photoreal";
                 var sourceInfo = new FileInfo(sourcePath);
                 double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
 
@@ -20446,7 +20451,9 @@ public partial class App : Application
                     int nativeFrameCount = 97,
                     string presetId = "wan22-ti2v-5b-normal-v1",
                     int steps = 20,
-                    object? sourceProducerJobId = null)
+                    object? sourceProducerJobId = null,
+                    string updatedAt = "2026-07-23T00:00:01.000Z",
+                    string? finishedAt = null)
                 {
                     var video = new Dictionary<string, object?>(
                         StringComparer.Ordinal)
@@ -20529,10 +20536,11 @@ public partial class App : Application
                         ["outputPath"] = output,
                         ["errorMessage"] = error,
                         ["createdAt"] = createdAt,
-                        ["updatedAt"] =
-                            "2026-07-23T00:00:01.000Z",
+                        ["updatedAt"] = updatedAt,
                         ["video"] = video,
                     };
+                    if (finishedAt is not null)
+                        job["finishedAt"] = finishedAt;
                     if (sourceProducerJobId is not null)
                         job["sourceProducerJobId"] = sourceProducerJobId;
                     return job;
@@ -20556,8 +20564,10 @@ public partial class App : Application
                     updatedAt = "2026-07-23T00:00:01.000Z",
                 };
 
-                object[] CurrentJobs()
+                object[] CurrentJobs(bool beforeTerminalHandoff = false)
                 {
+                    bool terminalHandoff =
+                        terminalHandoffApplied && !beforeTerminalHandoff;
                     string QueuedStatus(string id)
                         => allQueuedCanceled
                             || individuallyCanceledQueuedJobs.Contains(id)
@@ -20617,18 +20627,31 @@ public partial class App : Application
                             operation: "photoreal"),
                         VideoJob(
                             "active-job",
-                            activeCanceled ? "canceled" : "running",
-                            activeCanceled ? 43 : 42,
+                            terminalHandoff
+                                ? "succeeded"
+                                : activeCanceled ? "canceled" : "running",
+                            terminalHandoff ? 100 : activeCanceled ? 43 : 42,
+                            output: terminalHandoff ? videoOutputPath : null,
                             cancelRequested: activeCancelRequested,
-                            createdAt: "2026-07-23T00:00:01.000Z"),
+                            createdAt: "2026-07-23T00:00:01.000Z",
+                            updatedAt: terminalHandoff
+                                ? "2026-07-30T13:40:00.000Z"
+                                : "2026-07-23T00:00:01.000Z",
+                            finishedAt: terminalHandoff
+                                ? "2026-07-30T13:40:00.000Z"
+                                : null),
                         Job(
                             "queue-first-job",
-                            QueuedStatus("queue-first-job"),
-                            0,
+                            terminalHandoff
+                                ? "running"
+                                : QueuedStatus("queue-first-job"),
+                            terminalHandoff ? 2 : 0,
                             operation: "photoreal",
                             createdAt: "2026-07-23T00:00:02.000Z",
                             queueOrder: queueLaterFirst ? 1 : 0,
-                            adapter: "a1111-photoreal"),
+                            adapter: kreaQueueHeadFixture
+                                ? "comfyui-krea2-anything2real-v3-photoreal"
+                                : "a1111-photoreal"),
                         Job(
                             "done-job",
                             outputDeleted ? "deleted" : "succeeded",
@@ -20771,7 +20794,8 @@ public partial class App : Application
                             0,
                             operation: "photoreal",
                             createdAt: "2026-07-23T00:00:05.000Z",
-                            queueOrder: 4));
+                            queueOrder: 4,
+                            adapter: queuedSettingsAdapterId));
                     if (rerunCreated)
                         jobs.Insert(0, Job(
                             "rerun-job",
@@ -20779,7 +20803,8 @@ public partial class App : Application
                             0,
                             operation: "photoreal",
                             createdAt: "2026-07-23T00:00:06.000Z",
-                            queueOrder: 5));
+                            queueOrder: 5,
+                            adapter: queuedSettingsAdapterId));
                     if (bulkRetryCreated)
                         jobs.Insert(0, VideoJob(
                             "bulk-retry-job",
@@ -20835,7 +20860,7 @@ public partial class App : Application
                         .ToArray();
                 }
 
-                object CurrentHealth()
+                object CurrentHealth(bool beforeTerminalHandoff = false)
                 {
                     var counts = new Dictionary<string, int>(StringComparer.Ordinal)
                     {
@@ -20846,7 +20871,7 @@ public partial class App : Application
                         ["canceled"] = 0,
                         ["deleted"] = 0,
                     };
-                    foreach (object job in CurrentJobs())
+                    foreach (object job in CurrentJobs(beforeTerminalHandoff))
                     {
                         using JsonDocument jobDocument =
                             JsonDocument.Parse(JsonSerializer.Serialize(job));
@@ -20855,10 +20880,16 @@ public partial class App : Application
                         if (counts.ContainsKey(status))
                             counts[status]++;
                     }
+                    if (kreaQueueHeadBlocked)
+                    {
+                        counts["queued"] += counts["running"];
+                        counts["running"] = 0;
+                    }
 
                     var worker = new Dictionary<string, object?>(StringComparer.Ordinal)
                     {
-                        ["pumpRunning"] = counts["running"] + counts["queued"] > 0,
+                        ["pumpRunning"] = !kreaQueueHeadBlocked
+                            && counts["running"] + counts["queued"] > 0,
                         ["processWorkerInstanceId"] = "smoke-worker",
                         ["consecutiveWorkerFailures"] = 0,
                         ["lastWorkerError"] = null,
@@ -20873,6 +20904,13 @@ public partial class App : Application
                     {
                         capabilities["queuedPhotorealPromptUpdate"] = true;
                         capabilities["queuedPhotorealSettingsUpdateV1"] = true;
+                    }
+                    if (healthMode != "legacy-krea-settings-update")
+                    {
+                        capabilities["queuedKreaPhotorealSettingsUpdateV1"] =
+                            healthMode == "malformed-krea-settings-update"
+                                ? (object)"true"
+                                : true;
                     }
                     capabilities["photorealPromptControlsV2"] = true;
                     capabilities["kreaAnimeToRealV1"] = true;
@@ -20906,6 +20944,31 @@ public partial class App : Application
                             .Clone();
                         worker["pumpRunning"] = false;
                     }
+                    object backendAvailability = healthMode
+                        == "missing-krea-queue-head-blocked"
+                            ? new
+                            {
+                                kreaPhotorealV1 = new { },
+                            }
+                            : new
+                            {
+                                kreaPhotorealV1 = new
+                                {
+                                    queueHeadBlocked = healthMode
+                                        == "malformed-krea-queue-head-blocked"
+                                            ? (object)"true"
+                                            : kreaQueueHeadBlocked,
+                                },
+                            };
+                    var store = new Dictionary<string, object?>(
+                        StringComparer.Ordinal)
+                    {
+                        ["version"] = 1,
+                        ["inventoryRevision"] = healthInventoryRevision,
+                        ["queueOrderRevision"] = queueOrderRevision,
+                    };
+                    if (healthMode != "legacy-catalog-revision")
+                        store["catalogRevision"] = catalogRevision;
 
                     return new
                     {
@@ -20915,6 +20978,8 @@ public partial class App : Application
                         {
                             "unknown-status" => "future-health-state",
                             "unknown-issue" => "needs-attention",
+                            "krea-blocked-queued-without-pump" => "needs-attention",
+                            "non-loopback-server" => "needs-attention",
                             "h3-seal-missing" => "needs-attention",
                             _ => counts["running"] + counts["queued"] > 0
                                 ? "working"
@@ -20923,6 +20988,8 @@ public partial class App : Application
                         issues = healthMode switch
                         {
                             "unknown-issue" => ["future-health-issue"],
+                            "krea-blocked-queued-without-pump" => ["queued-without-pump"],
+                            "non-loopback-server" => ["non-loopback-server"],
                             "h3-seal-missing" => ["queued-without-pump"],
                             _ => Array.Empty<string>(),
                         },
@@ -20936,13 +21003,7 @@ public partial class App : Application
                             serverStartedAtUtc = healthServerStartedAtUtc,
                             processId = healthProcessId,
                         },
-                        store = new
-                        {
-                            version = 1,
-                            inventoryRevision = healthInventoryRevision,
-                            catalogRevision,
-                            queueOrderRevision,
-                        },
+                        store,
                         jobs = new
                         {
                             counts = new
@@ -20954,12 +21015,22 @@ public partial class App : Application
                                 canceled = counts["canceled"],
                                 deleted = counts["deleted"],
                             },
-                            current = (object?)null,
+                            current = terminalHandoffApplied
+                                && !beforeTerminalHandoff
+                                    ? new
+                                    {
+                                        id = "queue-first-job",
+                                        progress = 2,
+                                        updatedAt =
+                                            "2026-07-30T13:40:01.000Z",
+                                    }
+                                    : (object?)null,
                             lastClaimAt = healthLastClaimAt,
                             lastProgressAt = (string?)null,
                             lastTerminalAt = healthLastTerminalAt,
                         },
                         worker,
+                        backendAvailability,
                         capabilities,
                         comfyUi = new
                         {
@@ -21062,11 +21133,39 @@ public partial class App : Application
 
                 async Task<HttpResponseMessage> CurrentHealthResponseAsync()
                 {
-                    HttpResponseMessage response = healthMode != "missing"
-                        ? JsonResponse(HttpStatusCode.OK, CurrentHealth())
-                        : JsonResponse(
+                    HttpResponseMessage response;
+                    bool beforeTerminalHandoff = terminalHandoffApplied
+                        && preTerminalHandoffHealthReadsRemaining > 0;
+                    if (beforeTerminalHandoff)
+                        preTerminalHandoffHealthReadsRemaining--;
+                    if (healthMode == "missing")
+                    {
+                        response = JsonResponse(
                             HttpStatusCode.NotFound,
                             new { error = "health route unavailable" });
+                    }
+                    else if (healthMode == "duplicate-krea-queue-head-blocked")
+                    {
+                        string json = JsonSerializer.Serialize(
+                            CurrentHealth(beforeTerminalHandoff));
+                        json = json.Replace(
+                            "\"queueHeadBlocked\":false",
+                            "\"queueHeadBlocked\":false,\"queueHeadBlocked\":true",
+                            StringComparison.Ordinal);
+                        response = new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new StringContent(
+                                json,
+                                Encoding.UTF8,
+                                "application/json"),
+                        };
+                    }
+                    else
+                    {
+                        response = JsonResponse(
+                            HttpStatusCode.OK,
+                            CurrentHealth(beforeTerminalHandoff));
+                    }
                     int currentHealthGetCount = Interlocked.Increment(
                         ref healthGetCount);
                     TaskCompletionSource<bool>? gate = healthGetGate;
@@ -21741,10 +21840,10 @@ public partial class App : Application
                         .Where(static label => label.StartsWith("待機中 · ", StringComparison.Ordinal))
                         .All(static label => !label.Contains("%", StringComparison.Ordinal))
                     && initial.HeaderSummary.StartsWith(
-                        $"{initial.Total:N0}件 · 実行中 1 · 待機 3",
+                        $"キュー順で表示中 · {initial.Total:N0}件 · 実行中 1 · 待機 3",
                         StringComparison.Ordinal)
                     && !initial.HeaderSummary.Contains(" total ", StringComparison.Ordinal)
-                    && initial.Status == "実行順で表示中 · 履歴は最新 500件";
+                    && initial.Status == "キュー順で表示中 · 履歴は最新 500件";
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
@@ -21932,10 +22031,91 @@ public partial class App : Application
                         == afterTerminalSignaturePoll.HealthGetRequests + 2
                     && afterRestartSignaturePoll.Total
                         == afterTerminalSignaturePoll.Total;
+
+                healthInventoryRevision = 0;
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot beforeProgressRevision =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                healthInventoryRevision = 1;
+                await window.PollEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterProgressRevision =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool progressOnlyInventoryRevisionAvoidedFullRead =
+                    afterProgressRevision.GetRequests
+                        == beforeProgressRevision.GetRequests
+                    && afterProgressRevision.HealthGetRequests
+                        == beforeProgressRevision.HealthGetRequests + 1;
+
+                healthMode = "legacy-catalog-revision";
+                healthInventoryRevision = 10;
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot beforeLegacyFallback =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                window.AllowLegacyInventoryFallbackForSmoke();
+                healthInventoryRevision = 11;
+                int requestsBeforeLegacyFallback = requests.Count;
+                await window.PollEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterLegacyFallback =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                healthInventoryRevision = 12;
+                await window.PollEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterThrottledLegacyPoll =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool legacyInventoryFallbackThrottled =
+                    afterLegacyFallback.GetRequests
+                        == beforeLegacyFallback.GetRequests + 1
+                    && afterLegacyFallback.HealthGetRequests
+                        == beforeLegacyFallback.HealthGetRequests + 2
+                    && afterThrottledLegacyPoll.GetRequests
+                        == afterLegacyFallback.GetRequests
+                    && afterThrottledLegacyPoll.HealthGetRequests
+                        == afterLegacyFallback.HealthGetRequests + 1
+                    && requests.Skip(requestsBeforeLegacyFallback).All(
+                        static request => request.StartsWith(
+                            "GET ",
+                            StringComparison.Ordinal));
+                healthMode = "available";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot beforeTerminalHandoff =
+                    window.EnhancementJobsWorkspaceForSmoke();
+
+                int requestsBeforeTerminalHandoff = requests.Count;
+                terminalHandoffApplied = true;
+                preTerminalHandoffHealthReadsRemaining = 1;
+                healthInventoryRevision = 13;
+                catalogRevision++;
+                await window.PollEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterTerminalHandoff =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("completed");
+                EnhancementJobsWorkspaceSmokeSnapshot
+                    completedAfterTerminalHandoff =
+                        window.EnhancementJobsWorkspaceForSmoke();
+                string[] terminalHandoffRequests = requests
+                    .Skip(requestsBeforeTerminalHandoff)
+                    .ToArray();
+                bool catalogRevisionTerminalHandoffRefreshBounded =
+                    afterTerminalHandoff.GetRequests
+                        == beforeTerminalHandoff.GetRequests + 2
+                    && afterTerminalHandoff.HealthGetRequests
+                        == beforeTerminalHandoff.HealthGetRequests + 3
+                    && afterTerminalHandoff.VisibleIds.FirstOrDefault()
+                        == "queue-first-job"
+                    && afterTerminalHandoff.VisibleStatusLabels.FirstOrDefault()
+                        ?.StartsWith("処理中", StringComparison.Ordinal) == true
+                    && completedAfterTerminalHandoff.VisibleIds.FirstOrDefault()
+                        == "active-job"
+                    && terminalHandoffRequests.All(static request =>
+                        request.StartsWith("GET ", StringComparison.Ordinal));
+                window.SelectEnhancementJobsFilterForSmoke("all");
+                terminalHandoffApplied = false;
+                healthInventoryRevision = 14;
+                catalogRevision++;
+                await window.RefreshEnhancementJobsForSmokeAsync();
                 int getsBeforeHealthInventoryRace =
-                    afterRestartSignaturePoll.GetRequests;
+                    window.EnhancementJobsWorkspaceForSmoke().GetRequests;
                 int healthGetsBeforeHealthInventoryRace =
-                    afterRestartSignaturePoll.HealthGetRequests;
+                    window.EnhancementJobsWorkspaceForSmoke().HealthGetRequests;
                 jobsGetEntered = new TaskCompletionSource<bool>(
                     TaskCreationOptions.RunContinuationsAsynchronously);
                 jobsGetGate = new TaskCompletionSource<bool>(
@@ -22010,6 +22190,109 @@ public partial class App : Application
                 bool unknownIssueSafe = unknownIssueHealth.HealthState == "確認が必要"
                     && unknownIssueHealth.HealthDetail == "処理待ち列の確認が必要です。"
                     && unknownIssueHealth.Total == initial.Total;
+                int requestsBeforeKreaQueueHeadBlocked = requests.Count;
+                kreaQueueHeadFixture = true;
+                kreaQueueHeadBlocked = true;
+                healthMode = "available";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot kreaQueueHeadBlockedHealth =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                string[] kreaQueueHeadBlockedRequests = requests
+                    .Skip(requestsBeforeKreaQueueHeadBlocked)
+                    .ToArray();
+                bool kreaQueueHeadBlockedVisible =
+                    kreaQueueHeadBlockedHealth.HealthState == "処理中"
+                    && kreaQueueHeadBlockedHealth.HealthDetail
+                        == "先頭の実写化はエンジン準備待ちです。後続の動画化は開始しません。"
+                    && kreaQueueHeadBlockedHealth.QueuePaused == false
+                    && kreaQueueHeadBlockedHealth.QueuePauseLabel == "一時停止"
+                    && kreaQueueHeadBlockedHealth.QueuePauseEnabled
+                    && kreaQueueHeadBlockedHealth.Total == initial.Total;
+                bool kreaQueueHeadBlockedPassive =
+                    kreaQueueHeadBlockedRequests.Length >= 2
+                    && kreaQueueHeadBlockedRequests.All(static request =>
+                        request is "GET /api/enhance/jobs"
+                            or "GET /api/enhance/health")
+                    && kreaQueueHeadBlockedRequests.Contains(
+                        "GET /api/enhance/health",
+                        StringComparer.Ordinal);
+                healthMode = "krea-blocked-queued-without-pump";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot intentionalKreaQueueWait =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool intentionalKreaQueueWaitNotRecovery =
+                    intentionalKreaQueueWait.HealthDetail
+                        == "先頭の実写化はエンジン準備待ちです。後続の動画化は開始しません。"
+                    && intentionalKreaQueueWait.QueuePaused == false
+                    && intentionalKreaQueueWait.QueuePauseLabel == "一時停止"
+                    && intentionalKreaQueueWait.QueuePauseEnabled;
+                healthMode = "non-loopback-server";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot blockedWithTrustIssue =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool kreaQueueHeadDoesNotHideTrustIssue =
+                    blockedWithTrustIssue.HealthState == "確認が必要"
+                    && blockedWithTrustIssue.HealthDetail
+                        == "ローカルAIサービスがこのPC内だけの接続に限定されていません。"
+                    && blockedWithTrustIssue.QueuePauseLabel == "一時停止";
+                kreaQueueHeadFixture = false;
+                healthMode = "krea-blocked-queued-without-pump";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot mismatchedKreaQueueHead =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool mismatchedKreaQueueHeadDoesNotSuppressRecovery =
+                    mismatchedKreaQueueHead.HealthState == "確認が必要"
+                    && mismatchedKreaQueueHead.HealthDetail
+                        == "待機中の処理を開始する実行役が動いていません。"
+                    && mismatchedKreaQueueHead.QueuePauseLabel == "再開"
+                    && mismatchedKreaQueueHead.QueuePauseEnabled;
+                kreaQueueHeadBlocked = false;
+                healthMode = "malformed-krea-queue-head-blocked";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot malformedKreaQueueHeadBlocked =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool malformedKreaQueueHeadBlockedCompatible =
+                    malformedKreaQueueHeadBlocked.HealthState == "処理中"
+                    && malformedKreaQueueHeadBlocked
+                        .QueuedPhotorealPromptUpdateSupported
+                    && malformedKreaQueueHeadBlocked
+                        .PhotorealEnqueueNextSupported
+                    && !malformedKreaQueueHeadBlocked.HealthDetail.Contains(
+                        "エンジン準備待ち",
+                        StringComparison.Ordinal)
+                    && malformedKreaQueueHeadBlocked.Total == initial.Total
+                    && malformedKreaQueueHeadBlocked.Active == initial.Active;
+                healthMode = "missing-krea-queue-head-blocked";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot missingKreaQueueHeadBlocked =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool missingKreaQueueHeadBlockedCompatible =
+                    missingKreaQueueHeadBlocked.HealthState == "処理中"
+                    && missingKreaQueueHeadBlocked
+                        .QueuedPhotorealPromptUpdateSupported
+                    && missingKreaQueueHeadBlocked
+                        .PhotorealEnqueueNextSupported
+                    && !missingKreaQueueHeadBlocked.HealthDetail.Contains(
+                        "エンジン準備待ち",
+                        StringComparison.Ordinal)
+                    && missingKreaQueueHeadBlocked.Total == initial.Total
+                    && missingKreaQueueHeadBlocked.Active == initial.Active;
+                healthMode = "duplicate-krea-queue-head-blocked";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot duplicateKreaQueueHeadBlocked =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool duplicateKreaQueueHeadBlockedCompatible =
+                    duplicateKreaQueueHeadBlocked.HealthState == "処理中"
+                    && duplicateKreaQueueHeadBlocked
+                        .QueuedPhotorealPromptUpdateSupported
+                    && duplicateKreaQueueHeadBlocked
+                        .PhotorealEnqueueNextSupported
+                    && !duplicateKreaQueueHeadBlocked.HealthDetail.Contains(
+                        "エンジン準備待ち",
+                        StringComparison.Ordinal)
+                    && duplicateKreaQueueHeadBlocked.Total == initial.Total
+                    && duplicateKreaQueueHeadBlocked.Active == initial.Active;
                 healthMode = "h3-seal-missing";
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot missingH3SealHealth =
@@ -22863,6 +23146,7 @@ public partial class App : Application
                         "rerun-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterQueuedPromptUpdate =
                     window.EnhancementJobsWorkspaceForSmoke();
+                string fluxQueuedPromptUpdateBody = queuedPromptUpdateBody;
                 int promptUpdateCountBeforeBulk = queuedPromptUpdateBodies.Count;
                 bool bulkPromptControlReady =
                     window.UpdateAllQueuedPhotorealPromptsControlForSmoke;
@@ -22872,6 +23156,112 @@ public partial class App : Application
                     queuedPromptUpdateBodies.Skip(promptUpdateCountBeforeBulk).ToArray();
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkPromptUpdate =
                     window.EnhancementJobsWorkspaceForSmoke();
+                fluxQueuedPromptUpdateBody = queuedPromptUpdateBody;
+
+                queuedSettingsAdapterId =
+                    "comfyui-krea2-anything2real-v3-photoreal";
+                window.SelectPhotorealEngineForSmoke(queuedSettingsAdapterId);
+                healthMode = "legacy-krea-settings-update";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot legacyKreaSettingsHealth =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                var legacyKreaSettingsView =
+                    window.EnhancementJobViewIdentityForSmoke("rerun-job")
+                        as EnhancementWorkspaceJobView;
+                bool legacyKreaSettingsCapabilitySafe =
+                    legacyKreaSettingsHealth.HealthState == "処理中"
+                    && legacyKreaSettingsHealth
+                        .QueuedPhotorealPromptUpdateSupported
+                    && legacyKreaSettingsView is
+                        { CanUpdatePhotorealPrompts: false }
+                    && !window.QueuedPhotorealCurrentSettingsActionsForSmoke(
+                        "rerun-job");
+                healthMode = "malformed-krea-settings-update";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                var malformedKreaSettingsView =
+                    window.EnhancementJobViewIdentityForSmoke("rerun-job")
+                        as EnhancementWorkspaceJobView;
+                bool malformedKreaSettingsCapabilitySafe =
+                    window.EnhancementJobsWorkspaceForSmoke().HealthState
+                        == "処理中"
+                    && malformedKreaSettingsView is
+                        { CanUpdatePhotorealPrompts: false }
+                    && !window.QueuedPhotorealCurrentSettingsActionsForSmoke(
+                        "rerun-job");
+                healthMode = "available";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot beforeKreaSettingsUpdate =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool kreaAnythingCurrentSettingsActionsVisible =
+                    window.CurrentPhotorealEngineSupportsQueuedSettingsUpdateForSmoke
+                    && EnhancementWorkspaceJobView
+                        .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
+                            queuedSettingsAdapterId)
+                    && window.QueuedPhotorealCurrentSettingsActionsForSmoke(
+                        "rerun-job");
+                int kreaPromptUpdateCountBefore = queuedPromptUpdateBodies.Count;
+                bool kreaSingleSettingsUpdateIssued =
+                    await window.UpdateQueuedPhotorealPromptsForSmokeAsync(
+                        "rerun-job");
+                int kreaBulkSettingsEligibleCount =
+                    await window.UpdateAllQueuedPhotorealPromptsForSmokeAsync();
+                (string Route, string Body)[] kreaSettingsUpdates =
+                    queuedPromptUpdateBodies
+                        .Skip(kreaPromptUpdateCountBefore)
+                        .ToArray();
+                EnhancementJobsWorkspaceSmokeSnapshot afterKreaSettingsUpdate =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool kreaCurrentSettingsMutationContract =
+                    kreaSingleSettingsUpdateIssued
+                    && kreaBulkSettingsEligibleCount == 2
+                    && kreaSettingsUpdates.Length == 3
+                    && kreaSettingsUpdates.Count(static update =>
+                        update.Route == "/api/enhance/jobs/rerun-job/prompts") == 2
+                    && kreaSettingsUpdates.Count(static update =>
+                        update.Route
+                            == "/api/enhance/jobs/canceled-retry-job/prompts") == 1
+                    && kreaSettingsUpdates.All(static update =>
+                    {
+                        using JsonDocument document =
+                            JsonDocument.Parse(update.Body);
+                        JsonElement body = document.RootElement;
+                        return body.EnumerateObject().Count() == 8
+                            && body.GetProperty("loraEnabled").GetBoolean()
+                            && !body.TryGetProperty("adapterId", out _);
+                    })
+                    && afterKreaSettingsUpdate.VisibleIds.SequenceEqual(
+                        beforeKreaSettingsUpdate.VisibleIds,
+                        StringComparer.Ordinal);
+
+                window.SelectPhotorealEngineForSmoke(
+                    "comfyui-krea2-anime-to-real-edit-v1-photoreal");
+                var mismatchedKreaSettingsView =
+                    window.EnhancementJobViewIdentityForSmoke("rerun-job")
+                        as EnhancementWorkspaceJobView;
+                bool kreaCurrentSettingsAdapterMatchFailClosed =
+                    mismatchedKreaSettingsView is
+                        { CanUpdatePhotorealPrompts: false }
+                    && !window.QueuedPhotorealCurrentSettingsActionsForSmoke(
+                        "rerun-job");
+                queuedSettingsAdapterId =
+                    "comfyui-krea2-anime-to-real-edit-v1-photoreal";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                bool kreaAnimeCurrentSettingsActionsVisible =
+                    window.CurrentPhotorealEngineSupportsQueuedSettingsUpdateForSmoke
+                    && EnhancementWorkspaceJobView
+                        .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
+                            queuedSettingsAdapterId)
+                    && window.QueuedPhotorealCurrentSettingsActionsForSmoke(
+                        "rerun-job")
+                    && !EnhancementWorkspaceJobView
+                        .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
+                            "a1111-photoreal")
+                    && !EnhancementWorkspaceJobView
+                        .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
+                            "comfyui-future-photoreal-v9");
+                queuedSettingsAdapterId = "comfyui-flux2-photoreal";
+                window.SelectPhotorealEngineForSmoke(queuedSettingsAdapterId);
+                await window.RefreshEnhancementJobsForSmokeAsync();
                 window.ConfigurePhotorealSeedForSmoke(
                     fixedMode: true,
                     value: "2147483648");
@@ -23709,10 +24099,10 @@ public partial class App : Application
                             .GetString() == "next";
                 }
                 bool queuedPromptUpdateContract = false;
-                if (!string.IsNullOrWhiteSpace(queuedPromptUpdateBody))
+                if (!string.IsNullOrWhiteSpace(fluxQueuedPromptUpdateBody))
                 {
                     using JsonDocument updateDocument =
-                        JsonDocument.Parse(queuedPromptUpdateBody);
+                        JsonDocument.Parse(fluxQueuedPromptUpdateBody);
                     JsonElement body = updateDocument.RootElement;
                     queuedPromptUpdateContract =
                         body.EnumerateObject().Count() == 8
@@ -23783,6 +24173,9 @@ public partial class App : Application
                     && catalogRevisionRefreshesSameCountInventory
                     && terminalSignatureRefreshesSameCountInventory
                     && companionRestartRefreshesInventory
+                    && progressOnlyInventoryRevisionAvoidedFullRead
+                    && legacyInventoryFallbackThrottled
+                    && catalogRevisionTerminalHandoffRefreshBounded
                     && healthSignatureNeverBoundToStaleInventory
                     && mutationRefreshDebtContract
                     && legacyPromptUpdateCapabilitySafe
@@ -23790,6 +24183,14 @@ public partial class App : Application
                     && legacyHealthFallback
                     && futureHealthFallback
                     && unknownIssueSafe
+                    && kreaQueueHeadBlockedVisible
+                    && kreaQueueHeadBlockedPassive
+                    && intentionalKreaQueueWaitNotRecovery
+                    && kreaQueueHeadDoesNotHideTrustIssue
+                    && mismatchedKreaQueueHeadDoesNotSuppressRecovery
+                    && malformedKreaQueueHeadBlockedCompatible
+                    && missingKreaQueueHeadBlockedCompatible
+                    && duplicateKreaQueueHeadBlockedCompatible
                     && h3SealRecoveryAction
                     && healthRecovered
                     && queuePauseContract
@@ -23869,6 +24270,12 @@ public partial class App : Application
                         "rerun-job",
                         StringComparer.Ordinal)
                     && bulkQueuedPromptUpdateContract
+                    && legacyKreaSettingsCapabilitySafe
+                    && malformedKreaSettingsCapabilitySafe
+                    && kreaAnythingCurrentSettingsActionsVisible
+                    && kreaAnimeCurrentSettingsActionsVisible
+                    && kreaCurrentSettingsAdapterMatchFailClosed
+                    && kreaCurrentSettingsMutationContract
                     && afterBulkPromptUpdate.Total == afterQueuedPromptUpdate.Total
                     && afterBulkPromptUpdate.Active == afterQueuedPromptUpdate.Active
                     && clearQueuedIssued
@@ -23930,6 +24337,11 @@ public partial class App : Application
                     afterTerminalSignaturePoll,
                     companionRestartRefreshesInventory,
                     afterRestartSignaturePoll,
+                    progressOnlyInventoryRevisionAvoidedFullRead,
+                    legacyInventoryFallbackThrottled,
+                    catalogRevisionTerminalHandoffRefreshBounded,
+                    afterTerminalHandoff,
+                    completedAfterTerminalHandoff,
                     healthSignatureNeverBoundToStaleInventory,
                     mutationRefreshDebtContract,
                     afterHealthInventoryRaceReconcile,
@@ -23938,6 +24350,14 @@ public partial class App : Application
                     legacyHealthFallback,
                     futureHealthFallback,
                     unknownIssueSafe,
+                    kreaQueueHeadBlockedVisible,
+                    kreaQueueHeadBlockedPassive,
+                    intentionalKreaQueueWaitNotRecovery,
+                    kreaQueueHeadDoesNotHideTrustIssue,
+                    mismatchedKreaQueueHeadDoesNotSuppressRecovery,
+                    malformedKreaQueueHeadBlockedCompatible,
+                    missingKreaQueueHeadBlockedCompatible,
+                    duplicateKreaQueueHeadBlockedCompatible,
                     h3SealRecoveryAction,
                     healthRecovered,
                     queuePauseContract,
@@ -23998,6 +24418,12 @@ public partial class App : Application
                     queuedPromptUpdateIssued,
                     queuedPromptUpdateContract,
                     bulkQueuedPromptUpdateContract,
+                    legacyKreaSettingsCapabilitySafe,
+                    malformedKreaSettingsCapabilitySafe,
+                    kreaAnythingCurrentSettingsActionsVisible,
+                    kreaAnimeCurrentSettingsActionsVisible,
+                    kreaCurrentSettingsAdapterMatchFailClosed,
+                    kreaCurrentSettingsMutationContract,
                     afterQueuedPromptUpdate,
                     protectedQueuedClearContract,
                     queuedCancelSnapshotContract,

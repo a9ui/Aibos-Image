@@ -1754,7 +1754,8 @@ public partial class MainWindow
         _photorealEngineId = NormalizePhotorealEngineId(requested);
         SyncModalPhotorealSettingsControls();
         ApplyQueuedPhotorealPromptUpdateCapability(
-            _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported);
+            _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported,
+            _enhancementWorkspaceQueuedKreaPhotorealSettingsUpdateSupported);
         SetPhotorealSettingsStatus(_photorealEngineId switch
         {
             KreaV3PhotorealEngineId =>
@@ -1864,8 +1865,26 @@ public partial class MainWindow
             SaveState();
     }
 
+    private static bool IsQueuedPhotorealSettingsUpdateEngine(string? engineId)
+        => engineId is DefaultPhotorealEngineId
+            or KreaV3PhotorealEngineId
+            or KreaAnimeToRealV1PhotorealEngineId;
+
     private bool CurrentPhotorealEngineSupportsQueuedSettingsUpdate()
-        => _photorealEngineId == DefaultPhotorealEngineId;
+        => IsQueuedPhotorealSettingsUpdateEngine(_photorealEngineId);
+
+    private bool CurrentPhotorealEngineMatchesQueuedSettingsUpdateJob(
+        string adapterId)
+        => IsQueuedPhotorealSettingsUpdateEngine(_photorealEngineId)
+            && string.Equals(
+                _photorealEngineId,
+                adapterId,
+                StringComparison.Ordinal);
+
+    private static bool QueuedPhotorealSettingsUpdateRequiresKreaCapability(
+        string adapterId)
+        => adapterId is KreaV3PhotorealEngineId
+            or KreaAnimeToRealV1PhotorealEngineId;
 
     private static void SelectPhotorealEngine(
         ComboBox comboBox,

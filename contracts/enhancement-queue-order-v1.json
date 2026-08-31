@@ -74,59 +74,72 @@
       "strength": "number from 0.2 to 0.8",
       "steps": "integer from 4 to 12",
       "cfgScale": "number from 1 to 2",
-      "maxDimension": "one of 512, 640, 768, 1024, or 1280",
+      "maxDimension": "one of 512, 640, 768, 1024, or 1280; 1536 is also allowed only for an exact comfyui-krea2-anything2real-v3-photoreal row when kreaAnythingToReal1536V1 is exactly true",
       "seed": "integer from 0 to 2147483647, or null to request a new server-owned random seed"
     },
-    "appliesTo": "queued photoreal jobs using comfyui-flux2-photoreal only",
+    "adapterIds": [
+      "comfyui-flux2-photoreal",
+      "comfyui-krea2-anything2real-v3-photoreal",
+      "comfyui-krea2-anime-to-real-edit-v1-photoreal"
+    ],
+    "appliesTo": "a queued photoreal job whose exact adapterId is in adapterIds and exactly matches the WPF current photoreal engine",
     "updates": "preset.denoise and the exact current prompt, negativePrompt, LoRA, steps, CFG, work resolution, and seed options; then presetHash and updatedAt",
+    "adapterSemantics": {
+      "comfyui-flux2-photoreal": "preserve the accepted FLUX queued-settings normalization",
+      "comfyui-krea2-anything2real-v3-photoreal": "normalize Engine LoRA enabled with strength 1 and kvCache true; derive denoise from the bounded request strength and accept the bounded request steps and cfgScale",
+      "comfyui-krea2-anime-to-real-edit-v1-photoreal": "normalize Engine LoRA enabled with strength 1, kvCache true, denoise 100, steps 8, and cfgScale 1 regardless of generic compatibility inputs"
+    },
+    "invalidAdapterSettings": "maxDimension 1536 is accepted only for the exact comfyui-krea2-anything2real-v3-photoreal row under kreaAnythingToReal1536V1; Anime-to-Real, FLUX, unknown adapters, or missing capability return conflict and write nothing",
     "perSourcePrompt": "the WPF resolves enabled PNG metadata prompt mappings separately for each source before sending the body",
     "preserves": [
       "job id",
       "status",
       "queueOrder",
       "source identity",
+      "adapter identity",
       "unknown additive preset fields"
     ],
     "sharesClaimLock": true,
     "afterClaim": "return conflict without changing the running job",
     "wakesWorker": false,
-    "legacyReader": "a WPF reader must require capabilities.queuedPhotorealSettingsUpdateV1 before sending the extended body"
+    "readerCapabilityGate": "a WPF reader requires capabilities.queuedPhotorealSettingsUpdateV1 for every adapterId; each Krea adapter additionally requires capabilities.queuedKreaPhotorealSettingsUpdateV1 exactly true so an older FLUX-only writer remains compatible and fail-closed",
+    "invalidKreaCapability": "missing, false, null, malformed, or duplicate queuedKreaPhotorealSettingsUpdateV1 blocks only Krea current-settings actions without hiding health, Jobs, or the compatible FLUX action"
   },
   "deferredBackendSkipV1": {
     "capability": "capabilities.deferredBackendSkipV1 is exactly true",
-    "appliesTo": "a queued executable job whose recognized adapter backend is temporarily unavailable",
+    "appliesTo": "only a queued executable job whose exact adapterId is a member of recognizedOptionalAdapterIds and whose recognized optional non-Krea backend is temporarily unavailable; the capability alone never makes an adapter deferrable",
+    "recognizedOptionalAdapterIds": [],
+    "currentClassification": "schema version 1 classifies no adapter as deferrable; adding one requires an accepted contract revision with an exact bounded adapterId",
     "blockedRow": "remain queued at the exact durable queueOrder with no presentation reorder, payload update, retry, cancellation, timestamp update, or other mutation",
-    "executionSelection": "skip unavailable-backend rows only while selecting execution work and claim the earliest later runnable row in reader ordering",
+    "executionSelection": "skip only an exact recognizedOptionalAdapterIds member while selecting execution work and claim the earliest later runnable row in reader ordering",
     "allBlocked": "when every active queued row is waiting for an unavailable backend, stop the pump intentionally without reporting queued-without-pump",
     "readyTransition": "when the backend becomes ready, claim the row from its original queue position on the next explicit pump, recover, resume, enqueue action, or Companion restart",
     "passiveReads": "health and Jobs reads may report bounded readiness and waiting counts but never enqueue, wake, claim, retry, reorder, mutate, start a worker, or monitor external assets",
     "pause": "a paused queue claims nothing even when a deferred backend becomes ready; resume preserves the original ordering",
-    "kreaAdapters": [
+    "excludedStrictFifoBarrierAdapters": [
       "comfyui-krea2-anything2real-v3-photoreal",
       "comfyui-krea2-anime-to-real-edit-v1-photoreal"
-    ]
+    ],
+    "unknownOrFutureAdapter": "never skip; preserve the row and fail closed at its visible queue position"
   },
-  "fairGpuFamilyDispatchV1": {
-    "capability": "capabilities.fairGpuFamilyDispatchV1 is exactly true",
-    "scope": "the single shared GPU lane only; the dormant CPU Video Trim lane is excluded",
-    "families": {
-      "image": [
-        "upscale",
-        "photoreal",
-        "i2i"
-      ],
-      "video": [
-        "GPU-backed video"
-      ]
-    },
-    "selection": "when both families have runnable work, claim the earliest runnable job from the family opposite the most recently started exact GPU job; otherwise claim the earliest runnable job in reader ordering",
-    "familyFifo": "within the selected family, preserve reader ordering and never rewrite queueOrder",
-    "durableCursor": "derive the previous family from the latest valid startedAt across exact GPU jobs, using id as a stable equal-timestamp tie-breaker; do not add or passively write scheduler state",
-    "unavailableBackend": "apply deferred-backend skip before family selection so an unavailable Krea row stays byte-equivalent while a later runnable image remains eligible",
-    "strictBarrier": "never select across an unavailable adapter that is explicitly classified as a strict FIFO barrier",
-    "starvationBound": "while both families remain runnable, no family starts two consecutive GPU jobs",
-    "restartAndRecovery": "the derived cursor survives restart and recovery without requeue, reorder, retry, or timestamp mutation",
-    "singleGpu": "claim and adapter execution remain inside the existing one physical cross-process GPU lease; fairness never creates a second worker"
+  "strictVisibleGlobalFifoV1": {
+    "authority": "readerOrdering is the single visible global order and the default execution-selection order across image and video jobs",
+    "claim": "under the shared claim lock, select the first queued row in readerOrdering without operation-family alternation; only deferredBackendSkipV1's exact bounded recognizedOptionalAdapterIds exception may select a later row",
+    "presentation": "never present a family-fair or runnable-only order that differs from durable queueOrder",
+    "runningJob": "a running row remains first for presentation and is never preempted; strict FIFO governs the next queued claim",
+    "restartAndRecovery": "restart and recovery use the same durable readerOrdering without a scheduler cursor or passive state write",
+    "singleGpu": "claim and adapter execution remain inside the existing one physical cross-process GPU lease"
+  },
+  "kreaPhotorealStrictFifoBarrierV1": {
+    "adapterIds": [
+      "comfyui-krea2-anything2real-v3-photoreal",
+      "comfyui-krea2-anime-to-real-edit-v1-photoreal"
+    ],
+    "recognition": "exact single operation=photoreal and exact single adapterId member recognized by the current Companion",
+    "unavailableQueueHead": "leave the queued row byte-equivalent at its durable queueOrder, claim no later job including video, and stop the pump intentionally until an explicit readiness transition trigger",
+    "healthIssue": "the intentional unavailable-head stop sets backendAvailability.kreaPhotorealV1.queueHeadBlocked true and does not by itself report queued-without-pump or require queue recovery",
+    "unknownOrMalformed": "never treat an unknown, future, duplicate, or malformed row as a skippable Krea row",
+    "passiveProjection": "backendAvailability.kreaPhotorealV1.queueHeadBlocked reports the bounded barrier state under PV-ENHANCE-HEALTH-001 and never changes it"
   },
   "atomicImageEnqueueNext": {
     "route": "POST /api/enhance/jobs",
@@ -198,7 +211,7 @@
     "normalization": "after a queue mutation, persist contiguous queueOrder values starting at zero"
   },
   "workerRules": {
-    "claim": "apply fairGpuFamilyDispatchV1 when advertised, otherwise claim the first queued job in reader ordering",
+    "claim": "claim the first queued job in reader ordering; claim no later job when that row is an unavailable recognized Krea strict FIFO barrier, and apply deferredBackendSkipV1 only to an exact member of its bounded recognizedOptionalAdapterIds",
     "singleWorker": true,
     "pauseAndClaimShareOneLock": true,
     "currentJobFinishesWhenPaused": true,
