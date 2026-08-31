@@ -59,13 +59,15 @@ try {
     Assert-True ($result.unicodeITextRead -eq $true) 'Uncompressed Unicode iTXt parameters were not read consistently.'
     Assert-True ($result.comfyGraphRead -eq $true) 'Legacy ComfyUI prompt graph metadata was not recovered consistently.'
     Assert-True ($result.comfyLoraOffRead -eq $true) 'A LoRA-off ComfyUI graph did not remain explicitly LoRA-off.'
+    Assert-True ($result.kreaComfyGraphRead -eq $true) 'Krea ComfyUI prompt graph metadata was not recovered consistently.'
+    Assert-True ($result.kreaComfyDriftRejected -eq $true) 'A drifted hybrid Krea graph was accepted as exact metadata.'
     Assert-True ($result.parametersOverrideComfy -eq $true) 'A ComfyUI graph overrode the authoritative parameters chunk.'
     Assert-True ($result.validCopySurface -eq $true) 'PNG metadata copy actions were not distinct and available.'
     Assert-True ($result.missingCopySurface -eq $true) 'Unavailable PNG metadata left unusable copy actions visible.'
 
     [pscustomobject]@{
         allPassed = $true
-        message = 'Catalog, Preview, Modal, and Copy agree for A1111 parameters and legacy ComfyUI prompt graphs.'
+        message = 'Catalog, Preview, Modal, and Copy agree for A1111 parameters plus FLUX and Krea ComfyUI prompt graphs.'
         processId = $process.Id
         duplicateCatalogPrompt = $result.duplicateCatalogPrompt
         emptyFirstCatalogPrompt = $result.emptyFirstCatalogPrompt
@@ -74,6 +76,8 @@ try {
         unicodeITextRead = $result.unicodeITextRead
         comfyGraphRead = $result.comfyGraphRead
         comfyLoraOffRead = $result.comfyLoraOffRead
+        kreaComfyGraphRead = $result.kreaComfyGraphRead
+        kreaComfyDriftRejected = $result.kreaComfyDriftRejected
         parametersOverrideComfy = $result.parametersOverrideComfy
         validCopySurface = $result.validCopySurface
         missingCopySurface = $result.missingCopySurface

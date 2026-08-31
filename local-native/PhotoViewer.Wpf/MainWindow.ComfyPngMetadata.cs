@@ -6,6 +6,18 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
+    private enum ComfyPromptGraphPipeline
+    {
+        Flux2,
+        KreaEdit,
+    }
+
+    private sealed record KreaConditioningIdentity(
+        string NodeId,
+        string ClipNodeId,
+        string VaeNodeId,
+        string ImageNodeId);
+
     private const int MaxComfyPromptGraphNodes = 256;
     private const int MaxComfyPromptGraphBytes = 256 * 1024;
     private const int MaxComfyPromptCharacters = 16 * 1024;
@@ -41,6 +53,7 @@ public partial class MainWindow
             JsonElement? guiderNode = null;
             JsonElement? samplerSelectNode = null;
             JsonElement? schedulerNode = null;
+            ComfyPromptGraphPipeline? pipeline = null;
             foreach (JsonProperty property in graph.EnumerateObject())
             {
                 JsonElement candidate = property.Value;
@@ -79,11 +92,20 @@ public partial class MainWindow
                         graph,
                         candidateSamplerNode,
                         "sigmas",
-                        "Flux2Scheduler",
+                        expectedClass: null,
                         out JsonElement candidateScheduler))
                 {
                     continue;
                 }
+
+                ComfyPromptGraphPipeline? candidatePipeline =
+                    NodeHasClass(candidateScheduler, "Flux2Scheduler")
+                        ? ComfyPromptGraphPipeline.Flux2
+                        : NodeHasClass(candidateScheduler, "BetaSamplingScheduler")
+                            ? ComfyPromptGraphPipeline.KreaEdit
+                            : null;
+                if (!candidatePipeline.HasValue)
+                    continue;
 
                 // Multiple complete output pipelines are ambiguous. Do not
                 // guess which branch produced the displayed PNG.
@@ -94,6 +116,7 @@ public partial class MainWindow
                 guiderNode = candidateGuider;
                 samplerSelectNode = candidateSampler;
                 schedulerNode = candidateScheduler;
+                pipeline = candidatePipeline;
             }
 
             if (!samplerNode.HasValue
@@ -101,16 +124,21 @@ public partial class MainWindow
                 || !guiderNode.HasValue
                 || !samplerSelectNode.HasValue
                 || !schedulerNode.HasValue
+                || !pipeline.HasValue
                 || !TryResolveConditioningText(
                     graph,
                     guiderNode.Value,
                     "positive",
-                    out string positive)
+                    pipeline.Value,
+                    out string positive,
+                    out KreaConditioningIdentity? positiveIdentity)
                 || !TryResolveConditioningText(
                     graph,
                     guiderNode.Value,
                     "negative",
-                    out string negative)
+                    pipeline.Value,
+                    out string negative,
+                    out KreaConditioningIdentity? negativeIdentity)
                 || string.IsNullOrWhiteSpace(positive)
                 || positive.Length > MaxComfyPromptCharacters
                 || negative.Length > MaxComfyPromptCharacters
@@ -125,53 +153,90 @@ public partial class MainWindow
             {
                 return null;
             }
+            if (pipeline.Value == ComfyPromptGraphPipeline.KreaEdit
+                && (positiveIdentity is null
+                    || negativeIdentity is null
+                    || string.Equals(
+                        positiveIdentity.NodeId,
+                        negativeIdentity.NodeId,
+                        StringComparison.Ordinal)
+                    || !string.Equals(
+                        positiveIdentity.ClipNodeId,
+                        negativeIdentity.ClipNodeId,
+                        StringComparison.Ordinal)
+                    || !string.Equals(
+                        positiveIdentity.VaeNodeId,
+                        negativeIdentity.VaeNodeId,
+                        StringComparison.Ordinal)
+                    || !string.Equals(
+                        positiveIdentity.ImageNodeId,
+                        negativeIdentity.ImageNodeId,
+                        StringComparison.Ordinal)
+                    || !TryGetLinkedNodeId(
+                        guiderNode.Value,
+                        "model",
+                        out string guiderModelId)
+                    || !TryGetLinkedNodeId(
+                        schedulerNode.Value,
+                        "model",
+                        out string schedulerModelId)
+                    || !string.Equals(
+                        guiderModelId,
+                        schedulerModelId,
+                        StringComparison.Ordinal)))
+            {
+                return null;
+            }
 
-            string? width = null;
-            string? height = null;
-            if (TryGetInputInt64(
-                    schedulerNode.Value,
-                    "width",
-                    1,
-                    32_768,
-                    out long schedulerWidth)
-                && TryGetInputInt64(
-                    schedulerNode.Value,
-                    "height",
-                    1,
-                    32_768,
-                    out long schedulerHeight)
-                && TryResolveLinkedNode(
+            string latentClass = pipeline.Value == ComfyPromptGraphPipeline.Flux2
+                ? "EmptyFlux2LatentImage"
+                : "EmptySD3LatentImage";
+            if (!TryResolveLinkedNode(
                     graph,
                     samplerNode.Value,
                     "latent_image",
-                    "EmptyFlux2LatentImage",
+                    latentClass,
                     out JsonElement latentNode)
-                && TryGetInputInt64(
+                || !TryGetInputInt64(
                     latentNode,
                     "width",
                     1,
                     32_768,
                     out long latentWidth)
-                && TryGetInputInt64(
+                || !TryGetInputInt64(
                     latentNode,
                     "height",
                     1,
                     32_768,
-                    out long latentHeight)
-                && schedulerWidth == latentWidth
-                && schedulerHeight == latentHeight)
-            {
-                width = schedulerWidth.ToString(CultureInfo.InvariantCulture);
-                height = schedulerHeight.ToString(CultureInfo.InvariantCulture);
-            }
-            else
+                    out long latentHeight))
             {
                 return null;
             }
+            if (pipeline.Value == ComfyPromptGraphPipeline.Flux2
+                && (!TryGetInputInt64(
+                        schedulerNode.Value,
+                        "width",
+                        1,
+                        32_768,
+                        out long schedulerWidth)
+                    || !TryGetInputInt64(
+                        schedulerNode.Value,
+                        "height",
+                        1,
+                        32_768,
+                        out long schedulerHeight)
+                    || schedulerWidth != latentWidth
+                    || schedulerHeight != latentHeight))
+            {
+                return null;
+            }
+            string width = latentWidth.ToString(CultureInfo.InvariantCulture);
+            string height = latentHeight.ToString(CultureInfo.InvariantCulture);
 
             if (!TryResolveModelSettings(
                     graph,
                     guiderNode.Value,
+                    pipeline.Value,
                     out string? model,
                     out string? lora,
                     out string? loraStrength))
@@ -191,7 +256,37 @@ public partial class MainWindow
 
             settings["Steps"] = steps;
             settings["Sampler"] = sampler;
-            settings["Scheduler"] = "Flux2Scheduler";
+            settings["Scheduler"] = pipeline.Value == ComfyPromptGraphPipeline.Flux2
+                ? "Flux2Scheduler"
+                : "BetaSamplingScheduler";
+            if (pipeline.Value == ComfyPromptGraphPipeline.KreaEdit)
+            {
+                if (!TryGetInputDouble(
+                        schedulerNode.Value,
+                        "alpha",
+                        0,
+                        100,
+                        out _)
+                    || !TryGetInputDouble(
+                        schedulerNode.Value,
+                        "beta",
+                        0,
+                        100,
+                        out _)
+                    || !TryGetInputScalar(
+                        schedulerNode.Value,
+                        "alpha",
+                        out string alpha)
+                    || !TryGetInputScalar(
+                        schedulerNode.Value,
+                        "beta",
+                        out string beta))
+                {
+                    return null;
+                }
+                settings["Scheduler alpha"] = alpha;
+                settings["Scheduler beta"] = beta;
+            }
             settings["CFG scale"] = cfg;
             settings["Seed"] = seed;
             settings["Generation size"] = $"{width} x {height}";
@@ -216,17 +311,54 @@ public partial class MainWindow
         JsonElement graph,
         JsonElement guiderNode,
         string inputName,
-        out string text)
+        ComfyPromptGraphPipeline pipeline,
+        out string text,
+        out KreaConditioningIdentity? kreaIdentity)
     {
         text = "";
+        kreaIdentity = null;
         if (!TryResolveLinkedNode(
                 graph,
                 guiderNode,
                 inputName,
                 expectedClass: null,
-                out JsonElement conditioning))
+                out JsonElement conditioning,
+                out string conditioningNodeId))
         {
             return false;
+        }
+
+        if (pipeline == ComfyPromptGraphPipeline.KreaEdit)
+        {
+            return NodeHasClass(conditioning, "TextEncodeKrea2OstrisEdit")
+                && TryResolveLinkedNode(
+                    graph,
+                    conditioning,
+                    "clip",
+                    "CLIPLoader",
+                    out _,
+                    out string clipNodeId)
+                && TryResolveLinkedNode(
+                    graph,
+                    conditioning,
+                    "vae",
+                    "VAELoader",
+                    out _,
+                    out string vaeNodeId)
+                && TryResolveLinkedNode(
+                    graph,
+                    conditioning,
+                    "image1",
+                    "LoadImage",
+                    out _,
+                    out string imageNodeId)
+                && TryGetInputString(conditioning, "prompt", out text)
+                && SetKreaConditioningIdentity(
+                    conditioningNodeId,
+                    clipNodeId,
+                    vaeNodeId,
+                    imageNodeId,
+                    out kreaIdentity);
         }
 
         if (NodeHasClass(conditioning, "ReferenceLatent"))
@@ -249,9 +381,25 @@ public partial class MainWindow
         return TryGetInputString(conditioning, "text", out text);
     }
 
+    private static bool SetKreaConditioningIdentity(
+        string nodeId,
+        string clipNodeId,
+        string vaeNodeId,
+        string imageNodeId,
+        out KreaConditioningIdentity? identity)
+    {
+        identity = new KreaConditioningIdentity(
+            nodeId,
+            clipNodeId,
+            vaeNodeId,
+            imageNodeId);
+        return true;
+    }
+
     private static bool TryResolveModelSettings(
         JsonElement graph,
         JsonElement guiderNode,
+        ComfyPromptGraphPipeline pipeline,
         out string? model,
         out string? lora,
         out string? loraStrength)
@@ -269,7 +417,8 @@ public partial class MainWindow
             return false;
         }
 
-        if (NodeHasClass(modelNode, "LoraLoaderModelOnly"))
+        bool loraEnabled = NodeHasClass(modelNode, "LoraLoaderModelOnly");
+        if (loraEnabled)
         {
             if (!TryGetInputString(modelNode, "lora_name", out string loraName)
                 || string.IsNullOrWhiteSpace(loraName)
@@ -300,6 +449,23 @@ public partial class MainWindow
             }
         }
 
+        if (pipeline == ComfyPromptGraphPipeline.KreaEdit)
+        {
+            if (!loraEnabled
+                || !NodeHasClass(modelNode, "Krea2OstrisEditModelPatch")
+                || !TryGetInputBoolean(modelNode, "kv_cache", out bool kvCache)
+                || !kvCache
+                || !TryResolveLinkedNode(
+                    graph,
+                    modelNode,
+                    "model",
+                    "UNETLoader",
+                    out modelNode))
+            {
+                return false;
+            }
+        }
+
         if (!NodeHasClass(modelNode, "UnetLoaderGGUF")
             && !NodeHasClass(modelNode, "UNETLoader"))
         {
@@ -317,8 +483,45 @@ public partial class MainWindow
         string inputName,
         string? expectedClass,
         out JsonElement linkedNode)
+        => TryResolveLinkedNode(
+            graph,
+            sourceNode,
+            inputName,
+            expectedClass,
+            out linkedNode,
+            out _);
+
+    private static bool TryResolveLinkedNode(
+        JsonElement graph,
+        JsonElement sourceNode,
+        string inputName,
+        string? expectedClass,
+        out JsonElement linkedNode,
+        out string linkedNodeId)
     {
         linkedNode = default;
+        linkedNodeId = "";
+        if (!TryGetLinkedNodeId(sourceNode, inputName, out string id))
+        {
+            return false;
+        }
+        if (!graph.TryGetProperty(id, out linkedNode)
+            || (expectedClass is not null
+                && !NodeHasClass(linkedNode, expectedClass)))
+        {
+            linkedNode = default;
+            return false;
+        }
+        linkedNodeId = id;
+        return true;
+    }
+
+    private static bool TryGetLinkedNodeId(
+        JsonElement sourceNode,
+        string inputName,
+        out string nodeId)
+    {
+        nodeId = "";
         if (!TryGetNodeInputs(sourceNode, out JsonElement inputs)
             || !inputs.TryGetProperty(inputName, out JsonElement link)
             || link.ValueKind != JsonValueKind.Array
@@ -331,21 +534,13 @@ public partial class MainWindow
         }
 
         JsonElement idElement = link[0];
-        string? id = idElement.ValueKind switch
+        nodeId = idElement.ValueKind switch
         {
-            JsonValueKind.String => idElement.GetString(),
+            JsonValueKind.String => idElement.GetString() ?? "",
             JsonValueKind.Number => idElement.GetRawText(),
-            _ => null,
+            _ => "",
         };
-        if (string.IsNullOrWhiteSpace(id)
-            || !graph.TryGetProperty(id, out linkedNode)
-            || (expectedClass is not null
-                && !NodeHasClass(linkedNode, expectedClass)))
-        {
-            linkedNode = default;
-            return false;
-        }
-        return true;
+        return !string.IsNullOrWhiteSpace(nodeId);
     }
 
     private static bool NodeHasClass(JsonElement node, string expected)
@@ -445,6 +640,22 @@ public partial class MainWindow
             return false;
         }
         return value >= minimum && value <= maximum;
+    }
+
+    private static bool TryGetInputBoolean(
+        JsonElement node,
+        string name,
+        out bool value)
+    {
+        value = false;
+        if (!TryGetNodeInputs(node, out JsonElement inputs)
+            || !inputs.TryGetProperty(name, out JsonElement input)
+            || input.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+        value = input.GetBoolean();
+        return true;
     }
 
     private static void AddSetting(

@@ -153,6 +153,11 @@ public partial class MainWindow
                 ? _modalVideoVersions[_modalVideoVersionIndex]
                 : null;
 
+    private List<string> CurrentModalOriginalPromptSearchMatches()
+        => TryGetModalSourceTile(out Tile tile)
+            ? PromptSearchMatches(tile.PromptUtf8, CurrentSearchQuery)
+            : [];
+
     private void SyncModalMetadataSidebarForDisplayedVersion()
     {
         if (CurrentDisplayedModalVideoVersion() is ManagedVideoVersion video)
@@ -185,7 +190,9 @@ public partial class MainWindow
             : metadata.Settings.Count > 0
                 ? settingsText
                 : "このバージョンのPNG parametersを読み込みました";
-        SyncModalPromptChips(hasPrompt ? metadata!.Prompt : "");
+        SyncModalPromptChips(
+            hasPrompt ? metadata!.Prompt : "",
+            CurrentModalOriginalPromptSearchMatches());
         ModalPromptText.Text = hasPrompt
             ? string.Join(", ", _modalPromptChipTags)
             : "-";
