@@ -558,6 +558,9 @@ public partial class MainWindow : Window
     private string? _currentPreviewMetadataPath;
     private string _modalPromptChipSource = "";
     private List<string> _modalPromptChipTags = [];
+    private List<string> _modalPromptCurrentVersionSearchMatches = [];
+    private List<string> _modalPromptOriginalSearchMatches = [];
+    private List<string> _modalPromptOriginalSearchMatchTags = [];
     private int _modalPromptChipNextIndex;
     private long _modalPromptChipGeneration;
     private bool _modalPromptChipRealizationScheduled;
@@ -715,6 +718,7 @@ public partial class MainWindow : Window
     private IInputElement? _settingsFocusBeforeDialog;
     private IInputElement? _modalFocusBeforeOverlay;
     private GridZoomAnchor? _modalGalleryReturnAnchor;
+    private string? _modalGalleryOpeningSourcePath;
     private bool _modalGalleryReturnUsesGrid;
     public LoadMetrics? LastLoadMetrics { get; private set; }
 
@@ -7898,7 +7902,10 @@ public partial class MainWindow : Window
                 candidate.Path,
                 _modalSourceTilePath,
                 StringComparison.OrdinalIgnoreCase))!;
-        return tile is not null;
+        return tile is not null
+            || TryGetModalNavigationSnapshotTile(
+                _modalSourceTilePath,
+                out tile);
     }
 
     private void SyncDisplayedModalFavoriteLevel(Tile selected)
@@ -10443,12 +10450,24 @@ public partial class MainWindow : Window
         => await StartModalContextEnhancementNextAsync("photoreal");
 
     private Task StartModalContextEnhancementNextAsync(string operation)
-        => Modal.Visibility == Visibility.Visible
-            ? StartGalleryContextEnhancementAsync(
-                operation,
-                enqueueNext: true,
-                useModalDisplayedVersion: true)
-            : Task.CompletedTask;
+    {
+        if (Modal.Visibility != Visibility.Visible
+            || !TryGetModalSourceTile(out Tile modalSource)
+            || !modalSource.IsRealFile)
+        {
+            SetStatusToast("The displayed modal source is unavailable for Enhancement.");
+            return Task.CompletedTask;
+        }
+
+        // The modal is a pinned viewing surface. Background selection can move
+        // independently while A remains displayed, so capture A once and carry
+        // that exact Tile through identity, profile, request, and publication.
+        return StartGalleryContextEnhancementAsync(
+            operation,
+            enqueueNext: true,
+            useModalDisplayedVersion: true,
+            pinnedSourceTile: modalSource);
+    }
 
     private void GalleryContextOpenModal_Click(object sender, RoutedEventArgs e)
     {
@@ -10460,7 +10479,8 @@ public partial class MainWindow : Window
         string operation,
         bool enqueueNext = false,
         bool requirePhotorealSource = false,
-        bool useModalDisplayedVersion = false)
+        bool useModalDisplayedVersion = false,
+        Tile? pinnedSourceTile = null)
     {
         if (operation is not ("upscale" or "photoreal"))
         {
@@ -10473,7 +10493,8 @@ public partial class MainWindow : Window
         _galleryContextEnhancementRequestPending = true;
         try
         {
-        if (SelectedTile() is not Tile { IsRealFile: true } tile
+        Tile? requestedTile = pinnedSourceTile ?? SelectedTile();
+        if (requestedTile is not Tile { IsRealFile: true } tile
             || !File.Exists(tile.Path))
             return;
 
@@ -10487,6 +10508,44 @@ public partial class MainWindow : Window
         {
             SetStatusToast("The selected source path could not be resolved for Enhancement.");
             return;
+        }
+
+        if (pinnedSourceTile is not null)
+        {
+            if (!TryCaptureEnhancementSourcePrePublishGuard(
+                    sourceIdentity,
+                    out EnhancementSourcePrePublishGuard sourceVersionGuard))
+            {
+                SetStatusToast("The displayed modal source could not be pinned safely for Enhancement.");
+                return;
+            }
+
+            Func<string?>? sourceBoundaryValidator = prePublishValidator;
+            string pinnedSourcePath = tile.Path;
+            prePublishValidator = () =>
+            {
+                if (Modal.Visibility != Visibility.Visible
+                    || !TryGetModalSourceTile(out Tile currentModalSource)
+                    || !string.Equals(
+                        currentModalSource.Path,
+                        pinnedSourcePath,
+                        StringComparison.OrdinalIgnoreCase)
+                    || !TryResolveEnhancementSourceIdentity(
+                        pinnedSourcePath,
+                        out string currentSourceIdentity)
+                    || !string.Equals(
+                        currentSourceIdentity,
+                        sourceIdentity,
+                        StringComparison.OrdinalIgnoreCase)
+                    || !File.Exists(currentSourceIdentity)
+                    || !IsEnhancementSourcePrePublishGuardCurrent(
+                        sourceVersionGuard))
+                {
+                    return "The displayed modal source changed or became unavailable before the request was published.";
+                }
+
+                return sourceBoundaryValidator?.Invoke();
+            };
         }
 
         var requestSource = new UpscaleRequestSource(null, null);
@@ -11622,12 +11681,60 @@ public partial class MainWindow : Window
     private static string FormatPromptTagsForDisplay(string? prompt)
         => string.Join(", ", ParsePromptTags(prompt));
 
-    private void SyncModalPromptChips(string prompt)
+    private sealed record ModalPromptPresentation(
+        List<string> CurrentVersionTags,
+        List<string> OriginalSearchMatches);
+
+    private static ModalPromptPresentation BuildModalPromptPresentation(
+        string prompt,
+        IReadOnlyList<string> currentVersionSearchMatches,
+        IReadOnlyList<string> originalSearchMatches)
+    {
+        List<string> currentVersionTags = ParsePromptTags(prompt);
+        foreach (string match in currentVersionSearchMatches)
+        {
+            if (!currentVersionTags.Contains(match, StringComparer.OrdinalIgnoreCase))
+                currentVersionTags.Add(match);
+        }
+        var separatedOriginalMatches = new List<string>();
+        foreach (string match in originalSearchMatches)
+        {
+            if (currentVersionTags.Contains(match, StringComparer.OrdinalIgnoreCase))
+                continue;
+            separatedOriginalMatches.Add(match);
+        }
+        return new ModalPromptPresentation(
+            currentVersionTags,
+            separatedOriginalMatches);
+    }
+
+    private void SyncModalPromptChips(
+        string prompt,
+        IReadOnlyList<string>? originalSearchMatches = null,
+        string? searchQuery = null)
     {
         if (ModalPromptChips is null)
             return;
 
-        if (string.Equals(_modalPromptChipSource, prompt, StringComparison.Ordinal))
+        List<string> currentVersionSearchMatches = PromptSearchMatches(
+            MetadataIndexStore.EncodePrompt(prompt),
+            searchQuery ?? CurrentSearchQuery);
+        List<string> normalizedOriginalMatches = (originalSearchMatches ?? [])
+            .Where(static match => !string.IsNullOrWhiteSpace(match))
+            .Select(static match => match.Trim())
+            .Where(static match => match.Length <= MaxModalPromptTagCharacters
+                && !match.Contains('\r')
+                && !match.Contains('\n'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxModalPromptTagCount)
+            .ToList();
+        if (string.Equals(_modalPromptChipSource, prompt, StringComparison.Ordinal)
+            && _modalPromptCurrentVersionSearchMatches.SequenceEqual(
+                currentVersionSearchMatches,
+                StringComparer.OrdinalIgnoreCase)
+            && _modalPromptOriginalSearchMatches.SequenceEqual(
+                normalizedOriginalMatches,
+                StringComparer.OrdinalIgnoreCase))
         {
             StartModalPromptChipRealization();
             return;
@@ -11635,10 +11742,24 @@ public partial class MainWindow : Window
 
         CancelModalPromptChipRealization();
         _modalPromptChipSource = prompt;
-        _modalPromptChipTags = ParsePromptTags(prompt);
+        _modalPromptCurrentVersionSearchMatches = currentVersionSearchMatches;
+        _modalPromptOriginalSearchMatches = normalizedOriginalMatches;
+        ModalPromptPresentation presentation = BuildModalPromptPresentation(
+            prompt,
+            currentVersionSearchMatches,
+            normalizedOriginalMatches);
+        _modalPromptChipTags = presentation.CurrentVersionTags;
+        _modalPromptOriginalSearchMatchTags = presentation.OriginalSearchMatches;
         _modalPromptChipNextIndex = 0;
         ModalPromptChips.Children.Clear();
         ModalPromptEmptyText.Visibility = _modalPromptChipTags.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ModalOriginalPromptSearchMatchesText.Text = string.Join(
+            ", ",
+            _modalPromptOriginalSearchMatchTags);
+        ModalOriginalPromptSearchMatchesPanel.Visibility =
+            _modalPromptOriginalSearchMatchTags.Count == 0
+                ? Visibility.Collapsed
+                : Visibility.Visible;
         StartModalPromptChipRealization();
     }
 
@@ -11698,8 +11819,12 @@ public partial class MainWindow : Window
             FontSize = 11.5,
             ToolTip = $"Search for {tag}",
         };
-        System.Windows.Automation.AutomationProperties.SetName(chip, $"Search prompt tag {tag}");
-        System.Windows.Automation.AutomationProperties.SetHelpText(chip, "Append this tag to search, close the modal, and focus search.");
+        System.Windows.Automation.AutomationProperties.SetName(
+            chip,
+            $"Search prompt tag {tag}");
+        System.Windows.Automation.AutomationProperties.SetHelpText(
+            chip,
+            "Append this displayed-version prompt tag to search, close the modal, and focus search.");
         chip.Click += ModalPromptTag_Click;
         chip.PreviewKeyDown += ModalPromptTag_PreviewKeyDown;
         AttachModalPromptMappingContextMenu(chip, tag);
@@ -16615,6 +16740,39 @@ public partial class MainWindow : Window
     private static bool ContainsText(string? value, string token)
         => !string.IsNullOrEmpty(value) && value.Contains(token, StringComparison.OrdinalIgnoreCase);
 
+    private static List<string> PromptSearchMatches(
+        byte[]? promptUtf8,
+        string query)
+    {
+        if (promptUtf8 is null
+            || promptUtf8.Length == 0
+            || string.IsNullOrWhiteSpace(query))
+        {
+            return [];
+        }
+
+        var matches = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var promptMatcher = new Utf8PromptMatcher();
+        foreach (string token in query.Split(
+            ',',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (matches.Count >= MaxModalPromptTagCount)
+                break;
+            if (token.Length is < 1 or > MaxModalPromptTagCharacters
+                || token.Contains('\r')
+                || token.Contains('\n')
+                || !seen.Add(token)
+                || !promptMatcher.MatchesPrompt(promptUtf8, token))
+            {
+                continue;
+            }
+            matches.Add(token);
+        }
+        return matches;
+    }
+
     private sealed class Utf8PromptMatcher : IDisposable
     {
         private char[]? _buffer;
@@ -16642,6 +16800,13 @@ public partial class MainWindow : Window
             }
             return true;
         }
+
+        public bool MatchesPrompt(byte[] promptUtf8, string token)
+            => promptUtf8.Length > 0
+                && !string.IsNullOrEmpty(token)
+                && Decode(promptUtf8).Contains(
+                    token.AsSpan(),
+                    StringComparison.OrdinalIgnoreCase);
 
         private ReadOnlySpan<char> Decode(byte[] promptUtf8)
         {
@@ -17143,7 +17308,8 @@ public partial class MainWindow : Window
     private void RestoreModalGalleryViewport(
         GridZoomAnchor anchor,
         bool useGrid,
-        bool restoreFocus)
+        bool restoreFocus,
+        Tile? navigatedReturnTile = null)
     {
         ListBox activeList = useGrid ? CardsList : RowsList;
         if (activeList.Visibility != Visibility.Visible)
@@ -17164,17 +17330,65 @@ public partial class MainWindow : Window
 
         if (restoreFocus)
         {
-            // Do not focus the selected card here. Real Done can move that
-            // card to index zero while the modal is open; ScrollIntoView would
-            // then undo the saved viewport and make Back appear to jump home.
-            Dispatcher.BeginInvoke(
-                () =>
-                {
-                    if (activeList.IsVisible && activeList.IsEnabled)
-                        activeList.Focus();
-                },
-                DispatcherPriority.ContextIdle);
+            if (navigatedReturnTile is not null)
+            {
+                FocusModalGalleryReturnTileAfterLayout(
+                    activeList,
+                    navigatedReturnTile);
+            }
+            else
+            {
+                // Do not focus the selected card here. Real Done can move that
+                // card to index zero while the modal is open; ScrollIntoView would
+                // then undo the saved viewport and make Back appear to jump home.
+                Dispatcher.BeginInvoke(
+                    () =>
+                    {
+                        if (activeList.IsVisible && activeList.IsEnabled)
+                            activeList.Focus();
+                    },
+                    DispatcherPriority.ContextIdle);
+            }
         }
+    }
+
+    private void FocusModalGalleryReturnTileAfterLayout(
+        ListBox activeList,
+        Tile returnTile)
+    {
+        string returnPath = returnTile.Path;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (Modal.Visibility == Visibility.Visible
+                || !activeList.IsVisible
+                || !activeList.IsEnabled
+                || !string.Equals(
+                    _primarySelectedPath,
+                    returnPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            int returnIndex = _tiles.IndexOf(returnTile);
+            ListBoxItem? container = returnIndex >= 0
+                ? RealizedGalleryContainer(activeList, returnIndex)
+                : null;
+            if (container is not null
+                && container.IsMeasureValid
+                && container.IsVisible
+                && container.IsEnabled)
+            {
+                SelectRealizedContainer(activeList, returnTile);
+                if (container.Focus())
+                    return;
+            }
+
+            // The viewport restore, not focus, owns realization and scrolling.
+            // Falling back to the list surface avoids a late ScrollIntoView
+            // racing the exact B-position that was just restored.
+            activeList.Focus();
+        }, DispatcherPriority.ContextIdle);
     }
 
     private void RestoreListViewportAnchorAfterLayout(GridZoomAnchor anchor)
@@ -17190,8 +17404,13 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(RowsList);
-            ListBoxItem? item = RowsList.ItemContainerGenerator.ContainerFromItem(
-                anchorTile) as ListBoxItem;
+            // The list projection is grouped, so the root ItemContainerGenerator
+            // owns group containers rather than the nested Tile row. Resolve the
+            // realized row from the visual tree after ScrollIntoView has run.
+            ListBoxItem? item = FindVisualDescendants<ListBoxItem>(RowsList)
+                .FirstOrDefault(candidate => ReferenceEquals(
+                    candidate.DataContext,
+                    anchorTile));
             if (viewer is null || item is null)
                 return;
             try
@@ -19272,6 +19491,12 @@ public partial class MainWindow : Window
                 ? CaptureGridZoomAnchor(t.Path, preferSelection: false)
                     ?? CaptureGridZoomAnchor()
                 : CaptureListViewportAnchor(t.Path);
+            _modalGalleryOpeningSourcePath = !ExternalFileDropSessionActive
+                && !IsEnhancementJobsTrustedModalSource(t)
+                && _catalogTilesByFavoritePath.ContainsKey(
+                    NormalizeFavoritePath(t.Path))
+                    ? t.Path
+                    : null;
         }
         if (!string.Equals(_modalTransformPath, t.Path, StringComparison.OrdinalIgnoreCase))
             ResetModalTransform(t.Path, preserveZoom: !opening);
@@ -21066,9 +21291,12 @@ public partial class MainWindow : Window
         bool wasVisible = Modal.Visibility == Visibility.Visible;
         IInputElement? focusTarget = _modalFocusBeforeOverlay;
         GridZoomAnchor? galleryReturnAnchor = _modalGalleryReturnAnchor;
+        string? galleryOpeningSourcePath = _modalGalleryOpeningSourcePath;
+        string? galleryFinalSourcePath = _modalSourceTilePath;
         bool galleryReturnUsesGrid = _modalGalleryReturnUsesGrid;
         _modalFocusBeforeOverlay = null;
         _modalGalleryReturnAnchor = null;
+        _modalGalleryOpeningSourcePath = null;
         CancelPendingModalSingleClick();
         EndModalPointerGesture();
         _modalCts?.Cancel();
@@ -21137,12 +21365,42 @@ public partial class MainWindow : Window
             RestoreExternalFileDropSession();
         if (wasVisible)
             CloseExternalVideoDropSession();
+        Tile? navigatedReturnTile = null;
+        if (wasVisible
+            && !string.IsNullOrWhiteSpace(galleryOpeningSourcePath)
+            && !string.IsNullOrWhiteSpace(galleryFinalSourcePath)
+            && !string.Equals(
+                galleryOpeningSourcePath,
+                galleryFinalSourcePath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            navigatedReturnTile = _tiles.FirstOrDefault(tile => string.Equals(
+                tile.Path,
+                galleryFinalSourcePath,
+                StringComparison.OrdinalIgnoreCase));
+            if (navigatedReturnTile is not null)
+            {
+                int returnIndex = _tiles.IndexOf(navigatedReturnTile);
+                SetSelection(
+                    [navigatedReturnTile],
+                    navigatedReturnTile,
+                    returnIndex,
+                    deferPrimaryPresentation: true);
+                galleryReturnAnchor = galleryReturnAnchor is { } openingAnchor
+                    ? openingAnchor with { Path = navigatedReturnTile.Path }
+                    : new GridZoomAnchor(
+                        navigatedReturnTile.Path,
+                        ViewportY: 0,
+                        CenterDistance: 0);
+            }
+        }
         if (wasVisible && galleryReturnAnchor is not null)
         {
             RestoreModalGalleryViewport(
                 galleryReturnAnchor.Value,
                 galleryReturnUsesGrid,
-                restoreFocus);
+                restoreFocus,
+                navigatedReturnTile);
         }
         else if (wasVisible && restoreFocus)
         {
@@ -31503,6 +31761,51 @@ public partial class MainWindow : Window
             && !_galleryContextEnhancementRequestPending;
     }
 
+    public bool ModalContextUpscaleNextEnabledForSmoke
+    {
+        get
+        {
+            UpdateModalContextMenuPresentation();
+            return ModalContextUpscaleNext.IsEnabled;
+        }
+    }
+
+    public bool ModalContextPhotorealNextEnabledForSmoke
+    {
+        get
+        {
+            UpdateModalContextMenuPresentation();
+            return ModalContextPhotorealNext.IsEnabled;
+        }
+    }
+
+    public bool MakeModalSourceNavigationSnapshotOnlyForSmoke()
+    {
+        if (Modal.Visibility != Visibility.Visible
+            || string.IsNullOrWhiteSpace(_modalSourceTilePath)
+            || !_modalNavigationSnapshot.Any(tile => string.Equals(
+                tile.Path,
+                _modalSourceTilePath,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        string sourcePath = _modalSourceTilePath;
+        _catalogTilesByFavoritePath.Remove(
+            NormalizeFavoritePath(sourcePath));
+        Tile? projected = _tiles.FirstOrDefault(tile => string.Equals(
+            tile.Path,
+            sourcePath,
+            StringComparison.OrdinalIgnoreCase));
+        if (projected is not null)
+            _tiles.Remove(projected);
+        return !_tiles.Any(tile => string.Equals(
+            tile.Path,
+            sourcePath,
+            StringComparison.OrdinalIgnoreCase));
+    }
+
     public async Task<bool> StartGalleryContextEnhancementDoubleActivationForSmokeAsync(
         string operation,
         bool enqueueNext = false,
@@ -32309,6 +32612,72 @@ public partial class MainWindow : Window
         }
     }
 
+    public List<string> ModalPromptChipLabelsForSmoke
+    {
+        get
+        {
+            RealizeAllModalPromptChipsForSmoke();
+            return ModalPromptChips.Children
+                .OfType<Button>()
+                .Select(static chip => chip.Content?.ToString() ?? "")
+                .ToList();
+        }
+    }
+
+    public static ModalPromptPresentationSmokeSnapshot
+        ResolveModalPromptPresentationForSmoke(
+            string displayedPrompt,
+            string originalPrompt,
+            string searchQuery)
+    {
+        List<string> displayedMatches = PromptSearchMatches(
+            MetadataIndexStore.EncodePrompt(displayedPrompt),
+            searchQuery);
+        var displayedMatchSet = new HashSet<string>(
+            displayedMatches,
+            StringComparer.OrdinalIgnoreCase);
+        List<string> originalMatches = PromptSearchMatches(
+            MetadataIndexStore.EncodePrompt(originalPrompt),
+            searchQuery);
+        ModalPromptPresentation presentation = BuildModalPromptPresentation(
+            displayedPrompt,
+            displayedMatches,
+            originalMatches
+                .Where(match => !displayedMatchSet.Contains(match))
+                .ToList());
+        return new ModalPromptPresentationSmokeSnapshot(
+            presentation.CurrentVersionTags,
+            presentation.OriginalSearchMatches);
+    }
+
+    public ModalPromptSurfaceSmokeSnapshot RenderModalPromptPresentationForSmoke(
+        string displayedPrompt,
+        string originalPrompt,
+        string searchQuery)
+    {
+        ModalPromptPresentationSmokeSnapshot presentation =
+            ResolveModalPromptPresentationForSmoke(
+                displayedPrompt,
+                originalPrompt,
+                searchQuery);
+        SyncModalPromptChips(
+            displayedPrompt,
+            presentation.OriginalSearchMatches,
+            searchQuery);
+        return new ModalPromptSurfaceSmokeSnapshot(
+            ModalPromptTagsForSmoke,
+            [.. _modalPromptOriginalSearchMatchTags],
+            ModalOriginalPromptSearchMatchesPanel.Visibility == Visibility.Visible,
+            ModalOriginalPromptSearchMatchesText.Text,
+            !string.IsNullOrWhiteSpace(
+                System.Windows.Automation.AutomationProperties.GetName(
+                    ModalOriginalPromptSearchMatchesText))
+                && !string.IsNullOrWhiteSpace(
+                    System.Windows.Automation.AutomationProperties.GetHelpText(
+                        ModalOriginalPromptSearchMatchesText)),
+            ModalOriginalPromptSearchMatchesText.ContextMenu is null);
+    }
+
     public bool ModalPromptTagsAccessibilityReadyForSmoke
     {
         get
@@ -33042,6 +33411,18 @@ public sealed record PromptTagSearchSmokeSnapshot(
     bool SearchFocused,
     bool AccessibilityReady,
     List<string> FilteredNames);
+
+public sealed record ModalPromptPresentationSmokeSnapshot(
+    List<string> CurrentVersionTags,
+    List<string> OriginalSearchMatches);
+
+public sealed record ModalPromptSurfaceSmokeSnapshot(
+    List<string> CurrentVersionTags,
+    List<string> OriginalSearchMatches,
+    bool OriginalMatchesVisible,
+    string OriginalMatchesText,
+    bool OriginalMatchesAccessibilityReady,
+    bool OriginalMatchesHaveNoPromptMappingContext);
 
 public sealed record FileDragOutSmokeSnapshot(
     bool Built,

@@ -31881,6 +31881,8 @@ public partial class App : Application
         string unicodeName = "unicode-itxt-parameters.png";
         string comfyName = "legacy-comfy-prompt.png";
         string comfyLoraOffName = "legacy-comfy-prompt-lora-off.png";
+        string kreaComfyName = "krea-comfy-prompt.png";
+        string kreaComfyDriftName = "krea-comfy-drift.png";
         string parametersOverrideName = "parameters-overrides-comfy.png";
         string validPath = Path.Combine(folder, validName);
         string missingPath = Path.Combine(folder, missingName);
@@ -31890,6 +31892,8 @@ public partial class App : Application
         string unicodePath = Path.Combine(folder, unicodeName);
         string comfyPath = Path.Combine(folder, comfyName);
         string comfyLoraOffPath = Path.Combine(folder, comfyLoraOffName);
+        string kreaComfyPath = Path.Combine(folder, kreaComfyName);
+        string kreaComfyDriftPath = Path.Combine(folder, kreaComfyDriftName);
         string parametersOverridePath = Path.Combine(
             folder,
             parametersOverrideName);
@@ -31947,6 +31951,24 @@ public partial class App : Application
                 comfyLoraOffPath,
                 "prompt",
                 BuildComfyPromptGraphFixture(loraEnabled: false));
+            WriteSmokePng(
+                kreaComfyPath,
+                128,
+                96,
+                Color.FromRgb(41, 128, 185));
+            InsertPngTextFixture(
+                kreaComfyPath,
+                "prompt",
+                BuildKreaComfyPromptGraphFixture());
+            WriteSmokePng(
+                kreaComfyDriftPath,
+                128,
+                96,
+                Color.FromRgb(192, 57, 43));
+            InsertPngTextFixture(
+                kreaComfyDriftPath,
+                "prompt",
+                BuildKreaComfyPromptGraphFixture(drift: true));
             File.Copy(comfyPath, parametersOverridePath, overwrite: true);
             InsertPngTextFixture(
                 parametersOverridePath,
@@ -32090,6 +32112,66 @@ public partial class App : Application
                         "LoRA strength:",
                         StringComparison.Ordinal);
 
+                string? kreaComfyCatalogPrompt =
+                    win.PromptForFileNameForSmoke(kreaComfyName);
+                PngMetadataSmokeSnapshot kreaComfy =
+                    await win.SelectPngMetadataForSmokeAsync(kreaComfyName);
+                MetadataCopySmokeSnapshot kreaComfyCopy =
+                    win.CopyCurrentPreviewMetadataForSmoke();
+                win.OpenModalMetadataForSmoke();
+                ModalMetadataSmokeSnapshot kreaComfyModal =
+                    await win.WaitForModalDisplayedMetadataForSmokeAsync(
+                        kreaComfyPath);
+                win.CloseModalForSmoke();
+                bool kreaComfyGraphRead = string.Equals(
+                        kreaComfyCatalogPrompt,
+                        "krea enhanced positive",
+                        StringComparison.Ordinal)
+                    && kreaComfy.MetadataApplied
+                    && string.Equals(
+                        kreaComfy.Prompt,
+                        "krea enhanced positive",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        kreaComfy.NegativePrompt,
+                        "krea enhanced negative",
+                        StringComparison.Ordinal)
+                    && string.Equals(kreaComfy.Sampler, "euler", StringComparison.Ordinal)
+                    && kreaComfyCopy.Copied
+                    && kreaComfyCopy.CopyText.Contains(
+                        "Model: krea-edit-model.safetensors",
+                        StringComparison.Ordinal)
+                    && kreaComfyCopy.CopyText.Contains(
+                        "LoRA: krea-preservation.safetensors",
+                        StringComparison.Ordinal)
+                    && kreaComfyCopy.CopyText.Contains(
+                        "Scheduler: BetaSamplingScheduler",
+                        StringComparison.Ordinal)
+                    && kreaComfyCopy.CopyText.Contains(
+                        "Scheduler alpha: 0.5",
+                        StringComparison.Ordinal)
+                    && kreaComfyCopy.CopyText.Contains(
+                        "Scheduler beta: 0.7",
+                        StringComparison.Ordinal)
+                    && kreaComfyCopy.CopyText.Contains(
+                        "Generation size: 768 x 1152",
+                        StringComparison.Ordinal)
+                    && kreaComfyModal.MetadataCurrent
+                    && string.Equals(
+                        kreaComfyModal.Prompt,
+                        "krea enhanced positive",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        kreaComfyModal.NegativePrompt,
+                        "krea enhanced negative",
+                        StringComparison.Ordinal)
+                    && kreaComfyModal.Settings.Contains(
+                        "BetaSamplingScheduler",
+                        StringComparison.Ordinal);
+                bool kreaComfyDriftRejected =
+                    !PhotoViewer.Wpf.MainWindow.HasPngParametersForSmoke(
+                        kreaComfyDriftPath);
+
                 string? parametersOverrideCatalogPrompt =
                     win.PromptForFileNameForSmoke(parametersOverrideName);
                 PngMetadataSmokeSnapshot parametersOverride =
@@ -32209,6 +32291,8 @@ public partial class App : Application
                     && unicodeITextRead
                     && comfyGraphRead
                     && comfyLoraOffRead
+                    && kreaComfyGraphRead
+                    && kreaComfyDriftRejected
                     && parametersOverrideComfy
                     && missing.Selected
                     && !missing.MetadataApplied
@@ -32229,7 +32313,7 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok
-                        ? "A1111 parameters and legacy ComfyUI prompt graphs produce synchronized Catalog, Preview, Modal, and Copy metadata while parameters retains priority"
+                        ? "A1111 parameters plus FLUX and Krea ComfyUI prompt graphs produce synchronized Catalog, Preview, Modal, and Copy metadata while parameters retains priority"
                         : "PNG parameters metadata smoke did not meet expected lazy selection behavior",
                     SmokeRoot = smokeRoot,
                     Folder = folder,
@@ -32266,6 +32350,12 @@ public partial class App : Application
                     ComfyLoraOffPath = comfyLoraOffPath,
                     ComfyLoraOff = comfyLoraOff,
                     ComfyLoraOffRead = comfyLoraOffRead,
+                    KreaComfyPath = kreaComfyPath,
+                    KreaComfy = kreaComfy,
+                    KreaComfyCopy = kreaComfyCopy,
+                    KreaComfyModal = kreaComfyModal,
+                    KreaComfyGraphRead = kreaComfyGraphRead,
+                    KreaComfyDriftRejected = kreaComfyDriftRejected,
                     ParametersOverridePath = parametersOverridePath,
                     ParametersOverride = parametersOverride,
                     ParametersOverrideComfy = parametersOverrideComfy,
@@ -32306,8 +32396,11 @@ public partial class App : Application
         string favoritesPath = Path.Combine(smokeRoot, "favorites.json");
         string searchHistoryPath = Path.Combine(smokeRoot, "search-history.json");
         string taggedName = "tagged.png";
+        string boundedName = "bounded.png";
         string otherName = "other.png";
         string taggedPath = Path.Combine(folder, taggedName);
+        string boundedPath = Path.Combine(folder, boundedName);
+        string boundedPrompt = "";
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -32321,6 +32414,25 @@ public partial class App : Application
                 "parameters",
                 "studio portrait, soft light, 1girl, ((fresh_tag:1.2)), Studio Portrait, ,   \nNegative prompt: lowres\nSteps: 12, Sampler: Euler",
                 Color.FromRgb(52, 152, 219));
+            string overlongSegment = "long-segment-match-" + new string('l', 600);
+            string acceptedTagPrefix = string.Join(
+                ", ",
+                Enumerable.Range(0, 160).Select(static index => $"tag-{index:D3}"));
+            string beyondScanPadding = new string('s', 66_000);
+            boundedPrompt = string.Join(
+                ", ",
+                overlongSegment,
+                acceptedTagPrefix,
+                "tag-cap-match",
+                beyondScanPadding,
+                "scan-cap-match");
+            WritePngTextFixture(
+                boundedPath,
+                "parameters",
+                boundedPrompt
+                    + "\nNegative prompt: bounded-negative"
+                    + "\nSteps: 12, Sampler: Euler",
+                Color.FromRgb(142, 68, 173));
             WriteSmokePng(Path.Combine(folder, otherName), 64, 48, Color.FromRgb(46, 204, 113));
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", seenPath);
@@ -32396,6 +32508,101 @@ public partial class App : Application
                 bool outsideClickDismissesPopup = win.SearchPopupOutsideDismissContractForSmoke;
                 win.CloseSearchHistoryForSmoke();
                 bool popupClosed = !win.SearchHistoryPopupOpenForSmoke;
+                const string boundedQuery =
+                    "long-segment-match, tag-cap-match, scan-cap-match";
+                ModalPromptPresentationSmokeSnapshot boundedPresentation =
+                    PhotoViewer.Wpf.MainWindow.ResolveModalPromptPresentationForSmoke(
+                        boundedPrompt,
+                        boundedPrompt,
+                        boundedQuery);
+                bool boundedSearchMatchesVisible = new[]
+                    {
+                        "long-segment-match",
+                        "tag-cap-match",
+                        "scan-cap-match",
+                    }
+                    .All(match => boundedPresentation.CurrentVersionTags.Contains(
+                        match,
+                        StringComparer.OrdinalIgnoreCase));
+                bool samePromptHasNoOriginalOnlyMatches =
+                    boundedPresentation.OriginalSearchMatches.Count == 0;
+                ModalPromptPresentationSmokeSnapshot versionSplit =
+                    PhotoViewer.Wpf.MainWindow.ResolveModalPromptPresentationForSmoke(
+                        "enhanced-version-only",
+                        boundedPrompt,
+                        boundedQuery);
+                string[] expectedOriginalOnlyMatches =
+                [
+                    "long-segment-match",
+                    "tag-cap-match",
+                    "scan-cap-match",
+                ];
+                bool versionAuthoritiesRemainDistinct =
+                    versionSplit.CurrentVersionTags.SequenceEqual(
+                        ["enhanced-version-only"],
+                        StringComparer.Ordinal)
+                    && versionSplit.CurrentVersionTags.Contains(
+                        "enhanced-version-only",
+                        StringComparer.Ordinal)
+                    && !versionSplit.CurrentVersionTags.Contains(
+                        "tag-000",
+                        StringComparer.Ordinal)
+                    && versionSplit.OriginalSearchMatches.SequenceEqual(
+                        expectedOriginalOnlyMatches,
+                        StringComparer.OrdinalIgnoreCase)
+                    && versionSplit.OriginalSearchMatches.All(match =>
+                        !versionSplit.CurrentVersionTags.Contains(
+                            match,
+                            StringComparer.OrdinalIgnoreCase));
+                ModalPromptSurfaceSmokeSnapshot versionSplitSurface =
+                    win.RenderModalPromptPresentationForSmoke(
+                        "enhanced-version-only",
+                        boundedPrompt,
+                        boundedQuery);
+                bool originalMatchesRenderedSeparately =
+                    versionSplitSurface.CurrentVersionTags.SequenceEqual(
+                        ["enhanced-version-only"],
+                        StringComparer.Ordinal)
+                    && versionSplitSurface.OriginalSearchMatches.SequenceEqual(
+                        expectedOriginalOnlyMatches,
+                        StringComparer.OrdinalIgnoreCase)
+                    && versionSplitSurface.OriginalMatchesVisible
+                    && string.Equals(
+                        versionSplitSurface.OriginalMatchesText,
+                        string.Join(", ", expectedOriginalOnlyMatches),
+                        StringComparison.Ordinal)
+                    && versionSplitSurface.OriginalMatchesAccessibilityReady
+                    && versionSplitSurface.OriginalMatchesHaveNoPromptMappingContext;
+                string versionSplitCopy =
+                    win.CurrentModalPromptCopyTextForSmoke();
+                bool originalOnlyExcludedFromCopy = string.Equals(
+                    versionSplitCopy,
+                    "enhanced-version-only",
+                    StringComparison.Ordinal)
+                    && expectedOriginalOnlyMatches.All(match =>
+                        !versionSplitCopy.Contains(
+                            match,
+                            StringComparison.OrdinalIgnoreCase));
+                win.CloseModalForSmoke();
+                win.SetSearchQuery("", persist: false);
+                PngMetadataSmokeSnapshot boundedMetadata =
+                    await win.SelectPngMetadataForSmokeAsync(boundedName);
+                bool boundedModalOpened = win.OpenModalForSmoke();
+                ModalMetadataSmokeSnapshot boundedModal =
+                    await win.WaitForModalDisplayedMetadataForSmokeAsync(
+                        boundedPath);
+                MetadataCopySmokeSnapshot boundedPromptCopy =
+                    win.CopyCurrentModalPromptForSmoke(boundedQuery);
+                bool boundedPromptCopyCurrent = boundedMetadata.MetadataApplied
+                    && boundedModalOpened
+                    && boundedModal.MetadataCurrent
+                    && boundedPromptCopy.Copied
+                    && boundedPromptCopy.CopyEnabled
+                    && string.Equals(
+                        boundedPromptCopy.CopyText,
+                        string.Join(", ", boundedPresentation.CurrentVersionTags),
+                        StringComparison.Ordinal);
+                win.CloseModalForSmoke();
                 win.SetSearchQuery("", persist: false);
                 PngMetadataSmokeSnapshot missingMetadata = await win.SelectPngMetadataForSmokeAsync(otherName);
                 bool missingModalOpened = win.OpenModalForSmoke();
@@ -32432,6 +32639,12 @@ public partial class App : Application
                     && softPrefixSuggestions.Contains("soft light", StringComparer.OrdinalIgnoreCase)
                     && clickCommittedSuggestion && backspaceRemovedWholeTerm
                     && coloredSearchTerms && outsideClickDismissesPopup && popupClosed
+                    && boundedSearchMatchesVisible
+                    && samePromptHasNoOriginalOnlyMatches
+                    && versionAuthoritiesRemainDistinct
+                    && originalMatchesRenderedSeparately
+                    && boundedPromptCopyCurrent
+                    && originalOnlyExcludedFromCopy
                     && appended.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && deduped.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && sourceUntouched && searchPersisted
@@ -32443,7 +32656,7 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok
-                        ? "modal prompt tags append a deduped comma query, active search chips expose accessible whole-term removal, and only search state is persisted without source, metadata, or enhancement mutation"
+                        ? "displayed-version prompt tags and Original-only search matches remain separate while search state changes without source, metadata, or enhancement mutation"
                         : "prompt tag search smoke did not meet the modal/search isolation contract",
                     SmokeRoot = smokeRoot,
                     TaggedPath = taggedPath,
@@ -32470,6 +32683,18 @@ public partial class App : Application
                     ColoredSearchTerms = coloredSearchTerms,
                     OutsideClickDismissesPopup = outsideClickDismissesPopup,
                     PopupClosed = popupClosed,
+                    BoundedModalTags = boundedPresentation.CurrentVersionTags,
+                    BoundedSearchMatchesVisible = boundedSearchMatchesVisible,
+                    SamePromptHasNoOriginalOnlyMatches =
+                        samePromptHasNoOriginalOnlyMatches,
+                    VersionAuthoritiesRemainDistinct =
+                        versionAuthoritiesRemainDistinct,
+                    OriginalMatchesRenderedSeparately =
+                        originalMatchesRenderedSeparately,
+                    BoundedPromptCopy = boundedPromptCopy,
+                    BoundedPromptCopyCurrent = boundedPromptCopyCurrent,
+                    OriginalOnlyExcludedFromCopy =
+                        originalOnlyExcludedFromCopy,
                     SourceUntouched = sourceUntouched,
                     SearchPersisted = searchPersisted,
                     ReloadedQuery = reloadedQuery,
@@ -35238,6 +35463,151 @@ public partial class App : Application
         return JsonSerializer.Serialize(graph);
     }
 
+    private static string BuildKreaComfyPromptGraphFixture(bool drift = false)
+    {
+        static object[] Link(string nodeId) => [nodeId, 0];
+
+        var graph = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["save-output"] = new
+            {
+                inputs = new { images = Link("decode") },
+                class_type = "SaveImage",
+            },
+            ["decode"] = new
+            {
+                inputs = new { samples = Link("sample") },
+                class_type = "VAEDecode",
+            },
+            ["sample"] = new
+            {
+                inputs = new
+                {
+                    noise = Link("noise"),
+                    guider = Link("guider"),
+                    sampler = Link("sampler-select"),
+                    sigmas = Link("scheduler"),
+                    latent_image = Link("latent"),
+                },
+                class_type = "SamplerCustomAdvanced",
+            },
+            ["noise"] = new
+            {
+                inputs = new { noise_seed = 88442211L },
+                class_type = "RandomNoise",
+            },
+            ["guider"] = new
+            {
+                inputs = new
+                {
+                    model = Link("lora"),
+                    positive = Link("positive"),
+                    negative = Link("negative"),
+                    cfg = 1.0,
+                },
+                class_type = "CFGGuider",
+            },
+            ["positive"] = new
+            {
+                inputs = new
+                {
+                    clip = Link(drift ? "other-clip" : "clip"),
+                    prompt = "krea enhanced positive",
+                    vae = Link("vae"),
+                    image1 = Link("source"),
+                },
+                class_type = "TextEncodeKrea2OstrisEdit",
+            },
+            ["negative"] = new
+            {
+                inputs = new
+                {
+                    clip = Link("clip"),
+                    prompt = "krea enhanced negative",
+                    vae = Link("vae"),
+                    image1 = Link("source"),
+                },
+                class_type = "TextEncodeKrea2OstrisEdit",
+            },
+            ["model"] = new
+            {
+                inputs = new
+                {
+                    unet_name = "krea-edit-model.safetensors",
+                    weight_dtype = "default",
+                },
+                class_type = "UNETLoader",
+            },
+            ["model-patch"] = new
+            {
+                inputs = new { model = Link("model"), kv_cache = !drift },
+                class_type = "Krea2OstrisEditModelPatch",
+            },
+            ["lora"] = new
+            {
+                inputs = new
+                {
+                    model = Link("model-patch"),
+                    lora_name = "krea-preservation.safetensors",
+                    strength_model = 1.0,
+                },
+                class_type = "LoraLoaderModelOnly",
+            },
+            ["clip"] = new
+            {
+                inputs = new
+                {
+                    clip_name = "krea-text-encoder.safetensors",
+                    type = "krea2",
+                    device = "default",
+                },
+                class_type = "CLIPLoader",
+            },
+            ["other-clip"] = new
+            {
+                inputs = new
+                {
+                    clip_name = "other-krea-text-encoder.safetensors",
+                    type = "krea2",
+                    device = "default",
+                },
+                class_type = "CLIPLoader",
+            },
+            ["vae"] = new
+            {
+                inputs = new { vae_name = "krea-vae.safetensors" },
+                class_type = "VAELoader",
+            },
+            ["source"] = new
+            {
+                inputs = new { image = "synthetic-source.png" },
+                class_type = "LoadImage",
+            },
+            ["sampler-select"] = new
+            {
+                inputs = new { sampler_name = "euler" },
+                class_type = "KSamplerSelect",
+            },
+            ["scheduler"] = new
+            {
+                inputs = new
+                {
+                    model = Link("lora"),
+                    steps = 8,
+                    alpha = 0.5,
+                    beta = 0.7,
+                },
+                class_type = "BetaSamplingScheduler",
+            },
+            ["latent"] = new
+            {
+                inputs = new { width = 768, height = 1152, batch_size = 1 },
+                class_type = "EmptySD3LatentImage",
+            },
+        };
+        return JsonSerializer.Serialize(graph);
+    }
+
     private static int FindPngIdatOffset(byte[] png)
     {
         const int signatureLength = 8;
@@ -35815,6 +36185,12 @@ public partial class App : Application
         public string? ComfyLoraOffPath { get; init; }
         public PngMetadataSmokeSnapshot? ComfyLoraOff { get; init; }
         public bool ComfyLoraOffRead { get; init; }
+        public string? KreaComfyPath { get; init; }
+        public PngMetadataSmokeSnapshot? KreaComfy { get; init; }
+        public MetadataCopySmokeSnapshot? KreaComfyCopy { get; init; }
+        public ModalMetadataSmokeSnapshot? KreaComfyModal { get; init; }
+        public bool KreaComfyGraphRead { get; init; }
+        public bool KreaComfyDriftRejected { get; init; }
         public string? ParametersOverridePath { get; init; }
         public PngMetadataSmokeSnapshot? ParametersOverride { get; init; }
         public bool ParametersOverrideComfy { get; init; }
@@ -35858,6 +36234,14 @@ public partial class App : Application
         public bool ColoredSearchTerms { get; init; }
         public bool OutsideClickDismissesPopup { get; init; }
         public bool PopupClosed { get; init; }
+        public List<string> BoundedModalTags { get; init; } = [];
+        public bool BoundedSearchMatchesVisible { get; init; }
+        public bool SamePromptHasNoOriginalOnlyMatches { get; init; }
+        public bool VersionAuthoritiesRemainDistinct { get; init; }
+        public bool OriginalMatchesRenderedSeparately { get; init; }
+        public MetadataCopySmokeSnapshot? BoundedPromptCopy { get; init; }
+        public bool BoundedPromptCopyCurrent { get; init; }
+        public bool OriginalOnlyExcludedFromCopy { get; init; }
         public bool SourceUntouched { get; init; }
         public bool SearchPersisted { get; init; }
         public string? ReloadedQuery { get; init; }

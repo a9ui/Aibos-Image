@@ -153,6 +153,28 @@ public partial class MainWindow
                 ? _modalVideoVersions[_modalVideoVersionIndex]
                 : null;
 
+    private List<string> CurrentModalOriginalPromptSearchMatches(
+        string displayedPrompt)
+    {
+        if (!TryGetModalSourceTile(out Tile tile))
+            return [];
+
+        List<string> originalMatches = PromptSearchMatches(
+            tile.PromptUtf8,
+            CurrentSearchQuery);
+        if (originalMatches.Count == 0)
+            return [];
+
+        var displayedMatches = new HashSet<string>(
+            PromptSearchMatches(
+                MetadataIndexStore.EncodePrompt(displayedPrompt),
+                CurrentSearchQuery),
+            StringComparer.OrdinalIgnoreCase);
+        return originalMatches
+            .Where(match => !displayedMatches.Contains(match))
+            .ToList();
+    }
+
     private void SyncModalMetadataSidebarForDisplayedVersion()
     {
         if (CurrentDisplayedModalVideoVersion() is ManagedVideoVersion video)
@@ -185,7 +207,10 @@ public partial class MainWindow
             : metadata.Settings.Count > 0
                 ? settingsText
                 : "このバージョンのPNG parametersを読み込みました";
-        SyncModalPromptChips(hasPrompt ? metadata!.Prompt : "");
+        SyncModalPromptChips(
+            hasPrompt ? metadata!.Prompt : "",
+            CurrentModalOriginalPromptSearchMatches(
+                hasPrompt ? metadata!.Prompt : ""));
         ModalPromptText.Text = hasPrompt
             ? string.Join(", ", _modalPromptChipTags)
             : "-";
@@ -330,7 +355,10 @@ public partial class MainWindow
             text);
     }
 
-    private void CopyDisplayedModalPrompt(Button button, bool negative)
+    private void CopyDisplayedModalPrompt(
+        Button button,
+        bool negative,
+        bool useSystemClipboard = true)
     {
         string text;
         if (CurrentDisplayedModalVideoVersion() is ManagedVideoVersion video)
@@ -345,29 +373,71 @@ public partial class MainWindow
         {
             text = negative
                 ? metadata.NegativePrompt
-                : FormatPromptTagsForDisplay(metadata.Prompt);
+                : string.Join(", ", _modalPromptChipTags);
         }
         else
         {
             text = "";
         }
-        CopyDisplayedModalText(button, text);
+        CopyDisplayedModalText(button, text, useSystemClipboard);
     }
 
-    private void CopyDisplayedModalText(Button button, string text)
+    private void CopyDisplayedModalText(
+        Button button,
+        string text,
+        bool useSystemClipboard = true)
     {
         if (string.IsNullOrWhiteSpace(text))
             return;
         _lastMetadataCopyText = text.Trim();
         try
         {
-            Clipboard.SetText(_lastMetadataCopyText);
+            if (useSystemClipboard)
+                Clipboard.SetText(_lastMetadataCopyText);
             button.Content = "Copied";
         }
         catch (Exception ex) when (ex is ExternalException or InvalidOperationException)
         {
             button.Content = "Copy";
             button.ToolTip = $"Copy failed: {ex.Message}";
+        }
+    }
+
+    public string CurrentModalPromptCopyTextForSmoke()
+        => string.Join(", ", _modalPromptChipTags);
+
+    public MetadataCopySmokeSnapshot CopyCurrentModalPromptForSmoke(
+        string searchQuery)
+    {
+        string previousQuery = CurrentSearchQuery;
+        object previousContent = CopyModalPromptButton.Content;
+        object? previousToolTip = CopyModalPromptButton.ToolTip;
+        string previousCopyText = _lastMetadataCopyText;
+        try
+        {
+            SetSearchQuery(searchQuery, persist: false);
+            SyncModalMetadataSidebarForDisplayedVersion();
+            bool enabled = CopyModalPromptButton.IsEnabled;
+            _lastMetadataCopyText = "";
+            CopyDisplayedModalPrompt(
+                CopyModalPromptButton,
+                negative: false,
+                useSystemClipboard: false);
+            string copyText = _lastMetadataCopyText;
+            return new MetadataCopySmokeSnapshot(
+                copyText.Length > 0,
+                enabled,
+                _modalDisplayPath,
+                _currentModalMetadataPath,
+                copyText);
+        }
+        finally
+        {
+            SetSearchQuery(previousQuery, persist: false);
+            SyncModalMetadataSidebarForDisplayedVersion();
+            CopyModalPromptButton.Content = previousContent;
+            CopyModalPromptButton.ToolTip = previousToolTip;
+            _lastMetadataCopyText = previousCopyText;
         }
     }
 

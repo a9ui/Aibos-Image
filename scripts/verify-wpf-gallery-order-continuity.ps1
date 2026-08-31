@@ -70,8 +70,11 @@ try {
         $result.moveOnly -ne $true -or
         $result.thumbnailsRetained -ne $true -or
         $result.modalMovedToPinnedNeighbor -ne $true -or
+        $result.navigatedGridReturnPreserved -ne $true -or
         $result.returnedToTop -ne $true -or
         $result.toolbarContract -ne $true -or
+        $result.filteredListReturnPreserved -ne $true -or
+        $result.galleryRestored -ne $true -or
         $result.realDoneReturnPreserved -ne $true -or
         $result.sourcesUnchanged -ne $true
     ) {
