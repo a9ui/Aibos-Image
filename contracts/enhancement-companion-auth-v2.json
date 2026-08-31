@@ -83,9 +83,9 @@
     ],
     "explicitRecoveryRoute": "POST /api/enhance/queue/recover",
     "explicitRecoveryBodyAllowed": false,
-    "explicitBackendPreparation": "each authenticated recovery or paused=false request may restore the already configured read-only MiniMax H3 runtime mounts when its seal is unavailable; startup and passive reads never perform this preparation",
-    "explicitRecoveryProcessSemantics": "successful recovery runs at most once per companion process; concurrent or repeated authenticated requests reuse that result, while a request carrying an idempotency key drains the durable inbox after recovery and returns the matching receipt",
-    "authenticatedQueueResume": "POST /api/enhance/queue with paused=false repeats configured read-only runtime preparation and completes the same one-time job recovery before persisting resume or starting the worker; paused=true remains available without preparation or recovery so a running worker can be stopped at the next job boundary"
+    "explicitBackendPreparation": "after one-time interrupted-job recovery and the complete committed durable-Inbox drain, the worker passively rereads the final visible durable queue head and may restore the already configured read-only MiniMax H3 runtime mounts only when that head is one exact executable H3 row; a deeper H3 row, non-H3 head, paused queue, or unknown or malformed head performs no H3 path, runtime-status, seal, or mount access, and startup and passive reads never perform preparation",
+    "explicitRecoveryProcessSemantics": "successful interrupted-job recovery runs at most once per companion process and concurrent or repeated authenticated requests reuse that result; authenticated recovery and wake actions defer new claims while draining the complete committed durable Inbox, then wake the worker once, while a request carrying an idempotency key returns the matching receipt",
+    "authenticatedQueueResume": "POST /api/enhance/queue with paused=false completes the same one-time interrupted-job recovery and committed durable-Inbox drain before persisting resume; the resumed worker performs final-head backend preparation before claim, while paused=true remains available without preparation or recovery so a running worker can be stopped at the next job boundary"
   },
   "server": {
     "bind": "127.0.0.1",
