@@ -222,6 +222,20 @@ public partial class MainWindow
             : _tiles;
     }
 
+    private bool TryGetModalNavigationSnapshotTile(
+        string path,
+        out Tile tile)
+    {
+        tile = _modalNavigationSnapshot.FirstOrDefault(candidate =>
+            candidate.IsRealFile
+            && string.Equals(
+                candidate.Path,
+                path,
+                StringComparison.OrdinalIgnoreCase)
+            && File.Exists(candidate.Path))!;
+        return tile is not null;
+    }
+
     private bool TryResolveModalNavigationTile(Tile candidate, out Tile tile)
     {
         if (IsExternalVideoDropSessionTile(candidate)
@@ -247,7 +261,10 @@ public partial class MainWindow
             item.Path,
             candidate.Path,
             StringComparison.OrdinalIgnoreCase))!;
-        return tile is not null;
+        return tile is not null
+            || TryGetModalNavigationSnapshotTile(
+                candidate.Path,
+                out tile);
     }
 
     private static int IndexOfTile(

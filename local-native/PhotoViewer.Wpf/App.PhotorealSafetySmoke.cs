@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace PhotoViewer.Wpf;
@@ -35,7 +36,9 @@ public partial class App
             bool unknownMutationRequestsZero = false;
             bool authoritativeBatchHealthBlocked = false;
             bool legacyTerminalReaderOnlyFailClosed = false;
+            bool modalPinnedSourceContract = false;
             var failureEvidence = new List<object>();
+            var enqueueBodies = new List<JsonElement>();
             int enqueueMutationRequests = 0;
             int readerOnlyMutationRequests = 0;
             int readerOnlyTargetPlanRequests = 0;
@@ -58,6 +61,9 @@ public partial class App
                     "legacy-mixed",
                     "jobs.json");
                 string outputRoot = Path.Combine(smokeRoot, "outputs");
+                string modalFolder = Path.Combine(smokeRoot, "modal-sources");
+                string modalSourceA = Path.Combine(modalFolder, "modal-a.png");
+                string modalSourceB = Path.Combine(modalFolder, "modal-b.png");
                 Directory.CreateDirectory(storeRoot);
                 Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(
@@ -66,6 +72,17 @@ public partial class App
                 Directory.CreateDirectory(Path.GetDirectoryName(
                     jobsLegacyMixedPath)!);
                 Directory.CreateDirectory(outputRoot);
+                Directory.CreateDirectory(modalFolder);
+                WriteSmokePng(
+                    modalSourceA,
+                    64,
+                    48,
+                    Color.FromRgb(40, 80, 120));
+                WriteSmokePng(
+                    modalSourceB,
+                    64,
+                    48,
+                    Color.FromRgb(120, 80, 40));
                 var environment = new Dictionary<string, string>(
                     StringComparer.Ordinal)
                 {
@@ -89,6 +106,7 @@ public partial class App
                 }
 
                 string healthMode = "missing";
+                bool removeModalSourceOnNextHealth = false;
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
                 window.ConfigureModalEnhancementForSmoke((request, _) =>
@@ -99,12 +117,33 @@ public partial class App
                             "/api/enhance/health",
                             StringComparison.Ordinal))
                     {
+                        if (removeModalSourceOnNextHealth)
+                        {
+                            removeModalSourceOnNextHealth = false;
+                            File.Delete(modalSourceA);
+                        }
                         return HealthResponseForPhotorealSafetySmoke(healthMode);
                     }
 
                     if (request.Method != HttpMethod.Get)
                     {
                         Interlocked.Increment(ref enqueueMutationRequests);
+                        string requestBody = request.Content?.ReadAsStringAsync()
+                            .GetAwaiter().GetResult() ?? "{}";
+                        using JsonDocument requestDocument =
+                            JsonDocument.Parse(requestBody);
+                        JsonElement requestRoot = requestDocument.RootElement;
+                        enqueueBodies.Add(requestRoot.Clone());
+                        string requestedOperation = requestRoot.TryGetProperty(
+                                "operation",
+                                out JsonElement operationElement)
+                            ? operationElement.GetString() ?? "upscale"
+                            : "upscale";
+                        string requestedSourceId = requestRoot.TryGetProperty(
+                                "sourceId",
+                                out JsonElement sourceIdElement)
+                            ? sourceIdElement.GetString() ?? ""
+                            : "";
                         string requestId = request.Headers.TryGetValues(
                                 "Idempotency-Key",
                                 out IEnumerable<string>? requestIds)
@@ -117,7 +156,9 @@ public partial class App
                                 job = new
                                 {
                                     id = "accepted-krea-job",
-                                    operation = "photoreal",
+                                    operation = requestedOperation,
+                                    sourceId = requestedSourceId,
+                                    sourcePath = requestedSourceId,
                                     status = "queued",
                                 },
                                 receipt = new
@@ -353,6 +394,52 @@ public partial class App
                         AppChecked: false,
                         ModalChecked: false,
                     };
+
+                await window.LoadFolderAsync(modalFolder);
+                window.SetSortByForSmoke("name");
+                bool modalAOpened = window.SelectFileNameForSmoke("modal-a.png")
+                    && window.OpenModalForSmoke();
+                bool modalAStayedInNavigationSnapshot = modalAOpened
+                    && window.MakeModalSourceNavigationSnapshotOnlyForSmoke();
+                bool backgroundSelectionMoved = window.SelectFileNameForSmoke(
+                    "modal-b.png");
+                bool modalActionsStayedOnA = modalAOpened
+                    && modalAStayedInNavigationSnapshot
+                    && backgroundSelectionMoved
+                    && string.Equals(
+                        window.ModalSourcePathForSmoke,
+                        modalSourceA,
+                        StringComparison.OrdinalIgnoreCase)
+                    && window.ModalContextUpscaleNextEnabledForSmoke
+                    && window.ModalContextPhotorealNextEnabledForSmoke;
+                int modalBodiesBefore = enqueueBodies.Count;
+                await window.StartModalContextEnhancementNextForSmokeAsync(
+                    "upscale");
+                await window.StartModalContextEnhancementNextForSmokeAsync(
+                    "photoreal");
+                JsonElement[] modalBodies = enqueueBodies
+                    .Skip(modalBodiesBefore)
+                    .ToArray();
+                bool everyModalBodyPinnedToA = modalBodies.Length == 2
+                    && modalBodies.All(body =>
+                        body.TryGetProperty(
+                            "sourceId",
+                            out JsonElement sourceId)
+                        && string.Equals(
+                            sourceId.GetString(),
+                            modalSourceA,
+                            StringComparison.OrdinalIgnoreCase));
+                int mutationsBeforeDisappearance = enqueueMutationRequests;
+                removeModalSourceOnNextHealth = true;
+                await window.StartModalContextEnhancementNextForSmokeAsync(
+                    "photoreal");
+                bool disappearedSourceBlocked = !File.Exists(modalSourceA)
+                    && enqueueMutationRequests == mutationsBeforeDisappearance
+                    && !window.ModalContextUpscaleNextEnabledForSmoke
+                    && !window.ModalContextPhotorealNextEnabledForSmoke;
+                modalPinnedSourceContract = modalActionsStayedOnA
+                    && everyModalBodyPinnedToA
+                    && disappearedSourceBlocked;
 
                 string[] knownAdapters =
                 [
@@ -743,7 +830,8 @@ public partial class App
                     && modalClassificationExact
                     && unknownMutationRequestsZero
                     && authoritativeBatchHealthBlocked
-                    && legacyTerminalReaderOnlyFailClosed;
+                    && legacyTerminalReaderOnlyFailClosed
+                    && modalPinnedSourceContract;
                 if (!ok)
                 {
                     failure = "Photoreal safety invariants did not all hold.";
@@ -793,6 +881,7 @@ public partial class App
                     unknownMutationRequestsZero,
                     authoritativeBatchHealthBlocked,
                     legacyTerminalReaderOnlyFailClosed,
+                    modalPinnedSourceContract,
                     enqueueMutationRequests,
                     readerOnlyMutationRequests,
                     readerOnlyTargetPlanRequests,
@@ -911,6 +1000,10 @@ public partial class App
                 lastTerminalAt = "2026-08-30T00:00:01.000Z",
             },
             worker = new { paused = false },
+            backendAvailability = new
+            {
+                kreaPhotorealV1 = new { queueHeadBlocked = false },
+            },
             capabilities,
         };
     }
@@ -943,7 +1036,7 @@ public partial class App
             _ => "",
         };
         string capabilities =
-            "{\"durableEnqueueInboxV1\":{\"ready\":true,\"protocolVersion\":1,\"backendGeneration\":\"json-v1\"},\"photorealPromptControlsV2\":true"
+            "{\"durableEnqueueInboxV1\":{\"ready\":true,\"protocolVersion\":1,\"backendGeneration\":\"json-v1\"},\"photorealPromptControlsV2\":true,\"atomicImageEnqueueNext\":true"
             + kreaMembers
             + "}";
         string json = mode == "duplicate-capabilities"
