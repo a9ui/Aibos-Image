@@ -103,12 +103,79 @@ public partial class App
                         Path.Combine(folder, expectedNextName),
                         StringComparison.OrdinalIgnoreCase);
                 string? modalName = Path.GetFileName(window.ModalSourcePathForSmoke);
-                window.CloseModalForSmoke();
+                string gridReturnName = names[12];
+                bool modalMovedToGridReturn = window.NavigateModalForSmoke(11)
+                    && string.Equals(
+                        window.ModalSourcePathForSmoke,
+                        Path.Combine(folder, gridReturnName),
+                        StringComparison.OrdinalIgnoreCase);
+                window.CloseModalForSmoke(restoreFocus: true);
+                await window.WaitForGridZoomAnchorForSmokeAsync();
+                bool gridReturnFocused =
+                    await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                bool navigatedGridReturnPreserved = modalMovedToGridReturn
+                    && gridReturnFocused
+                    && string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        gridReturnName,
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        window.LastGridZoomAnchorPathForSmoke,
+                        Path.Combine(folder, gridReturnName),
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        window.FocusedGalleryPathForSmoke,
+                        Path.Combine(folder, gridReturnName),
+                        StringComparison.OrdinalIgnoreCase);
 
                 bool scrolledAway = await window.ScrollGridToMiddleForSmokeAsync()
                     && window.GalleryVerticalOffsetForSmoke > 0.5;
                 bool returnedToTop = await window.InvokeGalleryScrollToTopForSmokeAsync();
                 bool toolbarContract = window.GalleryScrollToTopButtonContractForSmoke;
+
+                MainWindow.SearchFilterCompletion filteredProjection =
+                    await window.SetSearchInputForSmokeAsync("image-2");
+                bool filteredProjectionReady = filteredProjection.Applied
+                    && !filteredProjection.Discarded
+                    && window.FilteredCountForSmoke == 10;
+                bool listModeSet = window.SetListModeForSmoke();
+                string listStartName = names[22];
+                string listReturnName = names[27];
+                bool listStartSelected = window.SelectFileNameForSmoke(listStartName);
+                await window.Dispatcher.InvokeAsync(
+                    () => { },
+                    DispatcherPriority.Render);
+                bool listModalOpened = listStartSelected
+                    && window.OpenModalForSmoke();
+                bool modalMovedToListReturn = window.NavigateModalForSmoke(5)
+                    && string.Equals(
+                        window.ModalSourcePathForSmoke,
+                        Path.Combine(folder, listReturnName),
+                        StringComparison.OrdinalIgnoreCase);
+                window.CloseModalForSmoke(restoreFocus: true);
+                await window.WaitForGridZoomAnchorForSmokeAsync();
+                bool listReturnFocused =
+                    await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                string? listSelectedName = window.SelectedFileNameForSmoke;
+                string? listFocusedPath = window.FocusedGalleryPathForSmoke;
+                bool filteredListReturnPreserved = filteredProjectionReady
+                    && listModeSet
+                    && listModalOpened
+                    && modalMovedToListReturn
+                    && listReturnFocused
+                    && string.Equals(
+                        listSelectedName,
+                        listReturnName,
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        listFocusedPath,
+                        Path.Combine(folder, listReturnName),
+                        StringComparison.OrdinalIgnoreCase);
+                MainWindow.SearchFilterCompletion clearedProjection =
+                    await window.SetSearchInputForSmokeAsync("");
+                bool galleryRestored = clearedProjection.Applied
+                    && !clearedProjection.Discarded
+                    && window.SetGridModeForSmoke();
 
                 bool realDoneSortSet = await window.SetSortByInteractiveForSmokeAsync(
                     "photoreal-completed-newest");
@@ -179,9 +246,12 @@ public partial class App
                     && thumbnailsRetained
                     && modalOpened
                     && modalMovedToPinnedNeighbor
+                    && navigatedGridReturnPreserved
                     && scrolledAway
                     && returnedToTop
                     && toolbarContract
+                    && filteredListReturnPreserved
+                    && galleryRestored
                     && realDoneReturnPreserved
                     && sourcesUnchanged
                     && isolated;
@@ -212,9 +282,24 @@ public partial class App
                     modalMovedToPinnedNeighbor,
                     expectedNextName,
                     modalName,
+                    gridReturnName,
+                    modalMovedToGridReturn,
+                    gridReturnFocused,
+                    navigatedGridReturnPreserved,
                     scrolledAway,
                     returnedToTop,
                     toolbarContract,
+                    filteredProjectionReady,
+                    listModeSet,
+                    listStartName,
+                    listReturnName,
+                    listModalOpened,
+                    modalMovedToListReturn,
+                    listReturnFocused,
+                    listSelectedName,
+                    listFocusedPath,
+                    filteredListReturnPreserved,
+                    galleryRestored,
                     realDoneSortSet,
                     realDoneScrolled,
                     realDoneSourceName,
