@@ -1079,14 +1079,14 @@ public partial class App
                     && window.KreaFixedLoraPresentationForSmoke
                     && window.PhotorealEngineSelectionForSmoke is
                         (kreaAnimeToRealEngineId, kreaAnimeToRealEngineId)
-                    && !window.CurrentPhotorealEngineSupportsQueuedSettingsUpdateForSmoke
+                    && window.CurrentPhotorealEngineSupportsQueuedSettingsUpdateForSmoke
                     && EnhancementWorkspaceJobView
                         .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
                             "comfyui-flux2-photoreal")
-                    && !EnhancementWorkspaceJobView
+                    && EnhancementWorkspaceJobView
                         .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
                             legacyKreaEngineId)
-                    && !EnhancementWorkspaceJobView
+                    && EnhancementWorkspaceJobView
                         .IsQueuedPhotorealSettingsUpdateAdapterForSmoke(
                             kreaAnimeToRealEngineId);
                 bool builtInStyleSelectedWithKrea =

@@ -297,26 +297,62 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   companion applies that order in one write only if the queued-id snapshot is
   still exact; a concurrent claim, enqueue, or cancel returns conflict without
   a partial reorder or worker wake.
-- With exact `deferredBackendSkipV1`, a recognized queued Krea row whose backend
-  is temporarily unavailable stays byte-equivalent at its durable queue order.
-  Execution selection may claim the earliest later runnable row, but it does
-  not reorder or update the waiting row. Readiness is reconsidered only at an
-  explicit pump, recovery, resume, enqueue, or Companion restart; passive Jobs
-  and health reads never monitor assets, start a worker, or wake the queue.
-  The explicit gate proves the complete sealed Krea inventory, pinned digests,
-  canonical identities, and ACL lease before claim. A readiness or security
-  drift detected between that gate and owned runtime start restores the exact
-  pre-claim queued row instead of settling it failed or changing queue order.
-- With exact `fairGpuFamilyDispatchV1`, the one shared GPU lane alternates
-  runnable image and video families whenever both are waiting. Each family
-  keeps reader order, durable `queueOrder` is never rewritten by selection,
-  and the previous family is derived from exact durable start timestamps so
-  restart and recovery need no passive scheduler-state write. Deferred backend
-  skip is applied first, so an unavailable Krea row remains byte-equivalent
-  while a later runnable image can prevent a long video backlog from starving
-  image work. The existing physical GPU lease still permits only one worker.
+- “待機中を現在設定へ” and each queued row's “設定を更新” apply only when
+  the exact queued adapter matches the current selected photoreal engine. The
+  supported bounded set is FLUX.2 Klein, Krea Anything-to-Real V3, and Krea
+  Anime-to-Real V1. An update preserves the job id, adapter identity, source,
+  status, and durable `queueOrder`; it neither moves nor wakes the queued row.
+  Every engine requires exact `queuedPhotorealSettingsUpdateV1: true`; Krea
+  additionally requires exact additive
+  `queuedKreaPhotorealSettingsUpdateV1: true`, so an older FLUX-only companion
+  keeps the Krea actions disabled without disabling its compatible FLUX action.
+  Krea Anything-to-Real may carry 1536 only under its existing exact health
+  capability, while the other engines retain their accepted resolution bounds.
+  Krea updates keep Engine LoRA fixed on at 1 and `kvCache` on; Anime-to-Real
+  additionally fixes denoise 100, 8 steps, and CFG 1, while Anything-to-Real
+  derives denoise from bounded Strength and accepts its bounded STEP and CFG.
+  A disallowed 1536 update returns conflict and writes nothing.
+- The visible global queue is the execution queue. After any running row, the
+  companion claims queued rows by durable `queueOrder` using the exact reader
+  ordering in `PV-ENHANCE-QUEUE-001`; it does not alternate image and video
+  families or maintain a scheduler cursor. The only permitted exception is an
+  exact adapter id in the contract's bounded optional non-Krea deferred list;
+  that list is empty in schema version 1. The existing physical GPU lease still
+  permits only one worker.
+- The two recognized Krea photoreal adapters are strict FIFO barriers. If one
+  is first among queued rows and its backend is unavailable, that row stays
+  byte-equivalent at its durable queue order and no later job, including video,
+  starts. The optional bounded passive health field
+  `backendAvailability.kreaPhotorealV1.queueHeadBlocked` is true only for that
+  exact state. Its absence or malformed value keeps the rest of health and its
+  capabilities readable but never infers that the queue head is blocked. This
+  intentional idle pump is not `queued-without-pump` and does not expose queue
+  recovery. A reader suppresses a conflicting recovery issue only after its
+  cached visible queue head also identifies one of the two exact Krea rows;
+  an uncorroborated boolean never hides a real pump failure. Readiness is
+  reconsidered only at an explicit
+  pump, recovery, resume, enqueue, or Companion restart; passive Jobs and
+  health reads never monitor assets, start a worker, or wake the queue. The
+  explicit gate proves
+  the complete sealed Krea inventory, pinned digests, canonical identities, and
+  ACL lease before claim. A readiness or security drift detected between that
+  gate and owned runtime start restores the exact pre-claim queued row instead
+  of settling it failed or changing queue order.
+- Exact `deferredBackendSkipV1` is limited to an exact adapter id in the
+  contract's bounded recognized optional non-Krea list. Schema version 1 has no
+  members. It never skips either Krea adapter or an unknown, future, duplicate,
+  or malformed row, and it never changes durable or visible order.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
   ComfyUI, or GPU side effect.
+- Health `store.catalogRevision` is the monotonic authority for terminal,
+  new-row, and managed-media changes visible in Jobs. Its advance invalidates
+  the displayed snapshot by the next poll, while progress-only and heartbeat
+  writes may advance `inventoryRevision` without forcing a full SQLite read.
+  If catalog revision or counts change during that read, WPF coalesces at most
+  one replacement snapshot instead of entering an unbounded reread loop.
+  `inventoryRevision` remains mutation-debt evidence; only a legacy health
+  writer with no catalog revision may use its advance as a throttled passive
+  fallback.
 - Explicit durable-Inbox consumption scans at most 256 directory entries, 128
   committed envelopes, and 64 MiB of envelope bytes per poll across pending and
   processing. Each envelope is opened and read through one stable plain-file

@@ -409,6 +409,10 @@ public partial class App
                 paused,
                 pumpRunning = !paused,
             },
+            backendAvailability = new
+            {
+                kreaPhotorealV1 = new { queueHeadBlocked = false },
+            },
             capabilities = new
             {
                 queuedPhotorealSettingsUpdateV1 = false,
