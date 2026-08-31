@@ -72,7 +72,9 @@ try {
         'unknownRowsReaderOnly',
         'modalClassificationExact',
         'unknownMutationRequestsZero',
-        'authoritativeBatchHealthBlocked'
+        'authoritativeBatchHealthBlocked',
+        'modalPinnedSourceContract',
+        'modalSamePathReplacementBlocked'
     )) {
         Assert-True ($result.$propertyName -eq $true) `
             "Photoreal safety invariant failed: $propertyName"

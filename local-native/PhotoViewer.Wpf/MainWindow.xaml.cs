@@ -10512,6 +10512,14 @@ public partial class MainWindow : Window
 
         if (pinnedSourceTile is not null)
         {
+            if (!TryCaptureEnhancementSourcePrePublishGuard(
+                    sourceIdentity,
+                    out EnhancementSourcePrePublishGuard sourceVersionGuard))
+            {
+                SetStatusToast("The displayed modal source could not be pinned safely for Enhancement.");
+                return;
+            }
+
             Func<string?>? sourceBoundaryValidator = prePublishValidator;
             string pinnedSourcePath = tile.Path;
             prePublishValidator = () =>
@@ -10529,7 +10537,9 @@ public partial class MainWindow : Window
                         currentSourceIdentity,
                         sourceIdentity,
                         StringComparison.OrdinalIgnoreCase)
-                    || !File.Exists(currentSourceIdentity))
+                    || !File.Exists(currentSourceIdentity)
+                    || !IsEnhancementSourcePrePublishGuardCurrent(
+                        sourceVersionGuard))
                 {
                     return "The displayed modal source changed or became unavailable before the request was published.";
                 }

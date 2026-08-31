@@ -32396,8 +32396,10 @@ public partial class App : Application
         string favoritesPath = Path.Combine(smokeRoot, "favorites.json");
         string searchHistoryPath = Path.Combine(smokeRoot, "search-history.json");
         string taggedName = "tagged.png";
+        string boundedName = "bounded.png";
         string otherName = "other.png";
         string taggedPath = Path.Combine(folder, taggedName);
+        string boundedPath = Path.Combine(folder, boundedName);
         string boundedPrompt = "";
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
@@ -32424,6 +32426,13 @@ public partial class App : Application
                 "tag-cap-match",
                 beyondScanPadding,
                 "scan-cap-match");
+            WritePngTextFixture(
+                boundedPath,
+                "parameters",
+                boundedPrompt
+                    + "\nNegative prompt: bounded-negative"
+                    + "\nSteps: 12, Sampler: Euler",
+                Color.FromRgb(142, 68, 173));
             WriteSmokePng(Path.Combine(folder, otherName), 64, 48, Color.FromRgb(46, 204, 113));
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", seenPath);
@@ -32564,6 +32573,35 @@ public partial class App : Application
                         StringComparison.Ordinal)
                     && versionSplitSurface.OriginalMatchesAccessibilityReady
                     && versionSplitSurface.OriginalMatchesHaveNoPromptMappingContext;
+                string versionSplitCopy =
+                    win.CurrentModalPromptCopyTextForSmoke();
+                bool originalOnlyExcludedFromCopy = string.Equals(
+                    versionSplitCopy,
+                    "enhanced-version-only",
+                    StringComparison.Ordinal)
+                    && expectedOriginalOnlyMatches.All(match =>
+                        !versionSplitCopy.Contains(
+                            match,
+                            StringComparison.OrdinalIgnoreCase));
+                win.CloseModalForSmoke();
+                win.SetSearchQuery("", persist: false);
+                PngMetadataSmokeSnapshot boundedMetadata =
+                    await win.SelectPngMetadataForSmokeAsync(boundedName);
+                bool boundedModalOpened = win.OpenModalForSmoke();
+                ModalMetadataSmokeSnapshot boundedModal =
+                    await win.WaitForModalDisplayedMetadataForSmokeAsync(
+                        boundedPath);
+                MetadataCopySmokeSnapshot boundedPromptCopy =
+                    win.CopyCurrentModalPromptForSmoke(boundedQuery);
+                bool boundedPromptCopyCurrent = boundedMetadata.MetadataApplied
+                    && boundedModalOpened
+                    && boundedModal.MetadataCurrent
+                    && boundedPromptCopy.Copied
+                    && boundedPromptCopy.CopyEnabled
+                    && string.Equals(
+                        boundedPromptCopy.CopyText,
+                        string.Join(", ", boundedPresentation.CurrentVersionTags),
+                        StringComparison.Ordinal);
                 win.CloseModalForSmoke();
                 win.SetSearchQuery("", persist: false);
                 PngMetadataSmokeSnapshot missingMetadata = await win.SelectPngMetadataForSmokeAsync(otherName);
@@ -32605,6 +32643,8 @@ public partial class App : Application
                     && samePromptHasNoOriginalOnlyMatches
                     && versionAuthoritiesRemainDistinct
                     && originalMatchesRenderedSeparately
+                    && boundedPromptCopyCurrent
+                    && originalOnlyExcludedFromCopy
                     && appended.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && deduped.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && sourceUntouched && searchPersisted
@@ -32651,6 +32691,10 @@ public partial class App : Application
                         versionAuthoritiesRemainDistinct,
                     OriginalMatchesRenderedSeparately =
                         originalMatchesRenderedSeparately,
+                    BoundedPromptCopy = boundedPromptCopy,
+                    BoundedPromptCopyCurrent = boundedPromptCopyCurrent,
+                    OriginalOnlyExcludedFromCopy =
+                        originalOnlyExcludedFromCopy,
                     SourceUntouched = sourceUntouched,
                     SearchPersisted = searchPersisted,
                     ReloadedQuery = reloadedQuery,
@@ -36195,6 +36239,9 @@ public partial class App : Application
         public bool SamePromptHasNoOriginalOnlyMatches { get; init; }
         public bool VersionAuthoritiesRemainDistinct { get; init; }
         public bool OriginalMatchesRenderedSeparately { get; init; }
+        public MetadataCopySmokeSnapshot? BoundedPromptCopy { get; init; }
+        public bool BoundedPromptCopyCurrent { get; init; }
+        public bool OriginalOnlyExcludedFromCopy { get; init; }
         public bool SourceUntouched { get; init; }
         public bool SearchPersisted { get; init; }
         public string? ReloadedQuery { get; init; }

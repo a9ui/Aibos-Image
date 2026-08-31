@@ -121,6 +121,10 @@ public partial class MainWindow
         string CanonicalPath,
         ExternalFileDropSourceVersion SourceVersion);
 
+    private readonly record struct EnhancementSourcePrePublishGuard(
+        string CanonicalPath,
+        ExternalFileDropSourceVersion SourceVersion);
+
     private sealed class ExternalImageValidation : IDisposable
     {
         private int _disposed;
@@ -1289,6 +1293,64 @@ public partial class MainWindow
             ? null
             : error;
     }
+
+    private bool TryCaptureEnhancementSourcePrePublishGuard(
+        string sourcePath,
+        out EnhancementSourcePrePublishGuard guard)
+    {
+        guard = default;
+        if (!TryResolveEnhancementSourceIdentity(
+                sourcePath,
+                out string canonicalPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var stream = new FileStream(
+                canonicalPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 4_096,
+                FileOptions.RandomAccess);
+            if (!WindowsPathIdentity.TryGetFinalPath(
+                    stream.SafeFileHandle,
+                    out string openedCanonicalPath)
+                || !string.Equals(
+                    openedCanonicalPath,
+                    canonicalPath,
+                    StringComparison.OrdinalIgnoreCase)
+                || !TryReadExternalFileDropSourceVersion(
+                    stream.SafeFileHandle,
+                    out ExternalFileDropSourceVersion sourceVersion))
+            {
+                return false;
+            }
+
+            guard = new EnhancementSourcePrePublishGuard(
+                openedCanonicalPath,
+                sourceVersion);
+            return true;
+        }
+        catch
+        {
+            guard = default;
+            return false;
+        }
+    }
+
+    private bool IsEnhancementSourcePrePublishGuardCurrent(
+        EnhancementSourcePrePublishGuard guard)
+        => TryCaptureEnhancementSourcePrePublishGuard(
+                guard.CanonicalPath,
+                out EnhancementSourcePrePublishGuard current)
+            && string.Equals(
+                current.CanonicalPath,
+                guard.CanonicalPath,
+                StringComparison.OrdinalIgnoreCase)
+            && guard.SourceVersion.SameFileVersion(current.SourceVersion);
 
     private void CloseExternalFileDropSessionForReplacement()
     {

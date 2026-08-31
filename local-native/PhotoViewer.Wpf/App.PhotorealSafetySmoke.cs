@@ -37,6 +37,7 @@ public partial class App
             bool authoritativeBatchHealthBlocked = false;
             bool legacyTerminalReaderOnlyFailClosed = false;
             bool modalPinnedSourceContract = false;
+            bool modalSamePathReplacementBlocked = false;
             var failureEvidence = new List<object>();
             var enqueueBodies = new List<JsonElement>();
             int enqueueMutationRequests = 0;
@@ -107,6 +108,7 @@ public partial class App
 
                 string healthMode = "missing";
                 bool removeModalSourceOnNextHealth = false;
+                string? replaceModalSourceOnNextHealth = null;
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
                 window.ConfigureModalEnhancementForSmoke((request, _) =>
@@ -117,6 +119,15 @@ public partial class App
                             "/api/enhance/health",
                             StringComparison.Ordinal))
                     {
+                        if (replaceModalSourceOnNextHealth is string replacement)
+                        {
+                            replaceModalSourceOnNextHealth = null;
+                            DateTime sourceWriteUtc = File.GetLastWriteTimeUtc(
+                                modalSourceA);
+                            File.SetLastWriteTimeUtc(replacement, sourceWriteUtc);
+                            File.Move(replacement, modalSourceA, overwrite: true);
+                            File.SetLastWriteTimeUtc(modalSourceA, sourceWriteUtc);
+                        }
                         if (removeModalSourceOnNextHealth)
                         {
                             removeModalSourceOnNextHealth = false;
@@ -429,6 +440,38 @@ public partial class App
                             sourceId.GetString(),
                             modalSourceA,
                             StringComparison.OrdinalIgnoreCase));
+                int mutationsBeforeReplacement = enqueueMutationRequests;
+                string upscaleReplacement = Path.Combine(
+                    smokeRoot,
+                    "modal-a-upscale-replacement.png");
+                WriteSmokePng(
+                    upscaleReplacement,
+                    64,
+                    48,
+                    Color.FromRgb(15, 145, 215));
+                replaceModalSourceOnNextHealth = upscaleReplacement;
+                await window.StartModalContextEnhancementNextForSmokeAsync(
+                    "upscale");
+                bool upscaleReplacementBlocked = File.Exists(modalSourceA)
+                    && !File.Exists(upscaleReplacement)
+                    && enqueueMutationRequests == mutationsBeforeReplacement;
+
+                string photorealReplacement = Path.Combine(
+                    smokeRoot,
+                    "modal-a-photoreal-replacement.png");
+                WriteSmokePng(
+                    photorealReplacement,
+                    64,
+                    48,
+                    Color.FromRgb(210, 35, 125));
+                replaceModalSourceOnNextHealth = photorealReplacement;
+                await window.StartModalContextEnhancementNextForSmokeAsync(
+                    "photoreal");
+                bool photorealReplacementBlocked = File.Exists(modalSourceA)
+                    && !File.Exists(photorealReplacement)
+                    && enqueueMutationRequests == mutationsBeforeReplacement;
+                modalSamePathReplacementBlocked = upscaleReplacementBlocked
+                    && photorealReplacementBlocked;
                 int mutationsBeforeDisappearance = enqueueMutationRequests;
                 removeModalSourceOnNextHealth = true;
                 await window.StartModalContextEnhancementNextForSmokeAsync(
@@ -439,6 +482,7 @@ public partial class App
                     && !window.ModalContextPhotorealNextEnabledForSmoke;
                 modalPinnedSourceContract = modalActionsStayedOnA
                     && everyModalBodyPinnedToA
+                    && modalSamePathReplacementBlocked
                     && disappearedSourceBlocked;
 
                 string[] knownAdapters =
@@ -882,6 +926,7 @@ public partial class App
                     authoritativeBatchHealthBlocked,
                     legacyTerminalReaderOnlyFailClosed,
                     modalPinnedSourceContract,
+                    modalSamePathReplacementBlocked,
                     enqueueMutationRequests,
                     readerOnlyMutationRequests,
                     readerOnlyTargetPlanRequests,
