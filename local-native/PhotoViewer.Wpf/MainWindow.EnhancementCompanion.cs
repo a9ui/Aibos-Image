@@ -3461,6 +3461,12 @@ public partial class MainWindow
             RedirectStandardOutput = false,
             RedirectStandardError = false,
         };
+        // Windows Insider build 26200 can fast-fail Node's V8 Maglev tier with
+        // STATUS_STACK_BUFFER_OVERRUN (0xc0000409). Keep TurboFan enabled while
+        // removing that unstable intermediate tier for this long-lived local
+        // service. This V8 flag must precede the launcher path and cannot be
+        // supplied through NODE_OPTIONS.
+        startInfo.ArgumentList.Add("--no-maglev");
         startInfo.ArgumentList.Add(companionRoot.LauncherPath);
         startInfo.ArgumentList.Add("--port");
         startInfo.ArgumentList.Add(endpoint.Port.ToString(
@@ -4115,8 +4121,13 @@ public partial class MainWindow
             startInfo.Environment["PVU_NO_OPEN"],
             startInfo.Environment["PVU_COMFY_AUTOSTART"],
             startInfo.Environment["PVU_H3_POWERSHELL_PATH"],
+            startInfo.ArgumentList.Count >= 2
+                && string.Equals(
+                    startInfo.ArgumentList[0],
+                    "--no-maglev",
+                    StringComparison.Ordinal),
             startInfo.ArgumentList.Contains("--defer-queue-recovery"),
-            Path.GetFileName(startInfo.ArgumentList[0]));
+            Path.GetFileName(startInfo.ArgumentList[1]));
     }
     public void ConfigureEnhancementCompanionAutoStartForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,
@@ -5166,5 +5177,6 @@ public sealed record EnhancementCompanionLaunchContractSmokeSnapshot(
     string? NoOpen,
     string? ComfyAutostart,
     string? H3PowerShellPath,
+    bool DisablesMaglev,
     bool DefersQueueRecovery,
     string LauncherFileName);

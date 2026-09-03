@@ -1724,6 +1724,7 @@ public partial class App
                         "WindowsPowerShell",
                         "v1.0",
                         "powershell.exe")
+                    && companionLaunch.DisablesMaglev
                     && companionLaunch.DefersQueueRecovery;
                 window.ConfigureModalPhotorealSettingsForSmoke(
                     0.55,

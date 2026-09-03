@@ -67,6 +67,8 @@ public partial class MainWindow
         (double)MiniMaxH3VideoFrameCount / MiniMaxH3VideoPlaybackFps;
     private const string PhotorealVideoSourceRequestPrefix =
         "photoreal-job:";
+    private const string VideoRetrySourceUnavailableError =
+        "保存済み動画Jobの元画像が見つからないか変更されています。Jobは追加していません。元画像を開き直して、新しい動画Jobとして登録してください。";
     private const int NormalVideoSteps = 20;
     private const int HighVideoSteps = 40;
     private const int DefaultVideoDurationSeconds = 6;
@@ -1167,6 +1169,12 @@ public partial class MainWindow
         }
         return PinVideoSourceForDurablePublish(stamp);
     }
+
+    private string? ValidateVideoRetrySourceForDurablePublish(
+        EnhancementWorkspaceJobView job)
+        => TryCaptureVideoRetrySourceStamp(job, out _)
+            ? null
+            : VideoRetrySourceUnavailableError;
 
     private void PopulateGalleryVideoSourceMenu(
         MenuItem videoMenu,
@@ -3633,7 +3641,20 @@ public partial class MainWindow
         }
         if (File.Exists(movedPath))
             File.Move(movedPath, fullPath);
-        return blocked;
+        bool missingSourceClassified = false;
+        File.Move(fullPath, movedPath);
+        try
+        {
+            missingSourceClassified = string.Equals(
+                ValidateVideoRetrySourceForDurablePublish(job),
+                VideoRetrySourceUnavailableError,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Move(movedPath, fullPath);
+        }
+        return blocked && missingSourceClassified;
     }
 
     public bool ModalVideoGenerationBoardVisibleForSmoke
