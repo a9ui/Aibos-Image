@@ -23,6 +23,20 @@ An external Enhancement companion must be selected explicitly with
 `AIBOS_COMPANION_ROOT` by its trusted dispatcher. The public launcher does not
 guess a private companion root from unrelated Git worktrees.
 
+For a desktop shortcut whose Aibos process is independent of the program that
+requested the launch, install the per-user Task Scheduler dispatcher:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-aibos-desktop-launcher.ps1
+```
+
+Pass `-CompanionRoot <path>` only when selecting a trusted external Enhancement
+companion explicitly. The shortcut asks Task Scheduler to start Aibos in the
+interactive user session. Each fresh application start still runs the normal
+source-revision and source-content check, rebuilding the local Release target
+when the current checkout has changed. Re-running the installer updates both
+the task action and the desktop shortcut to the current repository path.
+
 ## Product boundary
 
 - Normal viewing and state changes do not rewrite source images.
