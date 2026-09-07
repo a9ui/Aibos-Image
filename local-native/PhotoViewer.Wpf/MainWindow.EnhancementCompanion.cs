@@ -1673,6 +1673,10 @@ public partial class MainWindow
                     [item]);
             }
         }
+        catch (VideoRetrySourceUnavailableException)
+        {
+            return new EnhancementApiResponse(false, 409, null, VideoRetrySourceUnavailableError);
+        }
         catch (Exception ex) when (
             ex is IOException
                 or Win32Exception

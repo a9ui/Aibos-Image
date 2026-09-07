@@ -69,6 +69,8 @@ public partial class MainWindow
         "photoreal-job:";
     private const string VideoRetrySourceUnavailableError =
         "保存済み動画Jobの元画像が見つからないか変更されています。Jobは追加していません。元画像を開き直して、新しい動画Jobとして登録してください。";
+    private sealed class VideoRetrySourceUnavailableException(Exception? inner = null)
+        : IOException(VideoRetrySourceUnavailableError, inner);
     private const int NormalVideoSteps = 20;
     private const int HighVideoSteps = 40;
     private const int DefaultVideoDurationSeconds = 6;
@@ -1164,10 +1166,16 @@ public partial class MainWindow
     {
         if (!TryCaptureVideoRetrySourceStamp(job, out VideoH3SourceStamp stamp))
         {
-            throw new IOException(
-                "The saved video source could not be verified before durable retry publication.");
+            throw new VideoRetrySourceUnavailableException();
         }
-        return PinVideoSourceForDurablePublish(stamp);
+        try
+        {
+            return PinVideoSourceForDurablePublish(stamp);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new VideoRetrySourceUnavailableException(ex);
+        }
     }
 
     private string? ValidateVideoRetrySourceForDurablePublish(
@@ -3559,7 +3567,7 @@ public partial class MainWindow
         return blocked;
     }
 
-    public bool VideoRetrySourcePublishPinBlocksMoveForSmoke(
+    public async Task<bool> VideoRetrySourcePublishPinBlocksMoveForSmokeAsync(
         string sourcePath)
     {
         string fullPath;
@@ -3654,7 +3662,53 @@ public partial class MainWindow
         {
             File.Move(movedPath, fullPath);
         }
-        return blocked && missingSourceClassified;
+        string inboxRoot = Path.Combine(
+            Path.GetDirectoryName(ResolvedEnhancementJobsPath)!, "enqueue-inbox");
+        string[] InboxFiles() => Directory.Exists(inboxRoot)
+            ? Directory.GetFiles(inboxRoot, "*.json", SearchOption.AllDirectories)
+                .OrderBy(path => path, StringComparer.Ordinal).ToArray()
+            : [];
+        string[] beforeInbox = InboxFiles();
+        async Task<EnhancementApiResponse> SendRetry(Func<string?> validator, bool storageFailure = false)
+            => await SendEnhancementEnqueueAsync(
+                body: null,
+                retryJobId: job.Id,
+                prePublishValidator: validator,
+                onBeforeDurablePublish: _ => storageFailure
+                    ? throw new IOException("Synthetic Jobs writer failure.")
+                    : AcquireVideoDurablePublishLease(() => PinVideoRetrySourceForDurablePublish(job)),
+                durableRetryOperation: "video",
+                durableRetryAdapterId: MiniMaxH3VideoBackendId);
+        bool classified = true;
+        DateTime sourceMtime = File.GetLastWriteTimeUtc(fullPath);
+        for (int scenario = 0; scenario < 3; scenario++)
+        {
+            try
+            {
+                if (scenario == 0) File.Move(fullPath, movedPath);
+                EnhancementApiResponse response = await SendRetry(() =>
+                {
+                    string? error = ValidateVideoRetrySourceForDurablePublish(job);
+                    if (scenario == 1) File.Move(fullPath, movedPath);
+                    if (scenario == 2) File.SetLastWriteTimeUtc(fullPath, sourceMtime.AddSeconds(2));
+                    return error;
+                });
+                classified &= response.StatusCode == 409
+                    && !response.Ok && !response.SavedForDelivery
+                    && EnhancementApiErrorCode(response) == "VIDEO_RETRY_SOURCE_UNAVAILABLE";
+                using IDisposable released = AcquireEnhancementJobsWriteLeaseForDurablePublish();
+            }
+            finally
+            {
+                if (File.Exists(movedPath)) File.Move(movedPath, fullPath);
+                File.SetLastWriteTimeUtc(fullPath, sourceMtime);
+            }
+        }
+        EnhancementApiResponse storageResponse = await SendRetry(() => null, storageFailure: true);
+        bool storageNotSource = !storageResponse.Ok && !storageResponse.SavedForDelivery
+            && EnhancementApiErrorCode(storageResponse) != "VIDEO_RETRY_SOURCE_UNAVAILABLE";
+        return blocked && missingSourceClassified && classified && storageNotSource
+            && beforeInbox.SequenceEqual(InboxFiles(), StringComparer.Ordinal);
     }
 
     public bool ModalVideoGenerationBoardVisibleForSmoke
