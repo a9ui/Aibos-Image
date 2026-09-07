@@ -36,6 +36,14 @@ interactive user session. Each fresh application start still runs the normal
 source-revision and source-content check, rebuilding the local Release target
 when the current checkout has changed. Re-running the installer updates both
 the task action and the desktop shortcut to the current repository path.
+Clicking the shortcut again activates the existing window without rebuilding
+or restarting it. A fresh start verifies the apphost, managed assembly, and
+host configuration together. A configured Companion that is temporarily
+unavailable does not prevent ordinary viewing.
+New installations use a task name derived from the Windows user identity.
+To update an older named registration in place, pass its existing `-TaskName`.
+The installer rejects another owner's task or an unrelated shortcut and rolls
+back task registration if shortcut publication fails.
 
 ## Product boundary
 
@@ -87,6 +95,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-enhance
 
 Repository instructions for agents are in [`AGENTS.md`](AGENTS.md). Security
 and disclosure rules are in [`SECURITY.md`](SECURITY.md).
+
+Use the same product and verification requirements with any coding agent.
+Keep personal model profiles, experimental settings, credentials, and external
+review destinations in the operator's local configuration, outside this
+repository. Optional tools are selected for the current task, not installed as
+a prerequisite for every change.
+
+| Changed behavior | Focused verification entry point |
+|---|---|
+| Launch freshness / Release artifacts | `scripts/verify-wpf-launch-target.ps1` (synthetic artifacts, no WPF launch) |
+| Desktop repeat activation | `scripts/verify-desktop-activation.ps1` (synthetic identity against the WPF coordinator) |
+| Desktop installation / rollback | `scripts/verify-desktop-launcher-install.ps1` (TEMP shortcuts, mocked scheduler writes) |
+| Desktop startup errors | `scripts/verify-desktop-launch-errors.ps1` (TEMP launchers, observed native error dialogs) |
+| Companion launch options / photoreal enqueue | `scripts/verify-wpf-modal-photoreal.ps1` |
+| Video retry source / publication pin | `scripts/verify-wpf-enhancement-operation-filter.ps1` |
+
+Read each verifier's parameters and side effects first. The launcher verifiers
+retain their synthetic fixtures under TEMP for diagnosis. Run relevant local
+checks once per changed input, then use the existing PR workflow for the
+aggregate checks. A local checkpoint, a reviewed PR, and a deployed desktop
+application are distinct results; report which one was verified.
 
 ## Privacy when reporting bugs
 

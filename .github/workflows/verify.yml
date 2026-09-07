@@ -31,6 +31,14 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-contract-index.ps1
 
+      - name: Verify launch artifact freshness
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-launch-target.ps1
+
+      - name: Verify desktop installer failure handling
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-desktop-launcher-install.ps1
+
       - name: Verify legacy asset ledger
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-legacy-asset-ledger.ps1
@@ -51,6 +59,14 @@ jobs:
       - name: Release build
         shell: pwsh
         run: dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
+
+      - name: Desktop activation interoperability
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-desktop-activation.ps1
+
+      - name: Desktop startup error feedback
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-desktop-launch-errors.ps1
 
       - name: External image open command boundary
         shell: pwsh
