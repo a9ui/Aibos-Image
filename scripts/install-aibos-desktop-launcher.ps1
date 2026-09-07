@@ -2,12 +2,16 @@
 param(
     [string]$CompanionRoot = '',
     [string]$ShortcutPath = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Aibos Image.lnk'),
-    [string]$TaskName = 'Aibos Image Desktop Launcher',
+    [string]$TaskName = '',
     [switch]$PassThru
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'lib\DesktopActivation.ps1')
+if ([string]::IsNullOrEmpty($TaskName)) {
+    $TaskName = Get-AibosDesktopTaskName -Identity ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+}
 
 if ([string]::IsNullOrWhiteSpace($TaskName) -or
     $TaskName.Length -gt 64 -or
@@ -17,6 +21,7 @@ if ([string]::IsNullOrWhiteSpace($TaskName) -or
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $desktopRunner = Join-Path $repoRoot 'scripts\start-aibos-desktop.ps1'
+$desktopRequest = Join-Path $repoRoot 'scripts\request-aibos-desktop.ps1'
 $target = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.exe'
 $powerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $resolvedShortcutPath = [IO.Path]::GetFullPath($ShortcutPath)
@@ -27,6 +32,9 @@ if ([IO.Path]::GetExtension($resolvedShortcutPath) -ine '.lnk') {
 }
 if (-not (Test-Path -LiteralPath $desktopRunner -PathType Leaf)) {
     throw "Desktop runner was not found: $desktopRunner"
+}
+if (-not (Test-Path -LiteralPath $desktopRequest -PathType Leaf)) {
+    throw "Desktop request script was not found: $desktopRequest"
 }
 if (-not (Test-Path -LiteralPath $powerShell -PathType Leaf)) {
     throw "Windows PowerShell was not found: $powerShell"
@@ -44,7 +52,7 @@ if (-not [string]::IsNullOrWhiteSpace($CompanionRoot)) {
     }
 }
 
-foreach ($value in @($desktopRunner, $resolvedCompanionRoot)) {
+foreach ($value in @($desktopRunner, $desktopRequest, $resolvedCompanionRoot)) {
     if ($value.Contains('"')) {
         throw 'Launcher paths must not contain a double quote.'
     }
@@ -56,6 +64,24 @@ if (-not [string]::IsNullOrWhiteSpace($resolvedCompanionRoot)) {
 }
 
 $userId = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$description = 'Starts Aibos Image independently from the process that requested the launch.'
+$existing = @(Get-ScheduledTask -TaskPath '\' -ErrorAction Stop | Where-Object { $_.TaskName -eq $TaskName })
+if ($existing.Count -gt 1) { throw 'The desktop task identity is ambiguous.' }
+if ($existing.Count -eq 1) {
+    $ownerName = $existing[0].Principal.UserId
+    $ownerSid = if ($ownerName -match '^S-1-') {
+        [Security.Principal.SecurityIdentifier]::new($ownerName).Value
+    } else {
+        [Security.Principal.NTAccount]::new($ownerName).Translate([Security.Principal.SecurityIdentifier]).Value
+    }
+    if ($existing[0].Description -ne $description -or
+        $ownerSid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or
+        @($existing[0].Actions).Count -ne 1 -or
+        $existing[0].Actions[0].Execute -ine $powerShell -or
+        $existing[0].Actions[0].Arguments -notmatch ' -File "[^"\r\n]+\\scripts\\start-aibos-desktop\.ps1"(?: -CompanionRoot "[^"\r\n]+")?$') {
+        throw 'The selected task belongs to another launcher. Choose a different TaskName.'
+    }
+}
 $action = New-ScheduledTaskAction `
     -Execute $powerShell `
     -Argument $actionArguments `
@@ -73,18 +99,25 @@ $task = New-ScheduledTask `
     -Action $action `
     -Principal $principal `
     -Settings $settings `
-    -Description 'Starts Aibos Image independently from the process that requested the launch.'
+    -Description $description
 
-$shortcutArguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-ScheduledTask -TaskName ''{0}''"' -f $TaskName
+$shortcutArguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -TaskName "{1}"' -f $desktopRequest, $TaskName
 $temporaryShortcut = Join-Path $shortcutDirectory ('.aibos-shortcut-{0}.lnk' -f [guid]::NewGuid().ToString('N'))
 
+$registered = $false
+$previousXml = $null
 try {
-    if ($PSCmdlet.ShouldProcess($TaskName, 'Register independent Aibos desktop launcher task')) {
-        Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
-    }
-
-    if ($PSCmdlet.ShouldProcess($resolvedShortcutPath, 'Create Aibos Image desktop shortcut')) {
+    if ($PSCmdlet.ShouldProcess("$TaskName -> $resolvedShortcutPath", 'Install independent Aibos desktop launcher and shortcut')) {
+        if ($existing.Count -eq 1) {
+            $previousXml = Export-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop
+        }
         $shell = New-Object -ComObject WScript.Shell
+        if (Test-Path -LiteralPath $resolvedShortcutPath) {
+            $oldShortcut = $shell.CreateShortcut($resolvedShortcutPath)
+            if ($oldShortcut.Description -ne 'Aibos Image - independent latest local Release launcher') {
+                throw 'The shortcut path is already in use. Choose a different ShortcutPath.'
+            }
+        }
         $shortcut = $shell.CreateShortcut($temporaryShortcut)
         $shortcut.TargetPath = $powerShell
         $shortcut.Arguments = $shortcutArguments
@@ -95,8 +128,25 @@ try {
             $shortcut.IconLocation = "$target,0"
         }
         $shortcut.Save()
-        Move-Item -LiteralPath $temporaryShortcut -Destination $resolvedShortcutPath -Force
+        Register-ScheduledTask -TaskPath '\' -TaskName $TaskName -InputObject $task -Force -ErrorAction Stop | Out-Null
+        $registered = $true
+        if (Test-Path -LiteralPath $resolvedShortcutPath -PathType Leaf) {
+            [IO.File]::Replace($temporaryShortcut, $resolvedShortcutPath, [NullString]::Value)
+        } else {
+            [IO.File]::Move($temporaryShortcut, $resolvedShortcutPath)
+        }
     }
+}
+catch {
+    $failure = $_
+    if ($registered) {
+        if ($null -ne $previousXml) {
+            Register-ScheduledTask -TaskPath '\' -TaskName $TaskName -Xml $previousXml -Force -ErrorAction Stop | Out-Null
+        } else {
+            Unregister-ScheduledTask -TaskPath '\' -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+        }
+    }
+    throw $failure
 }
 finally {
     if (Test-Path -LiteralPath $temporaryShortcut -PathType Leaf) {

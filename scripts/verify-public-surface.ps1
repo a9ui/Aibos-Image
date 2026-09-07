@@ -51,6 +51,8 @@ try {
         'start_aibos.bat',
         'start_wpf.bat',
         'scripts/start-aibos-desktop.ps1',
+        'scripts/request-aibos-desktop.ps1',
+        'scripts/lib/DesktopActivation.ps1',
         'scripts/install-aibos-desktop-launcher.ps1',
         'scripts/verify-public-surface.ps1',
         'scripts/verify-contract-index.ps1',
@@ -89,7 +91,8 @@ try {
         'AGENTS.md', 'CLAUDE.md', 'README.md', 'SECURITY.md',
         'docs/product-contract.md', 'start_aibos.bat', 'start_wpf.bat',
         'scripts/start-aibos-desktop.ps1',
-        'scripts/install-aibos-desktop-launcher.ps1'
+        'scripts/install-aibos-desktop-launcher.ps1',
+        'scripts/request-aibos-desktop.ps1', 'scripts/lib/DesktopActivation.ps1'
     )
     $paths = if ($FullTree) {
         $tracked
@@ -178,7 +181,7 @@ try {
     if ([regex]::Matches(
             $wpfLauncher,
             '(?im)^\s*start\s+""\s+/wait\s+/normal\s+').Count -ne 2) {
-        Add-Finding 'wpf-launch-window-state' 'start_wpf.bat' 1 'The production launcher must explicitly start both WPF targets in the normal window state.'
+        Add-Finding 'wpf-launch-priority' 'start_wpf.bat' 1 'The production launcher must explicitly start both WPF targets with normal process priority.'
     }
 
     $desktopRunner = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $repoRoot 'scripts/start-aibos-desktop.ps1')
@@ -193,8 +196,13 @@ try {
         $desktopInstaller -notmatch '(?i)-LogonType\s+Interactive' -or
         $desktopInstaller -notmatch '(?i)-MultipleInstances\s+IgnoreNew' -or
         $desktopInstaller -notmatch '(?i)-ExecutionTimeLimit\s+\(\[TimeSpan\]::Zero\)' -or
-        $desktopInstaller -notmatch '(?i)Start-ScheduledTask') {
+        $desktopInstaller -notmatch '(?i)request-aibos-desktop\.ps1') {
         Add-Finding 'desktop-launch-isolation' 'scripts/install-aibos-desktop-launcher.ps1' 1 'The desktop shortcut must dispatch an unlimited interactive singleton through Task Scheduler.'
+    }
+
+    $desktopRequest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $repoRoot 'scripts/request-aibos-desktop.ps1')
+    if ($desktopRequest -notmatch '(?i)Send-AibosDesktopActivation' -or $desktopRequest -notmatch '(?i)Start-ScheduledTask') {
+        Add-Finding 'desktop-reactivation' 'scripts/request-aibos-desktop.ps1' 1 'Repeated shortcut requests must activate an existing instance before asking the scheduler to launch.'
     }
 
     if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'LICENSE') -PathType Leaf)) {

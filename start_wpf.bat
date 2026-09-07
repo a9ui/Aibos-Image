@@ -18,7 +18,7 @@ if exist "%LOCAL_DOTNET10%" (
 
 if not exist "%PROJECT%" (
     echo [Aibos WPF] Project not found: %PROJECT%
-    pause
+    if not "%AIBOS_DESKTOP_LAUNCH%"=="1" pause
     exit /b 1
 )
 
@@ -67,7 +67,7 @@ if "%EXIT_CODE%"=="0" exit /b 0
 
 echo.
 echo [Aibos WPF] Exited with code %EXIT_CODE%.
-pause
+if not "%AIBOS_DESKTOP_LAUNCH%"=="1" pause
 exit /b %EXIT_CODE%
 
 :build_target
