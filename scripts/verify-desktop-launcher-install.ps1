@@ -3,6 +3,9 @@ param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Load the constructors before defining mocks. Windows PowerShell module
+# auto-loading can otherwise replace the mocked scheduler commands mid-test.
+Import-Module ScheduledTasks -ErrorAction Stop
 $installer = Join-Path $PSScriptRoot 'install-aibos-desktop-launcher.ps1'
 . (Join-Path $PSScriptRoot 'lib\DesktopActivation.ps1')
 if ((Get-AibosDesktopTaskName 'S-1-5-21-111-1001') -eq (Get-AibosDesktopTaskName 'S-1-5-21-111-1002')) {
