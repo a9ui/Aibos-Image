@@ -19080,8 +19080,9 @@ public partial class App : Application
                     displayedPhotorealVideoSource
                     && win.VideoSourcePublishPinBlocksMoveForSmoke();
                 bool videoRetryPublicationFilePin =
-                    win.VideoRetrySourcePublishPinBlocksMoveForSmoke(
-                        photorealSource);
+                    await win.VideoRetrySourcePublishPinBlocksMoveForSmokeAsync(
+                        photorealSource)
+                    && enhancementMutationRequestCount == postsBeforeDisplayedPhotorealVideo;
                 bool imageDeletePublicationGuard = false;
                 bool displayedPhotorealVideoQueued = false;
                 if (displayedPhotorealVideoSource)

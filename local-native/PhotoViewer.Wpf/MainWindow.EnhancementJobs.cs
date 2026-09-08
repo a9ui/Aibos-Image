@@ -8349,15 +8349,19 @@ public partial class MainWindow
     {
         Func<JsonElement, string?>? retryHealthValidator =
             CreateEnhancementRetryHealthValidator(job);
+        bool requiresPinnedVideoSource = job.IsVideoOperation
+            && !job.IsExactCurrentVideoToolsV2
+            && !job.IsExactCurrentVideoTrimV1;
         return await SendEnhancementEnqueueAsync(
             body: null,
             queuePlacement: "last",
             retryJobId: job.Id,
             healthValidator: retryHealthValidator,
             requireExactHealthValidation: retryHealthValidator is not null,
-            onBeforeDurablePublish: job.IsVideoOperation
-                && !job.IsExactCurrentVideoToolsV2
-                && !job.IsExactCurrentVideoTrimV1
+            prePublishValidator: requiresPinnedVideoSource
+                ? () => ValidateVideoRetrySourceForDurablePublish(job)
+                : null,
+            onBeforeDurablePublish: requiresPinnedVideoSource
                 ? _ => AcquireVideoDurablePublishLease(
                     () => PinVideoRetrySourceForDurablePublish(job))
                 : null,
@@ -8383,6 +8387,11 @@ public partial class MainWindow
                         "The local AI companion is busy.",
                         StringComparison.Ordinal)
                     ? "COMPANION_BUSY"
+                : string.Equals(
+                    response.Error,
+                    VideoRetrySourceUnavailableError,
+                    StringComparison.Ordinal)
+                    ? "VIDEO_RETRY_SOURCE_UNAVAILABLE"
                 : response.StatusCode == 0
                     ? "COMPANION_UNAVAILABLE"
                     : "API_ERROR";

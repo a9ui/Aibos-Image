@@ -107,8 +107,13 @@ try {
     $sourceFingerprint = Get-SourceFingerprint $projectRoot $sourceFiles
     $sourceRevision = Get-SourceRevision
     $targetItem = Get-Item -LiteralPath $target -ErrorAction SilentlyContinue
+    # Both launch branches load the managed DLL and its host configuration.
+    # An unchanged apphost does not prove that the executable code is current.
+    $targetStem = Join-Path (Split-Path -Parent $target) ([IO.Path]::GetFileNameWithoutExtension($target))
+    $launchFiles = @($target, ($targetStem + '.dll'), ($targetStem + '.deps.json'), ($targetStem + '.runtimeconfig.json'))
+    $missingLaunchFiles = @($launchFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
 
-    if ($null -eq $targetItem) {
+    if ($null -eq $targetItem -or $missingLaunchFiles.Count -gt 0) {
         $result = [pscustomobject]@{
             status = 'missing'
             reason = 'target-missing'
@@ -124,16 +129,21 @@ try {
     }
 
     $targetHash = Get-Sha256Hex $target
+    $launchFileHashes = [ordered]@{}
+    foreach ($file in $launchFiles) {
+        $launchFileHashes[[IO.Path]::GetFileName($file)] = Get-Sha256Hex $file
+    }
 
     if ($Record) {
         $stamp = [ordered]@{
-            schemaVersion = 1
+            schemaVersion = 2
             repoRoot = $repoRoot
             projectPath = $project
             targetPath = $target
             sourceRevision = $sourceRevision
             sourceFingerprint = $sourceFingerprint
             targetSha256 = $targetHash
+            launchFileHashes = $launchFileHashes
             generatedAtUtc = [DateTime]::UtcNow.ToString('o')
         }
         $parent = Split-Path -Parent $provenance
@@ -179,7 +189,7 @@ try {
         }
     }
 
-    if ($status -eq 'current' -and [int]$stamp.schemaVersion -ne 1) {
+    if ($status -eq 'current' -and [int]$stamp.schemaVersion -ne 2) {
         $status = 'unverified'; $reason = 'provenance-schema'
     }
     elseif ($status -eq 'current' -and -not [StringComparer]::OrdinalIgnoreCase.Equals([string]$stamp.repoRoot, $repoRoot)) {
@@ -199,6 +209,17 @@ try {
     }
     elseif ($status -eq 'current' -and -not [StringComparer]::OrdinalIgnoreCase.Equals([string]$stamp.targetSha256, $targetHash)) {
         $status = 'stale'; $reason = 'target-hash-mismatch'
+    }
+    if ($status -eq 'current') {
+        foreach ($entry in $launchFileHashes.GetEnumerator()) {
+            $savedHash = if ($null -ne $stamp.launchFileHashes) {
+                $stamp.launchFileHashes.PSObject.Properties[$entry.Key]
+            } else { $null }
+            if ($null -eq $savedHash -or -not [StringComparer]::OrdinalIgnoreCase.Equals([string]$savedHash.Value, $entry.Value)) {
+                $status = 'stale'; $reason = 'target-hash-mismatch'
+                break
+            }
+        }
     }
 
     $result = [pscustomobject]@{
