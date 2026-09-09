@@ -2009,6 +2009,7 @@ public partial class MainWindow
 
     private async Task<bool> SetEnhancementQueuePausedAsync(bool paused)
     {
+        CancellationToken actionEpoch = CaptureEnhancementCompanionOperationToken();
         if (_enhancementWorkspaceMutationPending
             || _enhancementWorkspaceRefreshPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
@@ -2044,7 +2045,7 @@ public partial class MainWindow
                 EnhancementJobsStatusText.Text =
                     "ローカルAIサービスへ接続し、キュー状態を確認しています…";
                 EnhancementApiResponse readiness =
-                    await EnsureEnhancementCompanionReadyForExplicitActionAsync();
+                    await EnsureEnhancementCompanionReadyForExplicitActionAsync(token: actionEpoch);
                 if (generation != _enhancementWorkspaceGeneration
                     || EnhancementJobsDialog.Visibility != Visibility.Visible)
                 {
@@ -2077,12 +2078,13 @@ public partial class MainWindow
                 }
             }
 
+            if (actionEpoch.IsCancellationRequested) return false;
             EnhancementApiResponse response =
                 await SendTrackedEnhancementWorkspaceMutationAsync(
                     () => SendEnhancementApiAsync(
                         HttpMethod.Post,
                         "api/enhance/queue",
-                        new { paused }),
+                        new { paused }, token: actionEpoch),
                     requireInventoryRevisionAdvanceOnAmbiguous: false);
             if (generation != _enhancementWorkspaceGeneration
                 || EnhancementJobsDialog.Visibility != Visibility.Visible)
@@ -2137,6 +2139,11 @@ public partial class MainWindow
                 response.StatusCode,
                 mode: persistedPaused ? "pause" : "resume");
             return true;
+        }
+        catch (OperationCanceledException) when (actionEpoch.IsCancellationRequested)
+        {
+            EnhancementJobsStatusText.Text = "サーバー操作によりキューの操作を取り消しました。";
+            return false;
         }
         finally
         {

@@ -251,6 +251,8 @@ public partial class MainWindow
         using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(
             token, CaptureEnhancementCompanionOperationToken());
         token = operationCts.Token;
+        try
+        {
         token.ThrowIfCancellationRequested();
         const string readinessRoute = "api/enhance/health";
         bool queueRecoveryCompleted = !recoverQueueBeforeHealth;
@@ -435,6 +437,11 @@ public partial class MainWindow
         finally
         {
             _enhancementCompanionLaunchGate.Release();
+        }
+        }
+        catch (OperationCanceledException)
+        {
+            return new EnhancementApiResponse(false, 0, null, "Starting the local AI companion was canceled.");
         }
     }
 
