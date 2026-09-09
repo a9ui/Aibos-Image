@@ -70,10 +70,14 @@ public partial class MainWindow
         bool locked = false;
         try
         {
+            InvalidateEnhancementCompanionOperations();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_enhancementCompanionLifetimeCts.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(20));
             await _enhancementCompanionLaunchGate.WaitAsync(timeout.Token);
             locked = true;
+            // Only retire a missing/exited owned epoch; retain live-owner constraints.
+            if (_ownedEnhancementCompanion is null || _ownedEnhancementCompanion.HasExited)
+                ReleaseOwnedEnhancementCompanion();
             if (!TryGetOrCreateEnhancementCompanionAuthToken(out string authToken, out _))
                 throw new InvalidOperationException();
             EnhancementCompanionOwnershipProbe proof =
@@ -145,10 +149,39 @@ public partial class MainWindow
             requests = 0;
             await StopCompanionFromJobsAsync(false, confirmedForSmoke: true);
             bool changedEpochPreserved = !child.HasExited && requests == 2;
+            var expiredStart = new ProcessStartInfo(start.FileName)
+            { UseShellExecute = false, CreateNoWindow = true };
+            expiredStart.ArgumentList.Add("-NoProfile");
+            expiredStart.ArgumentList.Add("-Command");
+            expiredStart.ArgumentList.Add("exit 0");
+            _ownedEnhancementCompanion = Process.Start(expiredStart)!;
+            await _ownedEnhancementCompanion.WaitForExitAsync();
+            _ownedEnhancementCompanionInstanceId = "expired-synthetic-owner";
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _beforeCompanionRecoveryForSmoke = async _ =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            };
+            CancellationToken oldEpoch = CaptureEnhancementCompanionOperationToken();
+            KickEnhancementCompanionRecoveryAfterDurablePublish(null,
+                "00000000-0000-4000-8000-000000000003", actionEpoch: oldEpoch);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Task priorRecovery = _enhancementCompanionDurableRecoveryTask!;
             scenario = 2;
             requests = 0;
             await StopCompanionFromJobsAsync(false, confirmedForSmoke: true);
-            return unknownPreserved && changedEpochPreserved && child.HasExited && requests == 2;
+            release.TrySetResult();
+            await priorRecovery.WaitAsync(TimeSpan.FromSeconds(10));
+            // A late pre-stop publisher/finally must not reschedule into the new epoch.
+            KickEnhancementCompanionRecoveryAfterDurablePublish(null,
+                "00000000-0000-4000-8000-000000000003", actionEpoch: oldEpoch);
+            return unknownPreserved && changedEpochPreserved && child.HasExited && requests == 2
+                && oldEpoch.IsCancellationRequested
+                && !CaptureEnhancementCompanionOperationToken().IsCancellationRequested
+                && !_enhancementCompanionDurableRecoveryRequested
+                && !_enhancementCompanionDurableRecoveryRunning;
         }
         finally { if (!child.HasExited) child.Kill(); }
     }

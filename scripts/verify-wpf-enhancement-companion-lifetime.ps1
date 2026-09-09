@@ -108,6 +108,7 @@ try {
     Assert-True ($lazyResumeResult.healthBeforeRecoveryRequests -eq 0) 'Explicit bootstrap read health before WAL recovery.'
     Assert-True ($lazyResumeResult.apiOnlyStartExact -eq $true) 'API-only start mutated or resumed the queue, or duplicated a pending request.'
     Assert-True ($lazyResumeResult.authenticatedStopExact -eq $true) 'Authenticated Stop did not preserve an unknown or changed-epoch process, or failed to stop the exact verified synthetic process.'
+    Assert-True ($lazyResumeResult.resumeAfterStop -eq $true -and $lazyResumeResult.stopPreservedQueueState -eq $true) 'Stop lost durable queue state or prevented a later explicit Resume.'
 
     [pscustomobject]@{
         allPassed = $true

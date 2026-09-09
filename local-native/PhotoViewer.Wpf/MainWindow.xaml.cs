@@ -20067,6 +20067,7 @@ public partial class MainWindow : Window
             requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
             requestTimeoutCts.CancelAfter(effectiveTimeoutMilliseconds);
             CancellationToken requestToken = requestTimeoutCts.Token;
+            requestToken.ThrowIfCancellationRequested();
 
             Uri endpoint = new(ResolveBrowserEnhancementBaseUri(), relativePath.TrimStart('/'));
             string? requestBodyJson = exactBodyJson

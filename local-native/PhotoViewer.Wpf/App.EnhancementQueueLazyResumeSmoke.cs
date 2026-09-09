@@ -316,11 +316,33 @@ public partial class App
                         && window.EnhancementJobsWorkspaceForSmoke().QueuePaused == true;
                     var stopFixture = HiddenWindow();
                     bool authenticatedStopExact;
-                    try { authenticatedStopExact = await stopFixture.AuthenticatedCompanionStopForSmokeAsync(); }
+                    bool resumeAfterStop;
+                    string queueBeforeStop = ReadQueueSemanticState();
+                    try
+                    {
+                        authenticatedStopExact = await stopFixture.AuthenticatedCompanionStopForSmokeAsync();
+                        int newResumeRequests = 0;
+                        stopFixture.ConfigureModalEnhancementForSmoke((request, token) =>
+                        {
+                            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath == "/api/enhance/queue")
+                            {
+                                newResumeRequests++;
+                                return Task.FromResult(LazyResumeJsonResponse(HttpStatusCode.OK, new { paused = false }));
+                            }
+                            return Task.FromResult(LazyResumeJsonResponse(HttpStatusCode.OK, LazyResumeHealth(paused: true)));
+                        });
+                        stopFixture.PrepareUnknownEnhancementQueueResumeForSmoke();
+                        await stopFixture.StartEnhancementCompanionApiForApplicationLaunchAsync();
+                        resumeAfterStop = newResumeRequests == 0
+                            && await stopFixture.SetEnhancementQueuePausedForSmokeAsync(false)
+                            && newResumeRequests == 1;
+                    }
                     finally { stopFixture.Close(); }
+                    bool stopPreservedQueueState = queueBeforeStop == ReadQueueSemanticState();
                     ok = passiveDidNotStart
                         && apiOnlyStartExact
                         && authenticatedStopExact
+                        && resumeAfterStop && stopPreservedQueueState
                         && explicitResumeExact
                         && duplicateGuarded
                         && walFixtureValid
@@ -331,6 +353,8 @@ public partial class App
                         ok,
                         apiOnlyStartExact,
                         authenticatedStopExact,
+                        resumeAfterStop,
+                        stopPreservedQueueState,
                         passiveDidNotStart,
                         explicitResumeExact,
                         duplicateGuarded,
