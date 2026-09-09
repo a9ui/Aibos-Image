@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$CompanionRoot = ''
+    [string]$CompanionRoot = '',
+    [switch]$AutoStartCompanion
 )
 
 Set-StrictMode -Version Latest
@@ -33,8 +34,31 @@ if (-not [string]::IsNullOrWhiteSpace($CompanionRoot)) {
 
 # Scheduled launches have no console in which to acknowledge a batch pause.
 $env:AIBOS_DESKTOP_LAUNCH = '1'
-& $launcher
-$code = $LASTEXITCODE
+$env:AIBOS_COMPANION_START_ON_LAUNCH = if ($AutoStartCompanion) { '1' } else { '0' }
+$startup = [Threading.Mutex]::new($false, ('Local\AibosImage.Wpf.Startup.v1.' + (Get-AibosDesktopIdentitySuffix -Identity $identity)))
+$locked = $false
+$child = $null
+try {
+    try { $locked = $startup.WaitOne([TimeSpan]::FromMinutes(3)) }
+    catch [Threading.AbandonedMutexException] { $locked = $true }
+    if (-not $locked) { throw 'Another Aibos startup is still preparing. Try again after it finishes.' }
+    # Serialize cold-start preparation, not the lifetime of a retained Companion.
+    if (Send-AibosDesktopActivation -Identity $identity) { exit 0 }
+    $child = Start-Process -FilePath $env:ComSpec -ArgumentList ('/d /s /c ""{0}""' -f $launcher) -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+    while (-not $child.HasExited) {
+        if (Send-AibosDesktopActivation -Identity $identity) { break }
+        Start-Sleep -Milliseconds 200
+        $child.Refresh()
+    }
+}
+finally {
+    if ($locked) { $startup.ReleaseMutex() }
+    $startup.Dispose()
+}
+# Waiting here must not own startup exclusion: the task may retain descendants.
+$child.WaitForExit()
+$code = $child.ExitCode
+$child.Dispose()
 if ($code -ne 0) {
     Add-Type -AssemblyName PresentationFramework
     [System.Windows.MessageBox]::Show(

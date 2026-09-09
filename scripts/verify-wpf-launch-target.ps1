@@ -68,4 +68,44 @@ try {
 finally { [IO.File]::WriteAllText($stampPath, $savedStamp, $utf8) }
 [IO.File]::WriteAllText($sourcePath, '// changed source', $utf8)
 Invoke-Check 10 'source-content-mismatch'
+# Exercise the actual launcher repair path with real MSBuild, not dummy hashes.
+Copy-Item -LiteralPath (Join-Path $repoRoot 'start_wpf.bat') -Destination $runRoot
+[IO.File]::WriteAllText((Join-Path $projectRoot 'PhotoViewer.Wpf.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework></PropertyGroup></Project>', $utf8)
+[IO.File]::WriteAllText($sourcePath, 'System.Console.WriteLine("Synthetic launch succeeded.");', $utf8)
+$savedDesktop = $env:AIBOS_DESKTOP_LAUNCH
+$savedRebuild = $env:PHOTOVIEWER_WPF_REBUILD
+$savedRun = $env:PHOTOVIEWER_WPF_DOTNET_RUN
+$savedScratch = $env:NUGET_SCRATCH
+try {
+    $env:NUGET_SCRATCH = Join-Path $runRoot 'nuget-scratch'
+    $env:AIBOS_DESKTOP_LAUNCH = '1'
+    $env:PHOTOVIEWER_WPF_REBUILD = '0'
+    $env:PHOTOVIEWER_WPF_DOTNET_RUN = '0'
+    & (Join-Path $runRoot 'start_wpf.bat')
+    if ($LASTEXITCODE -ne 0) { throw 'Initial real fixture build/launch failed.' }
+    Invoke-Check 0 'provenance-match'
+    $runtimeConfig = Join-Path $targetRoot 'PhotoViewer.Wpf.runtimeconfig.json'
+    $correct = [IO.File]::ReadAllText($runtimeConfig)
+    $timestamp = [IO.File]::GetLastWriteTimeUtc($runtimeConfig)
+    [IO.File]::WriteAllText($runtimeConfig, $correct.Replace('Microsoft.NETCore.App', 'Microsoft.BADCore.App'), $utf8)
+    [IO.File]::SetLastWriteTimeUtc($runtimeConfig, $timestamp)
+    Invoke-Check 10 'target-hash-mismatch'
+    & (Join-Path $runRoot 'start_wpf.bat')
+    if ($LASTEXITCODE -ne 0) { throw 'Real repair build/launch failed.' }
+    if ([IO.File]::ReadAllText($runtimeConfig) -cne $correct) { throw 'Repair did not restore runtime configuration bytes.' }
+    Invoke-Check 0 'provenance-match'
+    $checks.Add('real-build-restores-runtimeconfig')
+    $beforeFailedBuild = [IO.File]::ReadAllText($stampPath)
+    [IO.File]::WriteAllText($sourcePath, 'intentional compiler error;', $utf8)
+    & (Join-Path $runRoot 'start_wpf.bat')
+    if ($LASTEXITCODE -eq 0) { throw 'Invalid fixture source unexpectedly built.' }
+    if ([IO.File]::ReadAllText($stampPath) -cne $beforeFailedBuild) { throw 'Failed build replaced the provenance stamp.' }
+    $checks.Add('failed-build-does-not-record')
+}
+finally {
+    $env:AIBOS_DESKTOP_LAUNCH = $savedDesktop
+    $env:PHOTOVIEWER_WPF_REBUILD = $savedRebuild
+    $env:PHOTOVIEWER_WPF_DOTNET_RUN = $savedRun
+    $env:NUGET_SCRATCH = $savedScratch
+}
 [pscustomobject]@{ ok = $true; checks = @($checks); syntheticOnly = $true; fixtureRoot = $runRoot } | ConvertTo-Json -Depth 4

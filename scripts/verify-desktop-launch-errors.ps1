@@ -15,6 +15,7 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 # Never signal the real application or start a real scheduled task.
 [IO.File]::WriteAllText((Join-Path $libraryRoot 'DesktopActivation.ps1'), @'
 function Send-AibosDesktopActivation { param($Identity) return $false }
+function Get-AibosDesktopIdentitySuffix { param($Identity) return 'SyntheticLaunchErrorFixture' }
 function Start-ScheduledTask { [CmdletBinding()] param($TaskPath, $TaskName) throw 'Synthetic scheduling failure.' }
 '@, $utf8)
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes

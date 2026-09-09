@@ -19,6 +19,8 @@ dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --
 `start_wpf.bat` remains as a compatibility entry point.
 When a rebuild is required, the launcher prefers the local .NET 10 SDK and
 uses a one-shot build that does not retain a shared compiler or build server.
+Repair builds regenerate outputs without incremental reuse before recording
+their hashes, including host configuration files with unchanged timestamps.
 An external Enhancement companion must be selected explicitly with
 `AIBOS_COMPANION_ROOT` by its trusted dispatcher. The public launcher does not
 guess a private companion root from unrelated Git worktrees.
@@ -32,7 +34,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-aibos-desk
 
 Pass `-CompanionRoot <path>` only when selecting a trusted external Enhancement
 companion explicitly. The shortcut asks Task Scheduler to start Aibos in the
-interactive user session. Each fresh application start still runs the normal
+interactive user session. Add `-AutoStartCompanion` to explicitly enable API
+startup together with Aibos; it does not recover or resume generation Jobs.
+Without that switch startup remains lazy. Jobs also offers API Start, Restart,
+and Stop. Stop/Restart require interruption confirmation and fresh authenticated
+server identity. An unverified listener is never stopped. Window close still
+leaves reused servers and accepted durable work alone.
+Each fresh application start still runs the normal
 source-revision and source-content check, rebuilding the local Release target
 when the current checkout has changed. Re-running the installer updates both
 the task action and the desktop shortcut to the current repository path.
@@ -40,6 +48,9 @@ Clicking the shortcut again activates the existing window without rebuilding
 or restarting it. A fresh start verifies the apphost, managed assembly, and
 host configuration together. A configured Companion that is temporarily
 unavailable does not prevent ordinary viewing.
+The scheduler accepts subsequent requests even while a previous Companion
+remains alive. A per-user/session startup mutex serializes preparation until
+the application accepts activation; it is not held for the Companion lifetime.
 New installations use a task name derived from the Windows user identity.
 To update an older named registration in place, pass its existing `-TaskName`.
 The installer rejects another owner's task or an unrelated shortcut and rolls
@@ -104,7 +115,8 @@ a prerequisite for every change.
 
 | Changed behavior | Focused verification entry point |
 |---|---|
-| Launch freshness / Release artifacts | `scripts/verify-wpf-launch-target.ps1` (synthetic artifacts, no WPF launch) |
+| Launch freshness / Release artifacts | `scripts/verify-wpf-launch-target.ps1` (synthetic artifacts and real .NET repair build, no WPF launch) |
+| Retained server / desktop relaunch | `scripts/verify-desktop-relaunch.ps1` (unique real scheduled task and synthetic processes; requires a Windows interactive session) |
 | Desktop repeat activation | `scripts/verify-desktop-activation.ps1` (synthetic identity against the WPF coordinator) |
 | Desktop installation / rollback | `scripts/verify-desktop-launcher-install.ps1` (TEMP shortcuts, mocked scheduler writes) |
 | Desktop startup errors | `scripts/verify-desktop-launch-errors.ps1` (TEMP launchers, observed native error dialogs) |

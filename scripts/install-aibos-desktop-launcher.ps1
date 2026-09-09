@@ -1,6 +1,7 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Low')]
 param(
     [string]$CompanionRoot = '',
+    [switch]$AutoStartCompanion,
     [string]$ShortcutPath = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Aibos Image.lnk'),
     [string]$TaskName = '',
     [switch]$PassThru
@@ -63,6 +64,7 @@ if (-not [string]::IsNullOrWhiteSpace($resolvedCompanionRoot)) {
     $actionArguments += ' -CompanionRoot "{0}"' -f $resolvedCompanionRoot
 }
 
+if ($AutoStartCompanion) { $actionArguments += ' -AutoStartCompanion' }
 $userId = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $description = 'Starts Aibos Image independently from the process that requested the launch.'
 $existing = @(Get-ScheduledTask -TaskPath '\' -ErrorAction Stop | Where-Object { $_.TaskName -eq $TaskName })
@@ -78,7 +80,7 @@ if ($existing.Count -eq 1) {
         $ownerSid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or
         @($existing[0].Actions).Count -ne 1 -or
         $existing[0].Actions[0].Execute -ine $powerShell -or
-        $existing[0].Actions[0].Arguments -notmatch ' -File "[^"\r\n]+\\scripts\\start-aibos-desktop\.ps1"(?: -CompanionRoot "[^"\r\n]+")?$') {
+        $existing[0].Actions[0].Arguments -notmatch ' -File "[^"\r\n]+\\scripts\\start-aibos-desktop\.ps1"(?: -CompanionRoot "[^"\r\n]+")?(?: -AutoStartCompanion)?$') {
         throw 'The selected task belongs to another launcher. Choose a different TaskName.'
     }
 }
@@ -94,7 +96,7 @@ $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -MultipleInstances IgnoreNew
+    -MultipleInstances Parallel
 $task = New-ScheduledTask `
     -Action $action `
     -Principal $principal `
@@ -161,7 +163,7 @@ if ($PassThru) {
         Action = $powerShell
         ActionArguments = $actionArguments
         WorkingDirectory = $repoRoot
-        MultipleInstances = 'IgnoreNew'
+        MultipleInstances = 'Parallel'
         ExecutionTimeLimit = [TimeSpan]::Zero
         ShortcutPath = $resolvedShortcutPath
         ShortcutTarget = $powerShell

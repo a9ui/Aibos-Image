@@ -1503,6 +1503,8 @@ public partial class App : Application
 
         var mainWindow = new MainWindow();
         mainWindow.Show();
+        if (Environment.GetEnvironmentVariable("AIBOS_COMPANION_START_ON_LAUNCH") == "1")
+            _ = mainWindow.StartEnhancementCompanionApiForApplicationLaunchAsync();
         _ = Dispatcher.BeginInvoke(
             mainWindow.ActivateFromSecondaryInstance,
             DispatcherPriority.ApplicationIdle);

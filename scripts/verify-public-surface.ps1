@@ -187,17 +187,19 @@ try {
     $desktopRunner = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $repoRoot 'scripts/start-aibos-desktop.ps1')
     if ($desktopRunner -notmatch '(?i)start_aibos\.bat' -or
         $desktopRunner -notmatch '(?i)AIBOS_COMPANION_ROOT' -or
-        $desktopRunner -match '(?i)Start-Process') {
-        Add-Finding 'desktop-launch-runner' 'scripts/start-aibos-desktop.ps1' 1 'The scheduled desktop runner must directly invoke the primary launcher and preserve explicit Companion selection.'
+        $desktopRunner -notmatch 'AibosImage.Wpf.Startup.v1.' -or
+        $desktopRunner -notmatch 'ReleaseMutex' -or
+        $desktopRunner -notmatch '(?i)-WindowStyle Hidden') {
+        Add-Finding 'desktop-launch-runner' 'scripts/start-aibos-desktop.ps1' 1 'The scheduled desktop runner must serialize startup, release exclusion before lifetime waiting, and preserve explicit Companion selection.'
     }
 
     $desktopInstaller = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $repoRoot 'scripts/install-aibos-desktop-launcher.ps1')
     if ($desktopInstaller -notmatch '(?i)Register-ScheduledTask' -or
         $desktopInstaller -notmatch '(?i)-LogonType\s+Interactive' -or
-        $desktopInstaller -notmatch '(?i)-MultipleInstances\s+IgnoreNew' -or
+        $desktopInstaller -notmatch '(?i)-MultipleInstances\s+Parallel' -or
         $desktopInstaller -notmatch '(?i)-ExecutionTimeLimit\s+\(\[TimeSpan\]::Zero\)' -or
         $desktopInstaller -notmatch '(?i)request-aibos-desktop\.ps1') {
-        Add-Finding 'desktop-launch-isolation' 'scripts/install-aibos-desktop-launcher.ps1' 1 'The desktop shortcut must dispatch an unlimited interactive singleton through Task Scheduler.'
+        Add-Finding 'desktop-launch-isolation' 'scripts/install-aibos-desktop-launcher.ps1' 1 'The desktop shortcut must accept subsequent requests through an unlimited interactive Task Scheduler registration; the runner owns startup exclusion.'
     }
 
     $desktopRequest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $repoRoot 'scripts/request-aibos-desktop.ps1')

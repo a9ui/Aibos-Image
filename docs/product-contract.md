@@ -269,12 +269,20 @@ The executable cases for these meanings are routed by
   Node.js or the Companion, recover the queue, start GPU work, or mount the
   optional Enhancement runtime. A passive reader may use an already-running
   authenticated Companion but does not launch a replacement. Only an explicit
-  Enhancement action may start the Companion.
+  Enhancement action may start the Companion. An explicit desktop
+  `AutoStartCompanion` selection or Jobs Start button may also start only the
+  authenticated API with deferred queue recovery; neither grants consent to
+  recover, drain, resume, or wake the queue. The default remains lazy.
 - If WPF owns a Companion but no authenticated non-GET request was constructed,
   closing WPF stops that exact owned process tree. Once an authenticated
   mutation or recovery request can activate durable work, WPF releases its
   process wrapper so accepted queued or running work can continue. WPF never
-  signals a listener or process it did not start.
+  automatically signals a listener or process it did not start.
+- Jobs Stop and Restart require explicit interruption confirmation and target
+  only the exact process pinned by an OS handle and a fresh repeated authenticated
+  identity proof for the same server epoch, including a reused server. They
+  preserve Jobs records and never signal an unverified listener. Restart starts only the API; queue
+  recovery and resume remain separate actions.
 
 The exact capability storage, identity proof, tunnel, request, response, and
 startup rules are in `contracts/enhancement-companion-auth-v2.json`.

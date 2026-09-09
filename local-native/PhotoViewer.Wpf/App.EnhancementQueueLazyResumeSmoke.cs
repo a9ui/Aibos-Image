@@ -298,7 +298,35 @@ public partial class App
                         && firstHealthIndex > recoveryIndex
                         && resumeIndex > firstHealthIndex
                         && healthBeforeRecoveryRequests == 0;
+                    int apiOnlyReads = 0;
+                    int apiOnlyMutations = 0;
+                    window.ConfigureModalEnhancementForSmoke(async (request, token) =>
+                    {
+                        if (request.Method == HttpMethod.Get
+                            && request.RequestUri?.AbsolutePath == "/api/enhance/health")
+                            apiOnlyReads++;
+                        else apiOnlyMutations++;
+                        await Task.Delay(30, token);
+                        return LazyResumeJsonResponse(HttpStatusCode.OK, LazyResumeHealth(paused: true));
+                    });
+                    await Task.WhenAll(
+                        window.StartEnhancementCompanionApiForApplicationLaunchAsync(),
+                        window.StartEnhancementCompanionApiForApplicationLaunchAsync());
+                    bool apiOnlyStartExact = apiOnlyReads == 1 && apiOnlyMutations == 0
+                        && window.EnhancementJobsWorkspaceForSmoke().QueuePaused == true;
+                    window.UpdateLayout();
+                    var startButton = (System.Windows.Controls.Button)window.FindName("CompanionStartButton");
+                    var controls = (System.Windows.FrameworkElement)((System.Windows.FrameworkElement)((System.Windows.FrameworkElement)startButton.Parent).Parent).Parent;
+                    var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                        (int)Math.Ceiling(controls.ActualWidth), (int)Math.Ceiling(controls.ActualHeight),
+                        96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                    bitmap.Render(controls);
+                    var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                    using (var output = File.Create(Path.Combine(Path.GetDirectoryName(resultFullPath)!, "companion-controls.png")))
+                        encoder.Save(output);
                     ok = passiveDidNotStart
+                        && apiOnlyStartExact
                         && explicitResumeExact
                         && duplicateGuarded
                         && walFixtureValid
@@ -307,6 +335,7 @@ public partial class App
                     result = new
                     {
                         ok,
+                        apiOnlyStartExact,
                         passiveDidNotStart,
                         explicitResumeExact,
                         duplicateGuarded,
