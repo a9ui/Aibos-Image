@@ -73,7 +73,7 @@
   },
   "startup": {
     "launcherArgument": "--defer-queue-recovery",
-    "applicationLaunch": "ordinary WPF launch and passive viewing do not start Node.js or the Companion; passive readers may use an already-running authenticated Companion but do not launch a replacement; only an explicit Enhancement action may start the exact authenticated API child",
+    "applicationLaunch": "ordinary WPF launch and passive viewing do not start Node.js or the Companion; an explicit desktop AutoStartCompanion selection (AIBOS_COMPANION_START_ON_LAUNCH=1) or Jobs Start button may start the exact authenticated API child with deferred queue recovery; this opt-in performs no recovery, inbox drain, resume or worker wake; passive readers may use an already-running authenticated Companion but do not launch a replacement",
     "deferredSideEffects": [
       "interrupted-job recovery",
       "durable-inbox drain",
@@ -103,7 +103,8 @@
   },
   "wpf": {
     "ownership": "verify HMAC, instance id, live process id, and process start time before explicit enqueue, and bind every encrypted request and authenticated response to that exact server epoch",
-    "closeLifetime": "if this WPF instance started the exact Companion process and no authenticated non-GET request was constructed, closing WPF stops only that exact owned process tree; after an authenticated mutation or recovery request can activate durable work, WPF releases its process wrapper so accepted queued or running work may continue; a listener or process not started by this WPF instance is never signalled",
+    "closeLifetime": "if this WPF instance started the exact Companion process and no authenticated non-GET request was constructed, closing WPF stops only that exact owned process tree; after an authenticated mutation or recovery request can activate durable work, WPF releases its process wrapper so accepted queued or running work may continue; automatic close never signals a listener or process not started by this WPF instance",
+    "explicitServerControl": "Jobs Stop or Restart requires explicit interruption confirmation; invalidate earlier startup and durable recovery continuations without deleting persisted reservations; inside the launch gate retire an absent or confirmed-exited owned process epoch, then acquire an OS process handle from fresh verified identity and repeat proof for the same process id, instance id and server epoch before signalling that exact process tree; a reused authenticated server may be stopped only through this explicit action, never passive reading or window close; Jobs records are not deleted and restart defers recovery and worker wake",
     "listenerHandoff": "a replacement listener receives only an epoch-bound encrypted envelope and its response is rejected without the response proof",
     "unknownListener": "fail closed before source identity, prompt, settings, credential, job body, or durable reservation",
     "bearerToUnknownListener": false

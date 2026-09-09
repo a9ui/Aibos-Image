@@ -81,6 +81,32 @@ public partial class MainWindow
     private readonly SemaphoreSlim _enhancementCompanionPassiveProbeGate = new(1, 1);
     private readonly CancellationTokenSource _enhancementCompanionLifetimeCts = new();
     private readonly object _enhancementCompanionDurableRecoverySync = new();
+    private CancellationTokenSource _enhancementCompanionOperationCts = new();
+    private Task? _enhancementCompanionDurableRecoveryTask;
+    private Func<CancellationToken, Task>? _beforeCompanionRecoveryForSmoke;
+
+    private CancellationToken CaptureEnhancementCompanionOperationToken()
+    {
+        lock (_enhancementCompanionDurableRecoverySync)
+            return _enhancementCompanionOperationCts.Token;
+    }
+
+    private void InvalidateEnhancementCompanionOperations()
+    {
+        CancellationTokenSource previous;
+        lock (_enhancementCompanionDurableRecoverySync)
+        {
+            previous = _enhancementCompanionOperationCts;
+            _enhancementCompanionOperationCts = new();
+            _enhancementCompanionDurableRecoveryRequested = false;
+            _enhancementCompanionDurableRecoveryRunning = false;
+            _enhancementCompanionDurableRecoveryRequestId = null;
+            _enhancementCompanionDurableRecoverySourceIdentity = null;
+        }
+        // Cancel outside the lock: callbacks may finish a recovery continuation.
+        previous.Cancel();
+        previous.Dispose();
+    }
     private Process? _ownedEnhancementCompanion;
     private EnhancementCompanionProcessObservation?
         _ownedEnhancementCompanionObservation;
@@ -222,6 +248,12 @@ public partial class MainWindow
         Action<EnhancementApiResponse>? onQueueRecoveryCompleted = null)
     {
         _ = sourceIdentity;
+        using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(
+            token, CaptureEnhancementCompanionOperationToken());
+        token = operationCts.Token;
+        try
+        {
+        token.ThrowIfCancellationRequested();
         const string readinessRoute = "api/enhance/health";
         bool queueRecoveryCompleted = !recoverQueueBeforeHealth;
 
@@ -405,6 +437,11 @@ public partial class MainWindow
         finally
         {
             _enhancementCompanionLaunchGate.Release();
+        }
+        }
+        catch (OperationCanceledException)
+        {
+            return new EnhancementApiResponse(false, 0, null, "Starting the local AI companion was canceled.");
         }
     }
 
@@ -1593,6 +1630,9 @@ public partial class MainWindow
         string? durableRetryAdapterId = null,
         int? durableRetryPhotorealMaxDimension = null)
     {
+        CancellationToken actionEpoch = CaptureEnhancementCompanionOperationToken();
+        using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(token, actionEpoch);
+        token = operationCts.Token;
         DurableEnhancementAdapterIdentity adapterIdentity = retryJobId is null
             ? ReadDurableEnhancementAdapterIdentity(body)
             : new DurableEnhancementAdapterIdentity(
@@ -1696,7 +1736,7 @@ public partial class MainWindow
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
                 recoverySourceIdentity,
-                item.RequestId);
+                item.RequestId, actionEpoch: actionEpoch);
             return SavedForDeliveryResponse(item);
         }
 
@@ -1705,7 +1745,7 @@ public partial class MainWindow
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
                 recoverySourceIdentity,
-                item.RequestId);
+                item.RequestId, actionEpoch: actionEpoch);
             return SavedForDeliveryResponse(item);
         }
         string nudgeRoute = _usingDefaultModalEnhancementSender
@@ -1728,7 +1768,7 @@ public partial class MainWindow
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
                 recoverySourceIdentity,
-                item.RequestId);
+                item.RequestId, actionEpoch: actionEpoch);
         }
         return normalized;
     }
@@ -1789,6 +1829,9 @@ public partial class MainWindow
             IReadOnlyList<Func<JsonElement, string?>?>? itemHealthValidators = null,
             bool requireExactItemHealthValidation = false)
     {
+        CancellationToken actionEpoch = CaptureEnhancementCompanionOperationToken();
+        using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(token, actionEpoch);
+        token = operationCts.Token;
         if (items.Count == 0)
             return new DurableEnhancementBatchResponse([], 0, 0);
         if (itemHealthValidators is not null
@@ -2009,7 +2052,7 @@ public partial class MainWindow
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
                 sourceIdentity: null,
-                publishedItems[0].Item.RequestId);
+                publishedItems[0].Item.RequestId, actionEpoch: actionEpoch);
         }
 
         int nudgeCount = 0;
@@ -2065,7 +2108,7 @@ public partial class MainWindow
             {
                 KickEnhancementCompanionRecoveryAfterDurablePublish(
                     sourceIdentity: null,
-                    publishedItems[0].Item.RequestId);
+                    publishedItems[0].Item.RequestId, actionEpoch: actionEpoch);
             }
         }
 
@@ -2079,7 +2122,8 @@ public partial class MainWindow
         string? sourceIdentity,
         string requestId,
         bool armSavedDeliveryCatalogAdoption = true,
-        bool scheduleRecovery = true)
+        bool scheduleRecovery = true,
+        CancellationToken? actionEpoch = null)
     {
         if (!_usingDefaultModalEnhancementSender
             || _enhancementCompanionLifetimeCts.IsCancellationRequested)
@@ -2087,14 +2131,18 @@ public partial class MainWindow
             return;
         }
 
-        MarkEnhancementCompanionDurableWorkActivated(
-            awaitSavedDeliveryCatalogAdoption:
-                armSavedDeliveryCatalogAdoption);
-        if (!scheduleRecovery)
-            return;
-
+        CancellationToken epoch = actionEpoch ?? CaptureEnhancementCompanionOperationToken();
         lock (_enhancementCompanionDurableRecoverySync)
         {
+            if (epoch.IsCancellationRequested || epoch != _enhancementCompanionOperationCts.Token)
+                return;
+            // Both lifetime authority and scheduling belong to the same epoch.
+            // Stop cannot rotate the operation between this check and the mark.
+            MarkEnhancementCompanionDurableWorkActivated(
+                awaitSavedDeliveryCatalogAdoption:
+                    armSavedDeliveryCatalogAdoption);
+            if (!scheduleRecovery)
+                return;
             _enhancementCompanionDurableRecoveryRequested = true;
             _enhancementCompanionDurableRecoveryRequestId = requestId;
             _enhancementCompanionDurableRecoverySourceIdentity = sourceIdentity;
@@ -2103,17 +2151,20 @@ public partial class MainWindow
             _enhancementCompanionDurableRecoveryRunning = true;
         }
 
-        _ = Task.Run(async () =>
+        _enhancementCompanionDurableRecoveryTask = Task.Run(async () =>
         {
+            using var recoveryCts = CancellationTokenSource.CreateLinkedTokenSource(
+                epoch, _enhancementCompanionLifetimeCts.Token);
             try
             {
-                while (!_enhancementCompanionLifetimeCts.IsCancellationRequested)
+                while (!recoveryCts.IsCancellationRequested)
                 {
                     string? nextRequestId;
                     string? nextSourceIdentity;
                     lock (_enhancementCompanionDurableRecoverySync)
                     {
-                        if (!_enhancementCompanionDurableRecoveryRequested)
+                        if (epoch != _enhancementCompanionOperationCts.Token
+                            || !_enhancementCompanionDurableRecoveryRequested)
                             break;
                         _enhancementCompanionDurableRecoveryRequested = false;
                         nextRequestId = _enhancementCompanionDurableRecoveryRequestId;
@@ -2124,7 +2175,7 @@ public partial class MainWindow
                     await RecoverAndWakeDurableEnqueueInboxAsync(
                         nextSourceIdentity,
                         nextRequestId,
-                        _enhancementCompanionLifetimeCts.Token);
+                        recoveryCts.Token);
                 }
             }
             catch
@@ -2136,15 +2187,18 @@ public partial class MainWindow
                 bool restart;
                 lock (_enhancementCompanionDurableRecoverySync)
                 {
-                    _enhancementCompanionDurableRecoveryRunning = false;
-                    restart = _enhancementCompanionDurableRecoveryRequested;
+                    bool current = epoch == _enhancementCompanionOperationCts.Token;
+                    if (current) _enhancementCompanionDurableRecoveryRunning = false;
+                    restart = current && !epoch.IsCancellationRequested
+                        && _enhancementCompanionDurableRecoveryRequested;
                 }
                 if (restart)
                 {
                     KickEnhancementCompanionRecoveryAfterDurablePublish(
                         _enhancementCompanionDurableRecoverySourceIdentity,
                         _enhancementCompanionDurableRecoveryRequestId ?? requestId,
-                        armSavedDeliveryCatalogAdoption: false);
+                        armSavedDeliveryCatalogAdoption: false,
+                        actionEpoch: epoch);
                 }
             }
         });
@@ -2203,6 +2257,9 @@ public partial class MainWindow
         string? requestId,
         CancellationToken token)
     {
+        if (_beforeCompanionRecoveryForSmoke is { } beforeRecovery)
+            await beforeRecovery(token);
+        token.ThrowIfCancellationRequested();
         for (int attempt = 0; attempt < DurableEnqueueRecoveryAttempts; attempt++)
         {
             EnhancementApiResponse? bootstrapRecovery = null;
@@ -4225,7 +4282,7 @@ public partial class MainWindow
     }
 
     public IReadOnlyDictionary<string, object>
-        EnhancementCompanionIdentityPayloadForSmoke(string challenge)
+        EnhancementCompanionIdentityPayloadForSmoke(string challenge, int? syntheticProcessId = null, string? syntheticEpoch = null)
     {
         if (!TryBase64UrlDecode(
                 EnhancementCompanionSmokeAuthToken,
@@ -4235,8 +4292,8 @@ public partial class MainWindow
         }
         string instanceId = _ownedEnhancementCompanionInstanceId
             ?? "companion-smoke-instance-v1";
-        int processId = Environment.ProcessId;
-        string serverStartedAtUtc = DateTimeOffset.UtcNow.ToString("O");
+        int processId = syntheticProcessId ?? Environment.ProcessId;
+        string serverStartedAtUtc = syntheticEpoch ?? DateTimeOffset.UtcNow.ToString("O");
         using var hmac = new HMACSHA256(authTokenBytes);
         string proof = Base64UrlEncode(hmac.ComputeHash(Encoding.UTF8.GetBytes(
             $"{EnhancementCompanionAuthProtocol}\0{challenge}\0{instanceId}\0{processId}\0{serverStartedAtUtc}")));

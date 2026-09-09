@@ -298,7 +298,51 @@ public partial class App
                         && firstHealthIndex > recoveryIndex
                         && resumeIndex > firstHealthIndex
                         && healthBeforeRecoveryRequests == 0;
+                    int apiOnlyReads = 0;
+                    int apiOnlyMutations = 0;
+                    window.ConfigureModalEnhancementForSmoke(async (request, token) =>
+                    {
+                        if (request.Method == HttpMethod.Get
+                            && request.RequestUri?.AbsolutePath == "/api/enhance/health")
+                            apiOnlyReads++;
+                        else apiOnlyMutations++;
+                        await Task.Delay(30, token);
+                        return LazyResumeJsonResponse(HttpStatusCode.OK, LazyResumeHealth(paused: true));
+                    });
+                    await Task.WhenAll(
+                        window.StartEnhancementCompanionApiForApplicationLaunchAsync(),
+                        window.StartEnhancementCompanionApiForApplicationLaunchAsync());
+                    bool apiOnlyStartExact = apiOnlyReads == 1 && apiOnlyMutations == 0
+                        && window.EnhancementJobsWorkspaceForSmoke().QueuePaused == true;
+                    var stopFixture = HiddenWindow();
+                    bool authenticatedStopExact;
+                    bool resumeAfterStop;
+                    string queueBeforeStop = ReadQueueSemanticState();
+                    try
+                    {
+                        authenticatedStopExact = await stopFixture.AuthenticatedCompanionStopForSmokeAsync();
+                        int newResumeRequests = 0;
+                        stopFixture.ConfigureModalEnhancementForSmoke((request, token) =>
+                        {
+                            if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath == "/api/enhance/queue")
+                            {
+                                newResumeRequests++;
+                                return Task.FromResult(LazyResumeJsonResponse(HttpStatusCode.OK, new { paused = false }));
+                            }
+                            return Task.FromResult(LazyResumeJsonResponse(HttpStatusCode.OK, LazyResumeHealth(paused: true)));
+                        });
+                        stopFixture.PrepareUnknownEnhancementQueueResumeForSmoke();
+                        await stopFixture.StartEnhancementCompanionApiForApplicationLaunchAsync();
+                        resumeAfterStop = newResumeRequests == 0
+                            && await stopFixture.SetEnhancementQueuePausedForSmokeAsync(false)
+                            && newResumeRequests == 1;
+                    }
+                    finally { stopFixture.Close(); }
+                    bool stopPreservedQueueState = queueBeforeStop == ReadQueueSemanticState();
                     ok = passiveDidNotStart
+                        && apiOnlyStartExact
+                        && authenticatedStopExact
+                        && resumeAfterStop && stopPreservedQueueState
                         && explicitResumeExact
                         && duplicateGuarded
                         && walFixtureValid
@@ -307,6 +351,10 @@ public partial class App
                     result = new
                     {
                         ok,
+                        apiOnlyStartExact,
+                        authenticatedStopExact,
+                        resumeAfterStop,
+                        stopPreservedQueueState,
                         passiveDidNotStart,
                         explicitResumeExact,
                         duplicateGuarded,

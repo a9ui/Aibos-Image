@@ -41,6 +41,12 @@ try {
     $ordinaryStartupLazy =
         $mainWindowSource -notmatch 'StartEnhancementCompanionApiForApplicationLaunchAsync' -and
         $companionSource -notmatch 'StartEnhancementCompanionApiForApplicationLaunchAsync'
+    $appSource = Get-Content -LiteralPath (Join-Path $repoRoot 'local-native/PhotoViewer.Wpf/App.xaml.cs') -Raw
+    $controlSource = Get-Content -LiteralPath (Join-Path $repoRoot 'local-native/PhotoViewer.Wpf/MainWindow.CompanionControls.cs') -Raw
+    $ordinaryStartupLazy = $ordinaryStartupLazy -and
+        $appSource -match 'if \(Environment.GetEnvironmentVariable\("AIBOS_COMPANION_START_ON_LAUNCH"\) == "1"\)\s*_ = mainWindow.StartEnhancementCompanionApiForApplicationLaunchAsync\(\)' -and
+        $controlSource -match 'recoverQueueBeforeHealth: false' -and
+        $controlSource -notmatch 'HttpMethod.Post|recoverQueueBeforeHealth: true|RecoverAndWake'
     $passiveMethod = [regex]::Match(
         $companionSource,
         'private async Task<EnhancementApiResponse\?>\s+EnsureEnhancementCompanionOwnershipForPassiveReadAsync[\s\S]*?private static bool ShouldReverifyEnhancementCompanionAfterAuthenticatedRequest',
@@ -100,6 +106,9 @@ try {
     Assert-True ($lazyResumeResult.recoveryPreservedQueueState -eq $true) 'Queue recovery changed paused/count/order semantics before Resume.'
     Assert-True ($lazyResumeResult.recoveryBeforeHealth -eq $true) 'Explicit bootstrap did not recover the authenticated queue before its first health read.'
     Assert-True ($lazyResumeResult.healthBeforeRecoveryRequests -eq 0) 'Explicit bootstrap read health before WAL recovery.'
+    Assert-True ($lazyResumeResult.apiOnlyStartExact -eq $true) 'API-only start mutated or resumed the queue, or duplicated a pending request.'
+    Assert-True ($lazyResumeResult.authenticatedStopExact -eq $true) 'Authenticated Stop did not preserve an unknown or changed-epoch process, or failed to stop the exact verified synthetic process.'
+    Assert-True ($lazyResumeResult.resumeAfterStop -eq $true -and $lazyResumeResult.stopPreservedQueueState -eq $true) 'Stop lost durable queue state or prevented a later explicit Resume.'
 
     [pscustomobject]@{
         allPassed = $true
