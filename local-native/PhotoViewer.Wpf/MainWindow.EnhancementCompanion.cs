@@ -2131,16 +2131,17 @@ public partial class MainWindow
             return;
         }
 
-        MarkEnhancementCompanionDurableWorkActivated(
-            awaitSavedDeliveryCatalogAdoption:
-                armSavedDeliveryCatalogAdoption);
-        if (!scheduleRecovery)
-            return;
-
         CancellationToken epoch = actionEpoch ?? CaptureEnhancementCompanionOperationToken();
         lock (_enhancementCompanionDurableRecoverySync)
         {
             if (epoch.IsCancellationRequested || epoch != _enhancementCompanionOperationCts.Token)
+                return;
+            // Both lifetime authority and scheduling belong to the same epoch.
+            // Stop cannot rotate the operation between this check and the mark.
+            MarkEnhancementCompanionDurableWorkActivated(
+                awaitSavedDeliveryCatalogAdoption:
+                    armSavedDeliveryCatalogAdoption);
+            if (!scheduleRecovery)
                 return;
             _enhancementCompanionDurableRecoveryRequested = true;
             _enhancementCompanionDurableRecoveryRequestId = requestId;

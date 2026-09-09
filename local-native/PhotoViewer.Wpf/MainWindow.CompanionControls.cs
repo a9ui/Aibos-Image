@@ -177,7 +177,43 @@ public partial class MainWindow
             // A late pre-stop publisher/finally must not reschedule into the new epoch.
             KickEnhancementCompanionRecoveryAfterDurablePublish(null,
                 "00000000-0000-4000-8000-000000000003", actionEpoch: oldEpoch);
+            bool passiveReplacementStopped;
+            using (Process replacement = Process.Start(start)!)
+            {
+                _ownedEnhancementCompanion = Process.GetProcessById(replacement.Id);
+                _ownedEnhancementCompanionInstanceId = "new-api-only-synthetic-owner";
+                _ownedEnhancementCompanionDurableWorkActivated = 0;
+                string replacementEpoch = DateTimeOffset.UtcNow.ToString("O");
+                int replacementRequests = 0;
+                ConfigureEnhancementCompanionAutoStartForSmoke((request, token) =>
+                {
+                    replacementRequests++;
+                    string challenge = request.Headers.GetValues(EnhancementCompanionChallengeHeader).Single();
+                    return Task.FromResult(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                    { Content = new System.Net.Http.StringContent(JsonSerializer.Serialize(
+                        EnhancementCompanionIdentityPayloadForSmoke(challenge, replacement.Id, replacementEpoch))) });
+                }, _ => throw new InvalidOperationException("Old recovery must not start a replacement."));
+                try
+                {
+                    EnhancementCompanionOwnershipProbe replacementProof =
+                        await ProbeEnhancementCompanionOwnershipAsync(_enhancementCompanionAuthToken!, CancellationToken.None);
+                    foreach (bool schedule in new[] { true, false })
+                        KickEnhancementCompanionRecoveryAfterDurablePublish(null,
+                            "00000000-0000-4000-8000-000000000003",
+                            scheduleRecovery: schedule, actionEpoch: oldEpoch);
+                    bool unchanged = replacementProof.Verified && replacementRequests == 1
+                        && _ownedEnhancementCompanionDurableWorkActivated == 0;
+                    CompleteOwnedEnhancementCompanionForApplicationClose();
+                    passiveReplacementStopped = unchanged && replacement.WaitForExit(5000);
+                }
+                finally
+                {
+                    if (!replacement.HasExited) replacement.Kill();
+                    ReleaseOwnedEnhancementCompanion();
+                }
+            }
             return unknownPreserved && changedEpochPreserved && child.HasExited && requests == 2
+                && passiveReplacementStopped
                 && oldEpoch.IsCancellationRequested
                 && !CaptureEnhancementCompanionOperationToken().IsCancellationRequested
                 && !_enhancementCompanionDurableRecoveryRequested
