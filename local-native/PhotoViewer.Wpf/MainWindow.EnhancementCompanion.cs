@@ -4225,7 +4225,7 @@ public partial class MainWindow
     }
 
     public IReadOnlyDictionary<string, object>
-        EnhancementCompanionIdentityPayloadForSmoke(string challenge)
+        EnhancementCompanionIdentityPayloadForSmoke(string challenge, int? syntheticProcessId = null, string? syntheticEpoch = null)
     {
         if (!TryBase64UrlDecode(
                 EnhancementCompanionSmokeAuthToken,
@@ -4235,8 +4235,8 @@ public partial class MainWindow
         }
         string instanceId = _ownedEnhancementCompanionInstanceId
             ?? "companion-smoke-instance-v1";
-        int processId = Environment.ProcessId;
-        string serverStartedAtUtc = DateTimeOffset.UtcNow.ToString("O");
+        int processId = syntheticProcessId ?? Environment.ProcessId;
+        string serverStartedAtUtc = syntheticEpoch ?? DateTimeOffset.UtcNow.ToString("O");
         using var hmac = new HMACSHA256(authTokenBytes);
         string proof = Base64UrlEncode(hmac.ComputeHash(Encoding.UTF8.GetBytes(
             $"{EnhancementCompanionAuthProtocol}\0{challenge}\0{instanceId}\0{processId}\0{serverStartedAtUtc}")));

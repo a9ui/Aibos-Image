@@ -314,19 +314,13 @@ public partial class App
                         window.StartEnhancementCompanionApiForApplicationLaunchAsync());
                     bool apiOnlyStartExact = apiOnlyReads == 1 && apiOnlyMutations == 0
                         && window.EnhancementJobsWorkspaceForSmoke().QueuePaused == true;
-                    window.UpdateLayout();
-                    var startButton = (System.Windows.Controls.Button)window.FindName("CompanionStartButton");
-                    var controls = (System.Windows.FrameworkElement)((System.Windows.FrameworkElement)((System.Windows.FrameworkElement)startButton.Parent).Parent).Parent;
-                    var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(
-                        (int)Math.Ceiling(controls.ActualWidth), (int)Math.Ceiling(controls.ActualHeight),
-                        96, 96, System.Windows.Media.PixelFormats.Pbgra32);
-                    bitmap.Render(controls);
-                    var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
-                    encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
-                    using (var output = File.Create(Path.Combine(Path.GetDirectoryName(resultFullPath)!, "companion-controls.png")))
-                        encoder.Save(output);
+                    var stopFixture = HiddenWindow();
+                    bool authenticatedStopExact;
+                    try { authenticatedStopExact = await stopFixture.AuthenticatedCompanionStopForSmokeAsync(); }
+                    finally { stopFixture.Close(); }
                     ok = passiveDidNotStart
                         && apiOnlyStartExact
+                        && authenticatedStopExact
                         && explicitResumeExact
                         && duplicateGuarded
                         && walFixtureValid
@@ -336,6 +330,7 @@ public partial class App
                     {
                         ok,
                         apiOnlyStartExact,
+                        authenticatedStopExact,
                         passiveDidNotStart,
                         explicitResumeExact,
                         duplicateGuarded,

@@ -57,10 +57,10 @@ public partial class MainWindow
     private async void RestartCompanion_Click(object sender, RoutedEventArgs e)
         => await StopCompanionFromJobsAsync(restart: true);
 
-    private async Task StopCompanionFromJobsAsync(bool restart)
+    private async Task StopCompanionFromJobsAsync(bool restart, bool confirmedForSmoke = false)
     {
         if (_companionControlPending) return;
-        if (MessageBox.Show(this,
+        if (!confirmedForSmoke && MessageBox.Show(this,
             "サーバーを停止すると実行中のAI処理が中断される場合があります。Jobsの記録は削除しません。\n続けますか？",
             restart ? "サーバーを再起動" : "サーバーを停止",
             MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
@@ -112,5 +112,44 @@ public partial class MainWindow
             SetCompanionControlsPending(false);
         }
         if (stopped && restart) await StartCompanionApiOnlyAsync();
+    }
+
+    public async Task<bool> AuthenticatedCompanionStopForSmokeAsync()
+    {
+        // A short-lived synthetic process, no listener, media, or user state.
+        var start = new ProcessStartInfo(System.IO.Path.Combine(
+            Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
+        { UseShellExecute = false, CreateNoWindow = true };
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-Command");
+        start.ArgumentList.Add("[Threading.Thread]::Sleep(30000)");
+        using Process child = Process.Start(start)!;
+        string epoch = DateTimeOffset.UtcNow.ToString("O");
+        int scenario = 0;
+        int requests = 0;
+        ConfigureEnhancementCompanionAutoStartForSmoke((request, token) =>
+        {
+            requests++;
+            string challenge = request.Headers.GetValues(EnhancementCompanionChallengeHeader).Single();
+            var payload = new Dictionary<string, object>(EnhancementCompanionIdentityPayloadForSmoke(
+                challenge, child.Id, scenario == 1 && requests == 2 ? DateTimeOffset.UtcNow.ToString("O") : epoch));
+            if (scenario == 0) payload["proof"] = "invalid";
+            return Task.FromResult(new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            { Content = new System.Net.Http.StringContent(JsonSerializer.Serialize(payload)) });
+        }, _ => throw new InvalidOperationException("Stop must never launch a server."));
+        try
+        {
+            await StopCompanionFromJobsAsync(false, confirmedForSmoke: true);
+            bool unknownPreserved = !child.HasExited && requests == 1;
+            scenario = 1;
+            requests = 0;
+            await StopCompanionFromJobsAsync(false, confirmedForSmoke: true);
+            bool changedEpochPreserved = !child.HasExited && requests == 2;
+            scenario = 2;
+            requests = 0;
+            await StopCompanionFromJobsAsync(false, confirmedForSmoke: true);
+            return unknownPreserved && changedEpochPreserved && child.HasExited && requests == 2;
+        }
+        finally { if (!child.HasExited) child.Kill(); }
     }
 }
