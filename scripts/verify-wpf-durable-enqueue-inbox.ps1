@@ -30,7 +30,8 @@ $companionText = Get-Content -LiteralPath $companionSource -Raw
 $jobsText = Get-Content -LiteralPath $jobsSource -Raw
 $videoText = Get-Content -LiteralPath $videoSource -Raw
 $sharedLockText = Get-Content -LiteralPath $sharedLockSource -Raw
-if (($jobsText -notmatch 'onBeforeDurablePublish:\s*job\.IsVideoOperation') -or
+if (($jobsText -notmatch 'bool requiresPinnedVideoSource = job\.IsVideoOperation\s*&& !job\.IsExactCurrentVideoToolsV2\s*&& !job\.IsExactCurrentVideoTrimV1') -or
+    ($jobsText -notmatch 'onBeforeDurablePublish:\s*requiresPinnedVideoSource') -or
     ($jobsText -notmatch 'PinVideoRetrySourceForDurablePublish\(job\)')) {
     throw 'Single video retry does not pin its source through durable publication.'
 }

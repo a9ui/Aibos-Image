@@ -317,70 +317,88 @@ public partial class MainWindow
             return;
 
         _batchEnhancementRequestPending = true;
-        _batchEnhancementStopRequested = false;
-        _batchEnhancementDurablePublishCommitted = false;
-        _batchEnhancementCompleted = false;
-        BatchEnhancementStatusText.Text = retry
-            ? $"失敗した{items.Count:N0}件を再試行中…"
-            : $"対象{items.Count:N0}件をJobsへ追加中…";
-        RefreshBatchEnhancementSurface();
-        bool confirmLarge = BatchEnhancementAllowLargeCheckBox.IsChecked == true;
-        DurableEnhancementBatchResponse durableBatch =
-            await TrySendDurableEnhancementBatchAsync(
-                items.Select(item => (object?)CreateBatchEnhancementRequestBody(
-                    item.SourceIdentity,
-                    item.Prompt,
-                    confirmLarge)).ToArray(),
-                onFirstPublish: OnFirstDurableBatchPublish,
-                shouldStopBeforeFirstPublish: () => _batchEnhancementStopRequested);
-        _batchEnhancementPostCount += durableBatch.NudgeCount;
-        for (int index = 0; index < items.Count; index++)
+        try
         {
-            BatchEnhancementItemView item = items[index];
-            EnhancementApiResponse response = durableBatch.Responses[index];
-            if (response.StatusCode == 499)
-                continue;
-            item.MarkSubmitting();
-            if (response.SavedForDelivery)
+            _batchEnhancementStopRequested = false;
+            _batchEnhancementDurablePublishCommitted = false;
+            _batchEnhancementCompleted = false;
+            BatchEnhancementStatusText.Text = retry
+                ? $"失敗した{items.Count:N0}件を再試行中…"
+                : $"対象{items.Count:N0}件をJobsへ追加中…";
+            RefreshBatchEnhancementSurface();
+            bool confirmLarge = BatchEnhancementAllowLargeCheckBox.IsChecked == true;
+            DurableEnhancementBatchResponse durableBatch =
+                await TrySendDurableEnhancementBatchAsync(
+                    items.Select(item => (object?)CreateBatchEnhancementRequestBody(
+                        item.SourceIdentity,
+                        item.Prompt,
+                        confirmLarge)).ToArray(),
+                    onFirstPublish: OnFirstDurableBatchPublish,
+                    shouldStopBeforeFirstPublish: () => _batchEnhancementStopRequested);
+            _batchEnhancementPostCount += durableBatch.NudgeCount;
+            for (int index = 0; index < items.Count; index++)
             {
-                item.MarkSavedForDelivery();
+                BatchEnhancementItemView item = items[index];
+                EnhancementApiResponse response = durableBatch.Responses[index];
+                if (response.StatusCode == 499)
+                    continue;
+                item.MarkSubmitting();
+                if (response.SavedForDelivery)
+                {
+                    item.MarkSavedForDelivery();
+                }
+                else if (response.Ok
+                    && response.Payload is JsonElement payload
+                    && TryReadCreatedBatchEnhancementJob(
+                        payload,
+                        item.SourceIdentity,
+                        out string? jobId))
+                {
+                    item.MarkQueued(jobId!);
+                    _batchEnhancementCreatedJobIds.Add(jobId!);
+                }
+                else
+                {
+                    item.MarkFailed(string.IsNullOrWhiteSpace(response.Error)
+                        ? "Jobsへの追加予約を確認できませんでした。"
+                        : response.Error);
+                }
             }
-            else if (response.Ok
-                && response.Payload is JsonElement payload
-                && TryReadCreatedBatchEnhancementJob(
-                    payload,
-                    item.SourceIdentity,
-                    out string? jobId))
-            {
-                item.MarkQueued(jobId!);
-                _batchEnhancementCreatedJobIds.Add(jobId!);
-            }
-            else
-            {
-                item.MarkFailed(string.IsNullOrWhiteSpace(response.Error)
-                    ? "Jobsへの追加予約を確認できませんでした。"
-                    : response.Error);
-            }
+
+            foreach (BatchEnhancementItemView item in items.Where(static item => item.State == BatchEnhancementItemState.Ready))
+                item.MarkStopped("一括追加を停止したため送信していません。");
+
+            _batchEnhancementRequestPending = false;
+            _batchEnhancementCompleted = true;
+            int queued = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Queued);
+            int failed = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Failed);
+            int saved = _batchEnhancementItems.Count(
+                static item => item.State == BatchEnhancementItemState.SavedForDelivery);
+            int outcomeUnknown = _batchEnhancementItems.Count(
+                static item => item.State == BatchEnhancementItemState.OutcomeUnknown);
+            int stopped = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Stopped);
+            BatchEnhancementStatusText.Text = _batchEnhancementStopRequested
+                ? $"停止 · 追加 {queued:N0} · 保存 {saved:N0} · 失敗 {failed:N0} · 要確認 {outcomeUnknown:N0} · 未送信 {stopped:N0}"
+                : $"追加 {queued:N0} · 保存 {saved:N0} · 失敗 {failed:N0} · 要確認 {outcomeUnknown:N0}";
+            RefreshBatchEnhancementSurface();
+            BatchEnhancementItemsList.Items.Refresh();
+            _ = Dispatcher.BeginInvoke(FocusFirstAvailableBatchEnhancementControl, DispatcherPriority.Input);
         }
-
-        foreach (BatchEnhancementItemView item in items.Where(static item => item.State == BatchEnhancementItemState.Ready))
-            item.MarkStopped("一括追加を停止したため送信していません。");
-
-        _batchEnhancementRequestPending = false;
-        _batchEnhancementCompleted = true;
-        int queued = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Queued);
-        int failed = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Failed);
-        int saved = _batchEnhancementItems.Count(
-            static item => item.State == BatchEnhancementItemState.SavedForDelivery);
-        int outcomeUnknown = _batchEnhancementItems.Count(
-            static item => item.State == BatchEnhancementItemState.OutcomeUnknown);
-        int stopped = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Stopped);
-        BatchEnhancementStatusText.Text = _batchEnhancementStopRequested
-            ? $"停止 · 追加 {queued:N0} · 保存 {saved:N0} · 失敗 {failed:N0} · 要確認 {outcomeUnknown:N0} · 未送信 {stopped:N0}"
-            : $"追加 {queued:N0} · 保存 {saved:N0} · 失敗 {failed:N0} · 要確認 {outcomeUnknown:N0}";
-        RefreshBatchEnhancementSurface();
-        BatchEnhancementItemsList.Items.Refresh();
-        _ = Dispatcher.BeginInvoke(FocusFirstAvailableBatchEnhancementControl, DispatcherPriority.Input);
+        catch (Exception)
+        {
+            foreach (BatchEnhancementItemView item in items.Where(static item =>
+                item.State is BatchEnhancementItemState.Ready or BatchEnhancementItemState.Submitting))
+            {
+                item.MarkOutcomeUnknown("追加結果を確認できません。Jobsと保存済み予約を確認してください。");
+            }
+            BatchEnhancementStatusText.Text = "一括追加の結果を確認できません。保存済み予約は保持されています。";
+        }
+        finally
+        {
+            _batchEnhancementRequestPending = false;
+            RefreshBatchEnhancementSurface();
+            BatchEnhancementItemsList.Items.Refresh();
+        }
     }
 
     private async Task SubmitBatchEnhancementWorkerAsync(

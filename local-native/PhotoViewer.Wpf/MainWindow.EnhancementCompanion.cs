@@ -561,6 +561,11 @@ public partial class MainWindow
         string? exactBodyJson = body is null
             ? null
             : JsonSerializer.Serialize(body);
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(
+            token, CaptureEnhancementCompanionOperationToken());
+        token = operation.Token;
+        if (token.IsCancellationRequested)
+            return new EnhancementApiResponse(false, 0, null, "操作は中断されました。");
         if (_usingDefaultModalEnhancementSender
             && !_enhancementCompanionOwnershipVerified)
         {
@@ -1736,7 +1741,7 @@ public partial class MainWindow
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
                 recoverySourceIdentity,
-                item.RequestId, actionEpoch: actionEpoch);
+                item.RequestId, scheduleRecovery: false, actionEpoch: actionEpoch);
             return SavedForDeliveryResponse(item);
         }
 
@@ -2052,7 +2057,7 @@ public partial class MainWindow
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
                 sourceIdentity: null,
-                publishedItems[0].Item.RequestId, actionEpoch: actionEpoch);
+                publishedItems[0].Item.RequestId, scheduleRecovery: false, actionEpoch: actionEpoch);
         }
 
         int nudgeCount = 0;
@@ -2262,19 +2267,17 @@ public partial class MainWindow
         token.ThrowIfCancellationRequested();
         for (int attempt = 0; attempt < DurableEnqueueRecoveryAttempts; attempt++)
         {
-            EnhancementApiResponse? bootstrapRecovery = null;
             EnhancementApiResponse readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
                     sourceIdentity,
                     token,
-                    recoverQueueBeforeHealth: true,
-                    recoveryIdempotencyKey: requestId,
-                    onQueueRecoveryCompleted:
-                        response => bootstrapRecovery = response);
-            if (readiness.Ok)
+                    recoverQueueBeforeHealth: false);
+            if (readiness.Ok
+                && EnhancementEnqueueProbePolicy.Classify(
+                    readiness.Ok, readiness.StatusCode, readiness.Payload)
+                    == EnhancementEnqueueBackendMode.Durable)
             {
-                EnhancementApiResponse recovery = bootstrapRecovery
-                    ?? await SendEnhancementApiAsync(
+                EnhancementApiResponse recovery = await SendEnhancementApiAsync(
                         HttpMethod.Post,
                         EnhancementCompanionQueueRecoveryRoute,
                         token: token,

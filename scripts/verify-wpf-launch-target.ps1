@@ -16,6 +16,8 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 $sourcePath = Join-Path $projectRoot 'App.cs'
 [IO.File]::WriteAllText($sourcePath, '// synthetic source', $utf8)
 $artifactNames = @('PhotoViewer.Wpf.exe', 'PhotoViewer.Wpf.dll', 'PhotoViewer.Wpf.deps.json', 'PhotoViewer.Wpf.runtimeconfig.json')
+$artifactNames += @('Microsoft.Data.Sqlite.dll', 'SQLitePCLRaw.batteries_v2.dll',
+    'SQLitePCLRaw.core.dll', 'SQLitePCLRaw.provider.winsqlite3.dll')
 foreach ($name in $artifactNames) {
     [IO.File]::WriteAllText((Join-Path $targetRoot $name), 'synthetic ' + $name, $utf8)
 }
@@ -51,7 +53,7 @@ foreach ($name in $artifactNames) {
     }
     finally { [IO.File]::WriteAllBytes($path, $bytes) }
 }
-$dllPath = Join-Path $targetRoot 'PhotoViewer.Wpf.dll'
+$dllPath = Join-Path $targetRoot 'Microsoft.Data.Sqlite.dll'
 $savedDll = $dllPath + '.saved'
 Move-Item -LiteralPath $dllPath -Destination $savedDll
 try { Invoke-Check 10 'target-missing' }
@@ -70,7 +72,12 @@ finally { [IO.File]::WriteAllText($stampPath, $savedStamp, $utf8) }
 Invoke-Check 10 'source-content-mismatch'
 # Exercise the actual launcher repair path with real MSBuild, not dummy hashes.
 Copy-Item -LiteralPath (Join-Path $repoRoot 'start_wpf.bat') -Destination $runRoot
-[IO.File]::WriteAllText((Join-Path $projectRoot 'PhotoViewer.Wpf.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework></PropertyGroup></Project>', $utf8)
+$dependencyRoot = Join-Path $projectRoot 'dependencies'
+New-Item -ItemType Directory -Path $dependencyRoot -Force | Out-Null
+foreach ($name in $artifactNames | Where-Object { $_ -match '^(Microsoft.Data.Sqlite|SQLitePCLRaw)' }) {
+    [IO.File]::WriteAllText((Join-Path $dependencyRoot $name), 'synthetic dependency ' + $name, $utf8)
+}
+[IO.File]::WriteAllText((Join-Path $projectRoot 'PhotoViewer.Wpf.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework></PropertyGroup><ItemGroup><Content Include="dependencies\*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="Always" /></ItemGroup></Project>', $utf8)
 [IO.File]::WriteAllText($sourcePath, 'System.Console.WriteLine("Synthetic launch succeeded.");', $utf8)
 $savedDesktop = $env:AIBOS_DESKTOP_LAUNCH
 $savedRebuild = $env:PHOTOVIEWER_WPF_REBUILD
@@ -95,6 +102,15 @@ try {
     if ([IO.File]::ReadAllText($runtimeConfig) -cne $correct) { throw 'Repair did not restore runtime configuration bytes.' }
     Invoke-Check 0 'provenance-match'
     $checks.Add('real-build-restores-runtimeconfig')
+    $dependencyOutput = Join-Path $targetRoot 'Microsoft.Data.Sqlite.dll'
+    $dependencyCorrect = [IO.File]::ReadAllText($dependencyOutput)
+    [IO.File]::WriteAllText($dependencyOutput, 'synthetic corruption', $utf8)
+    Invoke-Check 10 'target-hash-mismatch'
+    & (Join-Path $runRoot 'start_wpf.bat')
+    if ($LASTEXITCODE -ne 0) { throw 'Dependency repair build failed.' }
+    if ([IO.File]::ReadAllText($dependencyOutput) -cne $dependencyCorrect) { throw 'Repair did not restore dependency bytes.' }
+    Invoke-Check 0 'provenance-match'
+    $checks.Add('real-build-restores-runtime-dependency')
     $beforeFailedBuild = [IO.File]::ReadAllText($stampPath)
     [IO.File]::WriteAllText($sourcePath, 'intentional compiler error;', $utf8)
     & (Join-Path $runRoot 'start_wpf.bat')

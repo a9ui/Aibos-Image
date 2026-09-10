@@ -339,7 +339,17 @@ public partial class App
                     }
                     finally { stopFixture.Close(); }
                     bool stopPreservedQueueState = queueBeforeStop == ReadQueueSemanticState();
+                    bool integrityParsers = window.EnhancementIntegrityParsersForSmoke(
+                        JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)));
+                    bool idempotentEpoch = await window.IdempotentMutationEpochForSmokeAsync();
+                    using JsonDocument retryReady = JsonDocument.Parse(
+                        CreateI2iV3HealthJson(true, true, null));
+                    using JsonDocument retryUnavailable = JsonDocument.Parse(
+                        CreateI2iV3HealthJson(false, false, "WORKFLOW_UNVERIFIED"));
+                    bool i2iV3RetryGate = window.I2iV3RetryGateForSmoke(
+                        retryReady.RootElement, retryUnavailable.RootElement);
                     ok = passiveDidNotStart
+                        && integrityParsers && idempotentEpoch && i2iV3RetryGate
                         && apiOnlyStartExact
                         && authenticatedStopExact
                         && resumeAfterStop && stopPreservedQueueState
@@ -351,6 +361,9 @@ public partial class App
                     result = new
                     {
                         ok,
+                        integrityParsers,
+                        idempotentEpoch,
+                        i2iV3RetryGate,
                         apiOnlyStartExact,
                         authenticatedStopExact,
                         resumeAfterStop,

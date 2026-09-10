@@ -2072,8 +2072,14 @@ public partial class MainWindow
                 if (current == paused
                     && !health.QueueRecoveryRequired)
                 {
+                    if (health.State == "確認が必要")
+                    {
+                        EnhancementJobsStatusText.Text =
+                            "サーバーには接続しましたが、キューの確認が必要です。" + health.Detail;
+                        return false;
+                    }
                     EnhancementJobsStatusText.Text =
-                        "ローカルAIサービスへ接続しました。キューはすでに動作中です。";
+                        "サーバーに接続しました。キューの一時停止は解除済みです。";
                     return true;
                 }
             }
@@ -2131,7 +2137,7 @@ public partial class MainWindow
             }
             EnhancementJobsStatusText.Text = persistedPaused
                 ? "キューを一時停止しました。処理中の1件は完了し、次の待機ジョブから止まります。"
-                : "キューを再開しました。待機順を維持したまま処理を続けます。";
+                : "キューの一時停止を解除しました。処理状況はLOCAL AI欄で確認できます。";
             AibosOperationLog.Write(
                 "queue_pause_change",
                 "completed",
@@ -2588,6 +2594,7 @@ public partial class MainWindow
         health = default;
         if (payload.ValueKind != JsonValueKind.Object
             || !payload.TryGetProperty("version", out JsonElement versionElement)
+            || versionElement.ValueKind != JsonValueKind.Number
             || !versionElement.TryGetInt32(out int version)
             || version != 1
             || !payload.TryGetProperty("status", out JsonElement statusElement)
@@ -2646,6 +2653,7 @@ public partial class MainWindow
             || !runtimeElement.TryGetProperty(
                 "processId",
                 out JsonElement processIdElement)
+            || processIdElement.ValueKind != JsonValueKind.Number
             || !processIdElement.TryGetInt32(out int processId)
             || processId <= 0)
         {
@@ -2705,6 +2713,7 @@ public partial class MainWindow
                     currentJobId = null;
             }
             if (currentElement.TryGetProperty("progress", out JsonElement progressElement)
+                && progressElement.ValueKind == JsonValueKind.Number
                 && progressElement.TryGetInt32(out int progress)
                 && progress is >= 0 and <= 100)
             {
@@ -2750,7 +2759,8 @@ public partial class MainWindow
             {
                 if (inventoryRevisionElement.ValueKind != JsonValueKind.Null)
                 {
-                    if (!inventoryRevisionElement.TryGetInt64(
+                    if (inventoryRevisionElement.ValueKind != JsonValueKind.Number
+                        || !inventoryRevisionElement.TryGetInt64(
                             out long parsedInventoryRevision)
                         || parsedInventoryRevision
                             is < 0 or > 9_007_199_254_740_991)
@@ -2764,7 +2774,8 @@ public partial class MainWindow
                     "catalogRevision",
                     out JsonElement catalogRevisionElement))
             {
-                if (!catalogRevisionElement.TryGetInt64(
+                if (catalogRevisionElement.ValueKind != JsonValueKind.Number
+                    || !catalogRevisionElement.TryGetInt64(
                         out long parsedCatalogRevision)
                     || parsedCatalogRevision
                         is < 0 or > 9_007_199_254_740_991)
@@ -2779,7 +2790,8 @@ public partial class MainWindow
                     "queueOrderRevision",
                     out JsonElement queueOrderRevisionElement))
             {
-                if (!queueOrderRevisionElement.TryGetInt64(
+                if (queueOrderRevisionElement.ValueKind != JsonValueKind.Number
+                    || !queueOrderRevisionElement.TryGetInt64(
                         out long queueOrderRevision)
                     || queueOrderRevision is < 0 or > 9_007_199_254_740_991)
                 {
@@ -3041,6 +3053,7 @@ public partial class MainWindow
     {
         value = 0;
         return counts.TryGetProperty(propertyName, out JsonElement countElement)
+            && countElement.ValueKind == JsonValueKind.Number
             && countElement.TryGetInt32(out value)
             && value >= 0;
     }
@@ -8763,6 +8776,15 @@ public partial class MainWindow
 
         if (!string.Equals(operation, "i2i", StringComparison.Ordinal))
             return null;
+
+        if (i2iSchemaVersion == 3)
+        {
+            return payload => TryParseI2iV3Capability(
+                    payload, out I2iV3CapabilityState capability)
+                && capability.IsReady
+                    ? null
+                    : "LOCAL AIはこのAI編集の再試行を準備できていません。予約は保存していません。";
+        }
 
         if (i2iSchemaVersion == 2)
         {
