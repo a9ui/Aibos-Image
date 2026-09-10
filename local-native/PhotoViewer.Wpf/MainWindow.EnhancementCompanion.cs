@@ -1475,7 +1475,8 @@ public partial class MainWindow
 
         int[] actual = maximumPixelAreas
             .EnumerateArray()
-            .Select(static item => item.TryGetInt32(out int value) ? value : -1)
+            .Select(static item => item.ValueKind == JsonValueKind.Number
+                && item.TryGetInt32(out int value) ? value : -1)
             .ToArray();
         return actual.SequenceEqual(SupportedMiniMaxH3VideoMaximumPixelAreas);
     }
@@ -1529,6 +1530,7 @@ public partial class MainWindow
         string propertyName,
         int expected)
         => element.TryGetProperty(propertyName, out JsonElement property)
+            && property.ValueKind == JsonValueKind.Number
             && property.TryGetInt32(out int value)
             && value == expected;
 

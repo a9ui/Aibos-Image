@@ -7,6 +7,41 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
+    public bool H3NumericIntegrityForSmoke(JsonElement validHealth, string capabilitiesJson)
+    {
+        JsonNode baseline = JsonNode.Parse(validHealth.GetRawText())!;
+        baseline["capabilities"] = JsonNode.Parse(capabilitiesJson)!["capabilities"]!.DeepClone();
+        JsonElement good = JsonSerializer.SerializeToElement(baseline);
+        if (!TryParseEnhancementQueueHealth(good, out _)
+            || !TryParseMiniMaxH3VideoCapability(good, out var capability) || !capability.Ready
+            || !TryParseMiniMaxH3VideoCanvasTiersCapability(good)) return false;
+        foreach (string member in new[] {
+            "videoV2.profile.canary.width", "videoV2.profile.canary.height",
+            "videoV2.profile.frameCount", "videoV2.profile.playbackFps", "videoV2.profile.steps",
+            "videoV2.profile.canvasPolicy.alignment", "videoV2.profile.canvasPolicy.minDimension",
+            "videoV2.profile.canvasPolicy.maxDimension", "videoV2.profile.canvasPolicy.maxPixelArea",
+            "videoH3StepsV1.minimumSteps", "videoH3StepsV1.maximumSteps", "videoH3StepsV1.defaultSteps",
+            "videoH3CanvasTiersV1.defaultMaximumPixelArea", "videoH3CanvasTiersV1.maximumPixelAreas.0" })
+        foreach (string invalid in new[] { "\"864\"", "null", "{}", "[]", "1e100" })
+        {
+            JsonNode root = baseline.DeepClone();
+            string[] path = member.Split('.');
+            JsonNode parent = root["capabilities"]!;
+            foreach (string part in path[..^1]) parent = parent[part]!;
+            if (parent is JsonArray array) array[int.Parse(path[^1])] = JsonNode.Parse(invalid);
+            else parent[path[^1]] = JsonNode.Parse(invalid);
+            JsonElement payload = JsonSerializer.SerializeToElement(root);
+            bool accepted = path[0] switch
+            {
+                "videoV2" => TryParseMiniMaxH3VideoCapability(payload, out _),
+                "videoH3StepsV1" => TryParseMiniMaxH3VideoStepsCapability(payload),
+                _ => TryParseMiniMaxH3VideoCanvasTiersCapability(payload),
+            };
+            if (accepted || !TryParseEnhancementQueueHealth(payload, out _)) return false;
+        }
+        return true;
+    }
+
     public async Task<bool> ApiOnlyUnavailableHealthForSmokeAsync()
     {
         bool listening = false;
