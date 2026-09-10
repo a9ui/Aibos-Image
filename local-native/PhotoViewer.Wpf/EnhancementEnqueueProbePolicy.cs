@@ -63,6 +63,7 @@ internal static class EnhancementEnqueueProbePolicy
                 inbox,
                 "protocolVersion",
                 out JsonElement protocolVersion)
+            || protocolVersion.ValueKind != JsonValueKind.Number
             || !protocolVersion.TryGetInt32(out int version)
             || version != EnhancementEnqueueInboxStore.ProtocolVersion
             || !TryGetExactlyOneProperty(

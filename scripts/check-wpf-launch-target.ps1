@@ -111,6 +111,9 @@ try {
     # An unchanged apphost does not prove that the executable code is current.
     $targetStem = Join-Path (Split-Path -Parent $target) ([IO.Path]::GetFileNameWithoutExtension($target))
     $launchFiles = @($target, ($targetStem + '.dll'), ($targetStem + '.deps.json'), ($targetStem + '.runtimeconfig.json'))
+    $launchFiles += @('Microsoft.Data.Sqlite.dll', 'SQLitePCLRaw.batteries_v2.dll',
+        'SQLitePCLRaw.core.dll', 'SQLitePCLRaw.provider.winsqlite3.dll') |
+        ForEach-Object { Join-Path (Split-Path -Parent $target) $_ }
     $missingLaunchFiles = @($launchFiles | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
 
     if ($null -eq $targetItem -or $missingLaunchFiles.Count -gt 0) {

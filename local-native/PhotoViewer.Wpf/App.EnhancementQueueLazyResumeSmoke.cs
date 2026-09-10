@@ -339,8 +339,25 @@ public partial class App
                     }
                     finally { stopFixture.Close(); }
                     bool stopPreservedQueueState = queueBeforeStop == ReadQueueSemanticState();
+                    var unavailableFixture = HiddenWindow();
+                    bool apiOnlyUnavailableHealth;
+                    try { apiOnlyUnavailableHealth = await unavailableFixture.ApiOnlyUnavailableHealthForSmokeAsync(); }
+                    finally { unavailableFixture.Close(); }
+                    bool integrityParsers = window.EnhancementIntegrityParsersForSmoke(
+                        JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)));
+                    bool h3NumericIntegrity = window.H3NumericIntegrityForSmoke(
+                        JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)),
+                        CreateVideoV2HealthJson(true, true, "ready", null));
+                    bool idempotentEpoch = await window.IdempotentMutationEpochForSmokeAsync();
+                    using JsonDocument retryReady = JsonDocument.Parse(
+                        CreateI2iV3HealthJson(true, true, null));
+                    using JsonDocument retryUnavailable = JsonDocument.Parse(
+                        CreateI2iV3HealthJson(false, false, "WORKFLOW_UNVERIFIED"));
+                    bool i2iV3RetryGate = window.I2iV3RetryGateForSmoke(
+                        retryReady.RootElement, retryUnavailable.RootElement);
                     ok = passiveDidNotStart
-                        && apiOnlyStartExact
+                        && integrityParsers && h3NumericIntegrity && idempotentEpoch && i2iV3RetryGate
+                        && apiOnlyStartExact && apiOnlyUnavailableHealth
                         && authenticatedStopExact
                         && resumeAfterStop && stopPreservedQueueState
                         && explicitResumeExact
@@ -351,7 +368,12 @@ public partial class App
                     result = new
                     {
                         ok,
+                        integrityParsers,
+                        idempotentEpoch,
+                        i2iV3RetryGate,
                         apiOnlyStartExact,
+                        apiOnlyUnavailableHealth,
+                        h3NumericIntegrity,
                         authenticatedStopExact,
                         resumeAfterStop,
                         stopPreservedQueueState,

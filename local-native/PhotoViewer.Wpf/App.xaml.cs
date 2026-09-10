@@ -25832,6 +25832,15 @@ public partial class App : Application
                                         pumpRunning = false,
                                         paused = true,
                                     },
+                                    capabilities = new
+                                    {
+                                        durableEnqueueInboxV1 = new
+                                        {
+                                            ready = true,
+                                            protocolVersion = 1,
+                                            backendGeneration = "json-v1",
+                                        },
+                                    },
                                 });
                         }
                         compatibilityRequestsCarriedId &=

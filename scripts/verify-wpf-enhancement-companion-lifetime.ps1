@@ -58,7 +58,8 @@ try {
         $companionSource -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync[\s\S]*?EnsureEnhancementCompanionApiReadyAsync' -and
         $companionSource -match 'TryStartOwnedEnhancementCompanion\(out string startError\)'
     $explicitRecoveryBoundaryExact =
-        $companionSource -match 'RecoverAndWakeDurableEnqueueInboxAsync\([\s\S]{0,1800}recoverQueueBeforeHealth:\s*true' -and
+        $companionSource -match 'private async Task RecoverAndWakeDurableEnqueueInboxAsync[\s\S]{0,1800}recoverQueueBeforeHealth:\s*false' -and
+        $companionSource -match 'private async Task RecoverAndWakeDurableEnqueueInboxAsync[\s\S]{0,2200}EnhancementEnqueueBackendMode.Durable' -and
         $companionSource -notmatch 'SendIdempotentEnhancementMutationAsync[\s\S]{0,3500}recoverQueueBeforeHealth:\s*true' -and
         $companionSource -notmatch 'SendEnhancementEnqueueAsync\([\s\S]{0,6000}recoverQueueBeforeHealth:\s*true' -and
         $companionSource -notmatch 'TrySendDurableEnhancementBatchCoreAsync\([\s\S]{0,5000}recoverQueueBeforeHealth:\s*true'

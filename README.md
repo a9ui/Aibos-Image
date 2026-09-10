@@ -45,8 +45,9 @@ source-revision and source-content check, rebuilding the local Release target
 when the current checkout has changed. Re-running the installer updates both
 the task action and the desktop shortcut to the current repository path.
 Clicking the shortcut again activates the existing window without rebuilding
-or restarting it. A fresh start verifies the apphost, managed assembly, and
-host configuration together. A configured Companion that is temporarily
+or restarting it. A fresh start verifies the apphost, managed assembly, host
+configuration, and the required local SQLite dependency assemblies together.
+A configured Companion that is temporarily
 unavailable does not prevent ordinary viewing.
 The scheduler accepts subsequent requests even while a previous Companion
 remains alive. A per-user/session startup mutex serializes preparation until
