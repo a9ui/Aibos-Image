@@ -410,6 +410,12 @@ public partial class MainWindow
                         _enhancementCompanionLaunchError = null;
                         return response;
                     }
+                    // Identity already proved that this exact API is listening.
+                    // An unavailable Jobs store is not a failed process launch:
+                    // keep the API available for explicit recovery instead of
+                    // polling health until the bootstrap timeout kills it.
+                    _enhancementCompanionLaunchError = response.Error;
+                    return response;
                 }
                 else if (!ownership.TransportUnavailable && !ownership.RetryableBusy)
                 {

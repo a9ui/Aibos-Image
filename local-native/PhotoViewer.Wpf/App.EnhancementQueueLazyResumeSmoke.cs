@@ -339,6 +339,10 @@ public partial class App
                     }
                     finally { stopFixture.Close(); }
                     bool stopPreservedQueueState = queueBeforeStop == ReadQueueSemanticState();
+                    var unavailableFixture = HiddenWindow();
+                    bool apiOnlyUnavailableHealth;
+                    try { apiOnlyUnavailableHealth = await unavailableFixture.ApiOnlyUnavailableHealthForSmokeAsync(); }
+                    finally { unavailableFixture.Close(); }
                     bool integrityParsers = window.EnhancementIntegrityParsersForSmoke(
                         JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)));
                     bool idempotentEpoch = await window.IdempotentMutationEpochForSmokeAsync();
@@ -350,7 +354,7 @@ public partial class App
                         retryReady.RootElement, retryUnavailable.RootElement);
                     ok = passiveDidNotStart
                         && integrityParsers && idempotentEpoch && i2iV3RetryGate
-                        && apiOnlyStartExact
+                        && apiOnlyStartExact && apiOnlyUnavailableHealth
                         && authenticatedStopExact
                         && resumeAfterStop && stopPreservedQueueState
                         && explicitResumeExact
@@ -365,6 +369,7 @@ public partial class App
                         idempotentEpoch,
                         i2iV3RetryGate,
                         apiOnlyStartExact,
+                        apiOnlyUnavailableHealth,
                         authenticatedStopExact,
                         resumeAfterStop,
                         stopPreservedQueueState,

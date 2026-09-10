@@ -7,6 +7,37 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
+    public async Task<bool> ApiOnlyUnavailableHealthForSmokeAsync()
+    {
+        bool listening = false;
+        int starts = 0;
+        int healthReads = 0;
+        int mutations = 0;
+        ConfigureEnhancementCompanionAutoStartForSmoke(async (request, token) =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/api/enhance/identity")
+            {
+                if (!listening) throw new HttpRequestException("Synthetic API not started.");
+                string challenge = request.Headers.GetValues(EnhancementCompanionChallengeHeader).Single();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(
+                        EnhancementCompanionIdentityPayloadForSmoke(challenge))),
+                };
+            }
+            var inner = await DecodeEnhancementCompanionSecureRequestForSmokeAsync(request, token);
+            if (inner?.Method == "GET" && inner.PathAndQuery == "/api/enhance/health")
+                healthReads++;
+            else mutations++;
+            return EnhancementCompanionSecureResponseForSmoke(request, 503,
+                new { error = "Synthetic store unavailable.", code = "QUEUE_HEALTH_UNAVAILABLE" });
+        }, _ => { starts++; listening = true; return (true, ""); });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        EnhancementApiResponse response = await EnsureEnhancementCompanionApiReadyAsync(token: timeout.Token);
+        return !timeout.IsCancellationRequested && !response.Ok && response.StatusCode == 503
+            && starts == 1 && healthReads == 1 && mutations == 0;
+    }
+
     public bool I2iV3RetryGateForSmoke(JsonElement ready, JsonElement unavailable)
     {
         Func<JsonElement, string?>? validator = CreateEnhancementRetryHealthValidator(
