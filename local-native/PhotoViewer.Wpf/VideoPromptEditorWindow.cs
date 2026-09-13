@@ -108,9 +108,14 @@ public sealed class VideoPromptEditorWindow : Window
         AddText(imports, "既存のアニメ用・実写用H3文を、それぞれ土台として取り込めます。追加の［選択部品］は「本文と選択」に書きます。土台の [Shot 1] などはオプションとして解釈しません。");
         TextBox baseOriginal = AddEditor(imports, "Original / アニメ用のH3土台", Program.BaseH3Template, 8000, 130);
         TextBox basePhoto = AddEditor(imports, "実写用のH3土台（空欄ならOriginal用を共有）", Program.PhotorealBaseH3Template, 8000, 130);
+        if (Program.AnnotatedH3)
+        {
+            baseOriginal.IsReadOnly = basePhoto.IsReadOnly = true;
+            AddText(imports, "選択式にしたスタイルの元の本文です。既定状態との照合用に保持しています。文章や候補の編集は「本文と選択」で行えます。");
+        }
         baseOriginal.TextChanged += (_, _) => Program.BaseH3Template = baseOriginal.Text;
         basePhoto.TextChanged += (_, _) => Program.PhotorealBaseH3Template = basePhoto.Text;
-        if (existingStyles is { Count: > 0 })
+        if (!Program.AnnotatedH3 && existingStyles is { Count: > 0 })
         {
             string[] names = existingStyles.Keys.ToArray();
             ComboBox sourceStyle = AddCombo(imports, "取り込む既存Style", names, 0);
@@ -194,7 +199,9 @@ public sealed class VideoPromptEditorWindow : Window
         AddText(panel, token.Text, true);
         ComboBox mode = AddCombo(panel, "選び方", token.Kind == '['
             ? ["ON", "OFF", "条件で自動"] : ["手動候補", "OFF", "画像AI"], option.Mode == "off" ? 1 : option.Mode == "auto" ? 2 : 0);
-        ComboBox? choices = token.Choices.Count > 0 ? AddCombo(panel, "手動候補（画像AIがOFFのときも使用）", token.Choices.ToArray(), option.ChoiceIndex) : null;
+        ComboBox? choices = token.Choices.Count > 0 ? AddCombo(panel, "手動候補（画像AIがOFFのときも使用）",
+            token.Choices.Select((text, index) => option.ChoiceLabels.ElementAtOrDefault(index) ?? text).ToArray(), option.ChoiceIndex) : null;
+        if (option.Group.Length > 0) AddText(panel, "これを使うと、同じ組の他の候補は外れます。文章は取り消し線で残ります。");
         ComboBox? condition = token.Kind == '[' ? AddCombo(panel, "元画像プロンプトの条件",
             ["指定文字列を含む", "指定文字列を含まない", "プロンプトがある", "プロンプトがない"],
             option.Condition switch { "absent" => 1, "has-prompt" => 2, "no-prompt" => 3, _ => 0 }) : null;
@@ -210,7 +217,7 @@ public sealed class VideoPromptEditorWindow : Window
             if (choices is not null) option.ChoiceIndex = Math.Max(0, choices.SelectedIndex);
             if (condition is not null) option.Condition = condition.SelectedIndex switch { 1 => "absent", 2 => "has-prompt", 3 => "no-prompt", _ => "contains" };
             if (keyword is not null) option.Keyword = keyword.Text;
-            Program.Options[token.Key] = option;
+            Program.SetManualOption(token, option, _variant.SelectedIndex == 1 ? "photoreal" : "anime");
             dialog.DialogResult = true;
         });
         dialog.ShowDialog();

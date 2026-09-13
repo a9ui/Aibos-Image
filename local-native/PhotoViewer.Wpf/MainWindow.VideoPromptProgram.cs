@@ -89,10 +89,13 @@ public partial class MainWindow
             MarkVideoPromptTemplateAsCustom();
             RefreshVideoStyleControls(updateNameFields: false);
             InvalidateVideoProgramAuthoring();
+            ApplyDirectVideoSourceVariant();
             foreach (ContentControl host in new[] { ModalVideoPromptAuthoringHost, AppVideoPromptAuthoringHost })
                 if (host.Content is VideoPromptAuthoringControl peer && !ReferenceEquals(peer, sender))
                     peer.Load(_videoPromptProgram, _videoPrompt, _videoProgramSourceOverride, EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt());
-            SetVideoStyleStatus("変更は今回の動画に使います。残したい場合は名前を付けてスタイルを保存してください。");
+            SetVideoStyleStatus(_videoPromptProgram.AnnotatedH3 && !_videoPromptProgram.TryGetUnchangedH3(EffectiveVideoProgramSourceKind(), out _)
+                ? "選択を変更しました。H3候補を作成して反映すると、外した部分や文のつながりが生成用に整います。残す場合はスタイルを保存してください。"
+                : "変更は今回の動画に使います。残したい場合は名前を付けてスタイルを保存してください。");
         }
         finally { _syncingVideoAuthoringControls = false; }
     }
@@ -108,8 +111,18 @@ public partial class MainWindow
 
     private void ApplyDirectVideoSourceVariant()
     {
-        if (!_videoPromptProgram.UseSourceVariants || _videoPromptProgram.Enabled) return;
-        string prompt = _videoPromptProgram.BaseTemplateFor(EffectiveVideoProgramSourceKind());
+        string prompt;
+        if (_videoPromptProgram.Enabled)
+        {
+            if (_changingVideoPromptForH3History
+                || (_videoProgramAppliedContext == VideoProgramContext() && _videoProgramAppliedPrompt == _videoPrompt)
+                || !_videoPromptProgram.TryGetUnchangedH3(EffectiveVideoProgramSourceKind(), out prompt)) return;
+        }
+        else
+        {
+            if (!_videoPromptProgram.UseSourceVariants) return;
+            prompt = _videoPromptProgram.BaseTemplateFor(EffectiveVideoProgramSourceKind());
+        }
         if (_videoPrompt == prompt) return;
         _videoPrompt = prompt;
         bool wasSyncing = _syncingVideoGenerationSettings;
@@ -324,6 +337,8 @@ public partial class MainWindow
     private string? ValidateVideoProgramForEnqueue()
     {
         if (!_videoPromptProgram.Enabled) return null;
+        if (_videoPromptProgram.TryGetUnchangedH3(EffectiveVideoProgramSourceKind(), out string original)
+            && _videoPrompt == original) return null;
         return _videoProgramAppliedContext == VideoProgramContext()
             && _videoProgramAppliedPrompt == _videoPrompt
             ? null : "指示言語の設定に対応するH3候補を作成し、確認して反映してください。動画ジョブは追加していません。";
@@ -368,6 +383,9 @@ public partial class MainWindow
 
     public void SelectInlineVideoSourceForSmoke(string kind)
         => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).SelectSourceForSmoke(kind);
+
+    public bool SelectInlineVideoOptionForSmoke(string category, int choiceIndex, Action<FrameworkElement>? capture = null)
+        => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).SelectOptionForSmoke(category, choiceIndex, capture);
 
     public void EditInlineVideoVariantForSmoke(string body, string note)
         => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).EditVariantForSmoke(body, note);

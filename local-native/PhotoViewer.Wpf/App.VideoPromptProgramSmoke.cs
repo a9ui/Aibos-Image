@@ -93,6 +93,25 @@ public partial class App
                 && restored.Snapshot().GetProperty("FutureNote").GetProperty("Keep").GetBoolean();
             var tooLong = program.Clone(); tooLong.Template = new string('字', 7999);
             checks["expandedBounds"] = !tooLong.TryCompile("anime", "", 124, out _, out _);
+            var annotated = VideoPromptAnnotation.BuiltIn(CreateVideoH3Candidate("Let the camera follow gently. The subject waves."));
+            checks["annotatedDefaultIsExactOriginal"] = annotated.TryGetUnchangedH3("anime", out string originalAnnotated)
+                && originalAnnotated == annotated.BaseH3Template;
+            string cameraKey = annotated.Options.Single().Key;
+            annotated.Options[cameraKey].ChoiceIndex = 5;
+            checks["changedCameraRequiresCandidateAndNoDuplicateBase"] = !annotated.TryGetUnchangedH3("anime", out _)
+                && annotated.TryCompile("anime", null, 124, out string resolvedCamera, out _)
+                && resolvedCamera.Contains("orbit the camera right") && !resolvedCamera.Contains("follow gently")
+                && resolvedCamera.IndexOf("integrated_multimodal_description:") == resolvedCamera.LastIndexOf("integrated_multimodal_description:");
+            var groupProgram = new VideoPromptProgram { Enabled = true, Template = "[smile] [look curious]", PhotorealTemplate = "[wave]" };
+            groupProgram.Options["[smile]"] = new() { Group = "expression" };
+            groupProgram.Options["[look curious]"] = new() { Group = "expression" };
+            groupProgram.Options["[wave]"] = new() { Group = "expression" };
+            VideoPromptLanguage.TryParse(groupProgram.Template, out var groupTokens, out _);
+            groupProgram.SetManualOption(groupTokens[0], groupProgram.Options["[smile]"], "anime");
+            checks["exclusiveChoiceOnlyChangesActiveVariantGroup"] = groupProgram.Options["[look curious]"].Mode == "off"
+                && groupProgram.Options["[smile]"].Mode == "on" && groupProgram.Options["[wave]"].Mode == "on";
+            var badLabels = annotated.Clone(); badLabels.Options[cameraKey].ChoiceLabels = null!;
+            checks["malformedOptionLabelsProtectStore"] = !VideoPromptProgram.TryRead(badLabels.Snapshot(), out _);
 
             window = HiddenWindow(); window.ShowActivated = false; window.ShowInTaskbar = false; window.Show();
             window.Dispatcher.InvokeAsync(async () =>
@@ -175,7 +194,8 @@ public partial class App
                     editor.Close();
                     checks["unifiedStyleLibrary"] = window.VideoPromptTemplateSurfaceForSmoke
                         && window.SelectVideoPromptTemplateForSmoke("cinematic-camera")
-                        && !window.VideoPromptProgramSnapshotForSmoke.GetProperty("Enabled").GetBoolean()
+                        && window.VideoPromptProgramSnapshotForSmoke.GetProperty("AnnotatedH3").GetBoolean()
+                        && window.VideoPromptProgramEnqueueErrorForSmoke is null
                         && window.SelectVideoStyleForSmoke("Synthetic authoring style");
                     var inlineProgram = new VideoPromptProgram { Enabled = true,
                         Template = "Camera: [slow push-in / orbit left / POV with gentle head movement].\n\nThe subject [smiles / looks curious] and {walks closer / turns / waves}.",
@@ -186,6 +206,7 @@ public partial class App
                     checks["nativeInlineEditingAndReversibleOff"] = window.ExerciseVideoAuthoringForSmoke(Capture);
                     const string originalWithNotes = "Original body [Shot 1].\r\n\r\n▼▼▼ 使用時はこの行から末尾まで全削除｜日本語訳 ▼▼▼\r\n説明はそのまま。\r\n";
                     window.SelectVideoPromptTemplateForSmoke("dynamic-general");
+                    window.SetVideoPromptProgramForSmoke(new());
                     window.ConfigureVideoGenerationForSmoke(5, 24, 414720, originalWithNotes);
                     var separated = window.VideoPromptProgramSnapshotForSmoke;
                     checks["legacyNotesSeparatedLosslessly"] = window.VideoPromptForSmoke == "Original body [Shot 1].\r\n\r\n"
@@ -239,6 +260,38 @@ public partial class App
                     window.SelectVideoStyleForSmoke("Synthetic paired style");
                     window.SelectInlineVideoSourceForSmoke("photoreal");
                     window.CaptureVideoVariantForSmoke(Capture);
+                    int callsBeforeCameraChoices = rewriteCalls;
+                    changeDuringRewrite = false;
+                    checks["everyBuiltInHasCameraAndPreservesDefault"] = window.VideoPromptTemplateIdsForSmoke.Where(id => id != "custom").All(id =>
+                    {
+                        if (!window.SelectVideoPromptTemplateForSmoke(id)) return false;
+                        var built = window.VideoPromptProgramSnapshotForSmoke.Deserialize<VideoPromptProgram>()!;
+                        return built.TryGetUnchangedH3("anime", out string original) && original == window.VideoPromptForSmoke
+                            && built.Options.Values.Single().ChoiceLabels.Contains("POV風の揺れ・視線移動")
+                            && window.VideoPromptProgramEnqueueErrorForSmoke is null;
+                    }) && rewriteCalls == callsBeforeCameraChoices;
+                    window.SelectVideoPromptTemplateForSmoke("cinematic-camera");
+                    checks["defaultExplicitRewriteSurvivesRefresh"] = await window.RewriteVideoPromptProgramForSmokeAsync()
+                        && window.ApplyVideoH3PromptCandidateForSmoke();
+                    window.SyncVideoGenerationSettingsForSmoke();
+                    checks["defaultExplicitRewriteSurvivesRefresh"] &= window.VideoPromptForSmoke.Contains("PROGRAM_RESULT")
+                        && window.VideoPromptProgramEnqueueErrorForSmoke is null;
+                    checks["nativeCameraMenuAndChangedEnqueueGuard"] = window.SelectInlineVideoOptionForSmoke("camera", 5, v => Capture("native-camera-choices", v))
+                        && window.VideoPromptProgramEnqueueErrorForSmoke is not null
+                        && !await window.QueueVideoGenerationForSmokeAsync() && otherPosts == 0;
+                    checks["selectedCameraReachesCandidateWithoutOriginalCamera"] = await window.RewriteVideoPromptProgramForSmokeAsync()
+                        && sentPrompt.Contains("orbit the camera right") && !sentPrompt.Contains("Let the camera move smoothly")
+                        && window.ApplyVideoH3PromptCandidateForSmoke() && window.VideoPromptProgramEnqueueErrorForSmoke is null;
+                    checks["returnToOriginalCameraRestoresExactBody"] = window.SelectInlineVideoOptionForSmoke("camera", 0)
+                        && window.VideoPromptForSmoke == window.VideoPromptProgramSnapshotForSmoke.GetProperty("BaseH3Template").GetString()
+                        && window.VideoPromptProgramEnqueueErrorForSmoke is null;
+                    window.SaveVideoStyleForSmoke("Annotated camera style");
+                    window.FlushStateForSmoke();
+                    reload = HiddenWindow();
+                    checks["annotatedStyleRoundTripsWithReadableLabels"] = reload.SelectedVideoStyleNameForSmoke == "Annotated camera style"
+                        && reload.VideoPromptProgramEnqueueErrorForSmoke is null
+                        && reload.VideoPromptProgramSnapshotForSmoke.Deserialize<VideoPromptProgram>()!.Options.Values.Single().ChoiceLabels[0] == "元のカメラ指示";
+                    reload.Close();
                     string stylePath = Path.GetFullPath(window.AiStylePathForSmoke);
                     if (!stylePath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Style fixture escaped its isolated root.");
@@ -250,7 +303,7 @@ public partial class App
                     checks["futureProgramProtectsStyleFile"] = window.AiStyleWriteBlockedForSmoke
                         && protectedStyle.SequenceEqual(File.ReadAllBytes(stylePath));
                     checks["sourceAndJobsUnchanged"] = source.SequenceEqual(File.ReadAllBytes(sourcePath)) && jobs.SequenceEqual(File.ReadAllBytes(Path.Combine(root, "enhance/jobs.json")));
-                    checks["noWorkerOrJobMutation"] = starts == 0 && otherPosts == 0 && rewriteCalls == 2;
+                    checks["noWorkerOrJobMutation"] = starts == 0 && otherPosts == 0 && rewriteCalls == 4;
                 }
                 catch (Exception ex) { failure = ex.ToString(); }
                 finally

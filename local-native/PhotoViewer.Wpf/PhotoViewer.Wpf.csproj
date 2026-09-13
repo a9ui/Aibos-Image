@@ -23,6 +23,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="VideoCameraChoices.json" />
     <Resource Include="Brand\Generated\Aibos.App.ico" />
     <Resource Include="Brand\Generated\Aibos.Mark.20.png" />
     <Resource Include="Brand\Generated\Aibos.Mark.24.png" />

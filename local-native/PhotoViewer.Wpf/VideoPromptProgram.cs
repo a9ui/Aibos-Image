@@ -12,6 +12,10 @@ public sealed class VideoPromptProgram
     public int Version { get; set; } = 1;
     public bool Enabled { get; set; }
     public bool UseSourceVariants { get; set; }
+    // The template is a lossless annotation of the complete base H3 body.
+    // An unchanged resolution can use that body directly. Changed choices
+    // still go through the explicit H3 candidate flow for grammar and context.
+    public bool AnnotatedH3 { get; set; }
     public string Template { get; set; } = "";
     public string PhotorealTemplate { get; set; } = "";
     public string BaseH3Template { get; set; } = "";
@@ -77,6 +81,11 @@ public sealed class VideoPromptProgram
                 || option.Condition is not ("contains" or "absent" or "has-prompt" or "no-prompt")
                 || !Bounded(option.Keyword, 200) || option.ChoiceIndex is < 0 or > 15)
                 return false;
+            else if (!Bounded(option.Label, 120) || !Bounded(option.Group, 120)
+                || option.Category is not ("" or "camera" or "action" or "expression" or "viewpoint" or "ending" or "sound" or "detail")
+                || option.ChoiceLabels is null || option.ChoiceLabels.Count > 16
+                || option.ChoiceLabels.Any(label => !Bounded(label, 120)))
+                return false;
         // An unfinished template may be saved as a draft, but compilation
         // separately refuses invalid syntax before making an inference call.
         error = "";
@@ -101,6 +110,40 @@ public sealed class VideoPromptProgram
     public VideoPromptOption OptionFor(VideoPromptToken token)
         => Options.TryGetValue(token.Key, out VideoPromptOption? option) ? option
             : new() { Mode = token.Kind == '{' ? "auto" : "on" };
+
+    public void SetManualOption(VideoPromptToken token, VideoPromptOption option, string sourceKind)
+    {
+        // Mutually exclusive alternatives are resolved only by an explicit
+        // selection. Importing a document never silently changes its defaults.
+        if (option.Mode == "on" && option.Group.Length > 0
+            && VideoPromptLanguage.TryParse(TemplateFor(sourceKind), out var active, out _))
+            foreach (var pair in Options)
+                if (pair.Key != token.Key && pair.Value.Group == option.Group && active.Any(t => t.Key == pair.Key))
+                    pair.Value.Mode = "off";
+        Options[token.Key] = option;
+    }
+
+    public bool TryGetUnchangedH3(string kind, out string prompt)
+    {
+        prompt = "";
+        if (!Enabled || !AnnotatedH3 || SourceRules || ImageChoices || ActionPlot || PhysicalContinuity
+            || !Validate(out _) || !VideoPromptLanguage.TryParse(TemplateFor(kind), out var tokens, out _))
+            return false;
+        var resolved = new StringBuilder();
+        foreach (VideoPromptToken token in tokens)
+        {
+            if (token.Kind == 't') { resolved.Append(token.Text); continue; }
+            var option = OptionFor(token);
+            if (token.Kind != '[' || option.Mode == "auto") return false;
+            if (option.Mode == "off") continue;
+            if (token.Choices.Count > 0 && option.ChoiceIndex >= token.Choices.Count) return false;
+            resolved.Append(token.Choices.Count == 0 ? token.Text : token.Choices[option.ChoiceIndex]);
+        }
+        string original = BaseTemplateFor(kind);
+        if (string.IsNullOrWhiteSpace(original) || resolved.ToString() != original) return false;
+        prompt = original;
+        return true;
+    }
 
     public bool IsOn(VideoPromptOption option, string? sourcePrompt)
     {
@@ -131,7 +174,7 @@ public sealed class VideoPromptProgram
         if (!VideoPromptLanguage.TryParse(TemplateFor(sourceKind), out var tokens, out error))
             return false;
         var text = new StringBuilder();
-        string baseTemplate = BaseTemplateFor(sourceKind);
+        string baseTemplate = AnnotatedH3 ? "" : BaseTemplateFor(sourceKind);
         if (!string.IsNullOrWhiteSpace(baseTemplate))
             text.Append(baseTemplate).Append("\n\nAdditional resolved direction:\n");
         int choiceCount = 0;
@@ -171,6 +214,8 @@ public sealed class VideoPromptProgram
             return false;
         }
         text.Append("\n\nAuthoring policy: The text above is the resolved user direction. Preserve its intent. Do not add alternative actions or editorial explanations to the final H3 prompt.");
+        if (AnnotatedH3)
+            text.Append(" This is an existing H3 prompt with the user's manual selections already resolved. Preserve the remaining wording and content. Repair only punctuation, conjunctions and dependent references affected by omitted options. Use only the selected camera direction; do not reinstate an omitted option.");
         text.Append(sourceKind == "photoreal"
             ? " Use a live-action visual treatment consistent with the reference image."
             : " Preserve the reference image's illustrated or animated visual treatment.");
@@ -202,6 +247,10 @@ public sealed class VideoPromptProgram
 
 public sealed class VideoPromptOption
 {
+    public string Label { get; set; } = "";
+    public string Category { get; set; } = "";
+    public string Group { get; set; } = "";
+    public List<string> ChoiceLabels { get; set; } = [];
     public string Mode { get; set; } = "on";
     public bool DefaultOn { get; set; } = true;
     public string Condition { get; set; } = "contains";

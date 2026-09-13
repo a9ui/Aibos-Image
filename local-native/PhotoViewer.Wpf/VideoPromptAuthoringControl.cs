@@ -129,7 +129,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
             _variantHint.Visibility = program.UseSourceVariants ? Visibility.Visible : Visibility.Collapsed;
             _variantHint.Text = $"アニメ・実写 共通スタイル · 今回は{(effectiveKind == "photoreal" ? "実写" : "アニメ")}用の本文を使用";
             SetText(_baseInput, program.BaseTemplateFor(effectiveKind));
-            _base.Visibility = program.Enabled && !string.IsNullOrEmpty(_baseInput.Text) ? Visibility.Visible : Visibility.Collapsed;
+            _base.Visibility = program.Enabled && !program.AnnotatedH3 && !string.IsNullOrEmpty(_baseInput.Text) ? Visibility.Visible : Visibility.Collapsed;
         }
         finally { _loading = false; }
         Render();
@@ -171,7 +171,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         }
         _hint.Text = _edit.IsChecked == true
             ? "候補は / で区切ります。編集を閉じると本文から選べます。"
-            : "青：手動選択　紫：画像AI　黄：条件判定　取り消し線：使わない";
+            : "緑：カメラ　青：動作　桃：表情　橙：結末　紫：画像AI　取り消し線：使わない";
         foreach (VideoPromptToken token in tokens)
         {
             if (token.Kind == 't') { _reading.Inlines.Add(new Run(token.Text)); continue; }
@@ -180,14 +180,14 @@ public sealed class VideoPromptAuthoringControl : UserControl
             bool automatic = token.Kind == '{' && option.Mode == "auto" && _program.ImageChoices;
             string shown = automatic ? string.Join(" / ", token.Choices)
                 : token.Choices.Count > 0 ? token.Choices.ElementAtOrDefault(option.ChoiceIndex) ?? "選び直す" : token.Text;
-            bool camera = Regex.IsMatch(token.Text, @"カメラ|camera|POV|angle|focus|視点", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            string color = token.Kind == '{' ? "#DEC5FF" : option.Mode == "auto" ? "#FFDD95" : camera ? "#A0EEDA" : "#B8D9FF";
-            string fill = token.Kind == '{' ? "#493063" : option.Mode == "auto" ? "#57421A" : camera ? "#164D48" : "#203F6B";
+            bool camera = option.Category is "camera" or "viewpoint" || (option.Category == "" && Regex.IsMatch(token.Text, @"カメラ|camera|POV|angle|focus|視点", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
+            string color = token.Kind == '{' ? "#DEC5FF" : option.Mode == "auto" ? "#FFDD95" : camera ? "#A0EEDA" : option.Category == "expression" ? "#FFC8E3" : option.Category == "ending" ? "#FFD1A1" : "#B8D9FF";
+            string fill = token.Kind == '{' ? "#493063" : option.Mode == "auto" ? "#57421A" : camera ? "#164D48" : option.Category == "expression" ? "#612843" : option.Category == "ending" ? "#623919" : "#203F6B";
             var link = new Hyperlink(new Run(shown))
             {
                 Foreground = ColorBrush(color), Background = ColorBrush(fill),
                 TextDecorations = on ? null : System.Windows.TextDecorations.Strikethrough,
-                ToolTip = on ? "クリックして候補や使い方を選ぶ" : "今回は使いません。クリックですぐ戻せます",
+                ToolTip = (option.Label.Length > 0 ? option.Label + " · " : "") + (on ? "クリックして候補や使い方を選ぶ" : "今回は使いません。クリックですぐ戻せます"),
             };
             AutomationProperties.SetName(link, shown + (on ? " 使用する" : " 使用しない"));
             link.Click += (_, _) => OpenOption(token, link);
@@ -206,20 +206,20 @@ public sealed class VideoPromptAuthoringControl : UserControl
                 VideoPromptOption option = JsonSerializer.Deserialize<VideoPromptOption>(JsonSerializer.Serialize(_program.OptionFor(token)))!;
                 if (!_program.Options.ContainsKey(token.Key) && _program.Options.Count >= 128) return;
                 change(option);
-                _program.Options[token.Key] = option;
+                _program.SetManualOption(token, option, _photo ? "photoreal" : "anime");
                 Publish(null);
                 Render();
             };
             menu.Items.Add(item);
         }
         VideoPromptOption current = _program.OptionFor(token);
-        Item("使う", current.Mode == "on", option => option.Mode = "on");
+        Item(current.Group.Length > 0 ? "これを使う（同じ組の他候補は外す）" : "使う", current.Mode == "on", option => option.Mode = "on");
         Item("今回は使わない", current.Mode == "off", option => option.Mode = "off");
         if (token.Kind == '{') Item("画像AIに選んでもらう", current.Mode == "auto", option => { option.Mode = "auto"; _program.ImageChoices = true; });
         for (int i = 0; i < token.Choices.Count; i++)
         {
             int index = i;
-            Item(token.Choices[i], current.Mode == "on" && current.ChoiceIndex == i, option => { option.Mode = "on"; option.ChoiceIndex = index; });
+            Item(current.ChoiceLabels.ElementAtOrDefault(i) ?? token.Choices[i], current.Mode == "on" && current.ChoiceIndex == i, option => { option.Mode = "on"; option.ChoiceIndex = index; });
         }
         menu.PlacementTarget = _reading;
         menu.Placement = PlacementMode.MousePoint;
@@ -345,6 +345,23 @@ public sealed class VideoPromptAuthoringControl : UserControl
     }
 
     public void SelectSourceForSmoke(string kind) => _source.SelectedIndex = kind == "photoreal" ? 2 : kind == "anime" ? 1 : 0;
+    public bool SelectOptionForSmoke(string category, int choiceIndex, Action<FrameworkElement>? capture = null)
+    {
+        _edit.IsChecked = false;
+        if (!VideoPromptLanguage.TryParse(_input.Text, out var tokens, out _)) return false;
+        var interactive = tokens.Where(t => t.Kind != 't').ToList();
+        int index = interactive.FindIndex(t => _program.OptionFor(t).Category == category);
+        if (index < 0) return false;
+        var link = _reading.Inlines.OfType<Hyperlink>().ElementAt(index);
+        link.RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+        var menu = link.ContextMenu!;
+        menu.UpdateLayout();
+        capture?.Invoke(menu);
+        int itemIndex = choiceIndex < 0 ? 1 : interactive[index].Choices.Count > 0 ? 2 + choiceIndex : 0;
+        ((MenuItem)menu.Items[itemIndex]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        return true;
+    }
     public void EditVariantForSmoke(string body, string note) { _input.Text = body; _notes.Text = note; }
     public void WrapPhraseForSmoke(string phrase)
     {

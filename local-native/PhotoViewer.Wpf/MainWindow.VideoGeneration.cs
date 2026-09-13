@@ -1887,7 +1887,7 @@ public partial class MainWindow
 
         // A built-in style starts with its own body, never a previous style's
         // instruction program or automatic choices.
-        RestoreVideoPromptProgram(null);
+        RestoreVideoPromptProgram(VideoPromptAnnotation.BuiltIn(choice.Prompt).Snapshot());
         _applyingVideoPromptTemplate = true;
         try
         {

@@ -528,6 +528,32 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   compatible extension data, and keeps separate descriptions. Existing authored
   programs and differing settings are kept separate; name collisions fail before
   output. Prepared files are separate copies, never automatic live replacements.
+- Reviewed complete H3 bodies may use `AnnotatedH3`. Their base fields retain
+  the exact originals for comparison, while the templates add only escaped
+  literal text and inline options. When all resolved text is identical to the
+  matching original and automation is off, the original can be used directly.
+  Any changed wording or selection requires the explicit H3 candidate and Apply
+  flow; the archived base is not appended to that request. Reverting to the
+  original choices restores the exact original body. Applying a reviewed H3
+  candidate is not overwritten by a subsequent passive control refresh.
+- Built-ins include the shared basic camera choices in their existing camera
+  clause, retaining its original wording as the default. A built-in without an
+  explicit camera clause offers an initially disabled option at the beginning
+  of the integrated description. The camera catalog has Japanese labels for
+  fixed framing, push/pull, left/right orbit, moving to the front, tracking,
+  restrained handheld movement, and first-person head sway and gaze shifts.
+  Labels and categories are authoring metadata, never generation text. Reviewed
+  expression, viewpoint, or ending groups may be mutually exclusive: selecting
+  one manually disables other group members in the active variant. Import never
+  silently resolves conflicting original defaults. Disabled text remains in
+  the editor and can be re-enabled.
+- `scripts/prepare-video-style-options.py` applies a private reviewed manifest
+  of body hashes and character spans to a separate style copy. It retains exact
+  original bodies, descriptions, unknown settings, and the original file bytes.
+  Stale hashes, overlapping or ambiguous spans, missing paired variants, authored
+  programs, and native bounds violations refuse preparation. It does not infer
+  new actions, enable image inference, or replace live settings. Synthetic
+  preservation and refusal coverage is in `verify-video-style-options.py`.
 - The explicit H3 candidate action expands a program before calling the
   existing authenticated rewrite route. Authoring syntax is distinct from H3
   reference syntax: unescaped H3 reference labels in authoring text are errors.
