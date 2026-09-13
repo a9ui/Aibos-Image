@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
+using System.Text.RegularExpressions;
 
 namespace PhotoViewer.Wpf;
 
@@ -19,6 +21,113 @@ public partial class MainWindow
     private string? _videoProgramMetadataSourceKey;
     private string? _videoProgramMetadataStamp;
     private string? _videoProgramMetadataPrompt;
+    private bool _syncingVideoAuthoringControls;
+
+    private void RefreshVideoPromptAuthoringControls()
+    {
+        if (_syncingVideoAuthoringControls || ModalVideoPromptAuthoringHost is null || AppVideoPromptAuthoringHost is null) return;
+        _syncingVideoAuthoringControls = true;
+        try
+        {
+            SeparateVideoPromptNotes();
+            foreach (ContentControl host in new[] { ModalVideoPromptAuthoringHost, AppVideoPromptAuthoringHost })
+            {
+                if (host.Content is not VideoPromptAuthoringControl)
+                {
+                    var editor = new VideoPromptAuthoringControl();
+                    editor.Changed += VideoAuthoringChanged;
+                    editor.SourceChanged += choice =>
+                    {
+                        if (choice != "auto" && !_videoPromptProgram.Enabled)
+                        {
+                            string literal = VideoPromptAuthoringControl.EscapeLiteral(_videoPrompt);
+                            if (literal.Length > 8000)
+                            {
+                                SetVideoStyleStatus("描写の切り替えには本文を短くする必要があります。元の文章は変更していません。");
+                                RefreshVideoPromptAuthoringControls();
+                                return;
+                            }
+                            _videoPromptProgram.Template = literal;
+                            _videoPromptProgram.BaseH3Template = "";
+                            _videoPromptProgram.Enabled = true;
+                            MarkVideoPromptTemplateAsCustom();
+                            MarkVideoStyleAsCustom();
+                            RefreshVideoStyleControls(updateNameFields: false);
+                        }
+                        _videoProgramSourceOverride = choice;
+                        _videoProgramOverrideSourceKey = VideoProgramSourceKey();
+                        InvalidateVideoProgramAuthoring();
+                        RefreshVideoPromptAuthoringControls();
+                    };
+                    editor.DetailsRequested += () => OpenVideoPromptProgram_Click(editor, new RoutedEventArgs());
+                    host.Content = editor;
+                }
+                ((VideoPromptAuthoringControl)host.Content).Load(_videoPromptProgram, _videoPrompt,
+                    _videoProgramOverrideSourceKey == VideoProgramSourceKey() ? _videoProgramSourceOverride : "auto",
+                    EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt());
+            }
+        }
+        finally { _syncingVideoAuthoringControls = false; }
+    }
+
+    private void VideoAuthoringChanged(VideoPromptAuthoringControl sender, VideoPromptProgram program, string? rawPrompt)
+    {
+        if (_syncingVideoAuthoringControls) return;
+        _syncingVideoAuthoringControls = true;
+        try
+        {
+            _videoPromptProgram = program;
+            if (rawPrompt is not null)
+            {
+                _videoPromptProgram.BaseH3Template = rawPrompt;
+                ModalVideoPromptTextBox.Text = rawPrompt;
+            }
+            MarkVideoStyleAsCustom();
+            MarkVideoPromptTemplateAsCustom();
+            RefreshVideoStyleControls(updateNameFields: false);
+            InvalidateVideoProgramAuthoring();
+            foreach (ContentControl host in new[] { ModalVideoPromptAuthoringHost, AppVideoPromptAuthoringHost })
+                if (host.Content is VideoPromptAuthoringControl peer && !ReferenceEquals(peer, sender))
+                    peer.Load(_videoPromptProgram, _videoPrompt, _videoProgramSourceOverride, EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt());
+            SetVideoStyleStatus("変更は今回の動画に使います。残したい場合は名前を付けてスタイルを保存してください。");
+        }
+        finally { _syncingVideoAuthoringControls = false; }
+    }
+
+    private void InvalidateVideoProgramAuthoring()
+    {
+        _videoProgramCandidateContext = null;
+        _videoProgramAppliedContext = null;
+        _videoProgramAppliedPrompt = null;
+        VideoH3PromptRewriteContextChanged();
+        UpdateVideoGenerationActionControls();
+    }
+
+    private void SeparateVideoPromptNotes()
+    {
+        // Mechanical, lossless split of the existing explicit notes delimiter.
+        // Keep the complete original in compatible extension data. Persist only
+        // when the user saves this style; never rewrite the saved library here.
+        if (_videoPromptProgram.Enabled || _videoPromptProgram.Description.Length != 0) return;
+        Match marker = Regex.Match(_videoPrompt, @"(?m)^▼▼▼ 使用時はこの行から末尾まで全削除｜日本語訳 ▼▼▼[^\S\r\n]*(?:\r?\n|$)");
+        if (!marker.Success || marker.NextMatch().Success) return;
+        string original = _videoPrompt;
+        string body = original[..marker.Index];
+        _videoPromptProgram.Description = original[(marker.Index + marker.Length)..];
+        _videoPromptProgram.BaseH3Template = body;
+        _videoPromptProgram.ExtensionData ??= new(StringComparer.Ordinal);
+        _videoPromptProgram.ExtensionData.TryAdd("OriginalStyleText", JsonSerializer.SerializeToElement(new
+        {
+            Prompt = original,
+            Separator = marker.Value,
+            Sha256 = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(original))),
+        }));
+        _videoPrompt = body;
+        bool wasSyncing = _syncingVideoGenerationSettings;
+        _syncingVideoGenerationSettings = true;
+        try { ModalVideoPromptTextBox.Text = body; AppVideoPromptTextBox.Text = body; }
+        finally { _syncingVideoGenerationSettings = wasSyncing; }
+    }
 
     private string VideoProgramSourceKey()
         => _videoSourceChoice is { } source
@@ -125,6 +234,8 @@ public partial class MainWindow
         _videoProgramCandidateContext = null;
         VideoH3PromptRewriteContextChanged();
         SetVideoStyleStatus("指示言語の編集を反映しました。再起動後も残すにはStyleを保存してください。");
+        MarkVideoStyleAsCustom();
+        RefreshVideoPromptAuthoringControls();
         if (editor.CreateCandidate) await RewriteVideoPromptProgramAsync();
     }
 
@@ -218,5 +329,20 @@ public partial class MainWindow
     {
         _videoProgramSourceOverride = "auto";
         _videoProgramOverrideSourceKey = null;
+        RefreshVideoPromptAuthoringControls();
     }
+
+    public bool ExerciseVideoAuthoringForSmoke(Action<string, FrameworkElement> capture)
+    {
+        RefreshVideoPromptAuthoringControls();
+        UpdateLayout();
+        var editor = (VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content;
+        bool result = editor.ExerciseInlineForSmoke(v => { UpdateLayout(); capture("native-video-edit", v); });
+        UpdateLayout();
+        capture("native-video-menu", ModalVideoGenerationBoardBorder);
+        return result;
+    }
+
+    public void SelectInlineVideoSourceForSmoke(string kind)
+        => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).SelectSourceForSmoke(kind);
 }

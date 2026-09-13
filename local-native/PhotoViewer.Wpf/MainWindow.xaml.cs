@@ -25124,8 +25124,7 @@ public partial class MainWindow : Window
 
     private static bool AreViewerStyleCollectionsSupported(ViewerState state)
     {
-        if (state.VideoStyles is { Count: > MaxVideoStyleCount }
-            || state.I2iEditStyles is { Count: > I2iV3MaximumStyleCount })
+        if (state.I2iEditStyles is { Count: > I2iV3MaximumStyleCount })
         {
             return false;
         }

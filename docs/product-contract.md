@@ -466,6 +466,18 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   base fields, which are not parsed as bracket options. Option settings are
   shared by identical bracket text. Compatible unknown members are preserved;
   malformed or future programs fail style validation without rewriting storage.
+- The native video menu and default settings share one style library containing
+  built-in motion templates and saved user styles. Built-ins retain their exact
+  H3 text, replace the current instruction program, and can be saved under a new
+  name. Selecting or editing one never enqueues work. User style counts have no
+  fixed 32-item cap; existing document-size and validation bounds still apply.
+  The inline input uses one pressed-state Edit toggle: notation while editing,
+  colored clickable phrases while selecting, and reversible strike-through for
+  disabled phrases. Converting a selected literal phrase escapes the surrounding
+  H3 reference syntax before enabling the authoring program. Japanese notes are
+  a separate editable field. A recognized legacy notes delimiter is split in
+  the current draft with the original text retained as compatible extension
+  data; the saved style is only replaced by an explicit style save.
 - Offline legacy-style note preparation is available through
   `scripts/prepare-video-style-notes.py`. It writes a new private directory
   outside the repository containing the exact original bytes, a prepared

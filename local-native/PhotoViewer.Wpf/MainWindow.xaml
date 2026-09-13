@@ -719,7 +719,7 @@
                 </Grid>
                 <Grid Margin="0,0,0,10">
                   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                  <TextBlock Grid.Row="0" Text="Style" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBlock Grid.Row="0" Text="スタイル" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,4"/>
                   <Border Grid.Row="1" CornerRadius="8" Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="3">
                     <Grid>
                       <Grid.ColumnDefinitions>
@@ -2565,22 +2565,19 @@
                      Margin="0,0,0,6" AutomationProperties.Name="Video generation settings section"/>
           <TextBlock Text="動画ジョブのモデルと初期値です。変更は次に明示的に追加するジョブから使われ、待機中・処理中のジョブは変わりません。"
                      Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
-          <TextBlock Text="Template" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
-          <ComboBox x:Name="AppVideoPromptTemplateComboBox"
+          <ComboBox x:Name="AppVideoPromptTemplateComboBox" Visibility="Collapsed"
                     Style="{StaticResource PhotorealSettingsComboBox}"
                     DisplayMemberPath="Label"
                     IsSynchronizedWithCurrentItem="False"
                     SelectionChanged="VideoPromptTemplate_SelectionChanged"
                     AutomationProperties.Name="Video prompt template"
                     AutomationProperties.HelpText="Apply a built-in motion prompt. MiniMax語化 can then add source-image details."/>
-          <TextBlock Text="用途と動き方の土台をPromptへ入れます。画像固有の動作・カメラ・表情はMiniMax語化で追加できます。"
-                     Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,5,0,10"/>
-          <TextBlock Text="Style" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
+          <TextBlock Text="スタイル" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
                   BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
             <StackPanel>
               <ListBox x:Name="AppVideoStyleListBox"
-                       MinHeight="42" MaxHeight="112"
+                       MinHeight="80" MaxHeight="180"
                        Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
                        Foreground="{StaticResource TextPrimary}"
                        ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -2646,7 +2643,7 @@
                         AutomationProperties.Name="Delete selected video generation style"/>
               </Grid>
               <Button x:Name="OpenAppVideoStylesFileButton"
-                      Style="{StaticResource GhostButton}" Content="Style保存ファイルを開く"
+                      Style="{StaticResource GhostButton}" Content="スタイルの保存先を開く"
                       Click="OpenVideoStylesFile_Click"
                       HorizontalAlignment="Left" Margin="0,6,0,0" Padding="8,3"
                       AutomationProperties.Name="Open video generation style storage file"
@@ -2821,17 +2818,8 @@
                          AutomationProperties.Name="Estimated video generation time"
                          AutomationProperties.HelpText="Estimated range includes measured landscape and portrait Wan generation plus RIFE 4.25 delivery time; excludes queue wait."
                          AutomationProperties.LiveSetting="Polite"/>
-              <DockPanel Margin="0,11,0,4">
-                <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
-                        Content="Reset" Height="25" Padding="8,2"
-                        Click="ResetVideoGenerationSettings_Click"
-                        AutomationProperties.Name="Reset default video generation settings"/>
-                <TextBlock Text="Default prompt" Foreground="{StaticResource TextSecondary}" FontSize="10.5" VerticalAlignment="Center"/>
-              </DockPanel>
-              <Button Content="指示言語・日本語説明を編集" Style="{StaticResource GhostButton}"
-                      Click="OpenVideoPromptProgram_Click" HorizontalAlignment="Left" Margin="0,0,0,6"
-                      AutomationProperties.Name="Edit default video instruction program"/>
-              <Grid>
+              <ContentControl x:Name="AppVideoPromptAuthoringHost" HorizontalContentAlignment="Stretch"/>
+<Grid Visibility="Collapsed">
                 <TextBox x:Name="AppVideoPromptTextBox"
                          MinHeight="78" MaxHeight="480" MaxLength="8000"
                          AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
@@ -3134,11 +3122,11 @@
               </DockPanel>
             </StackPanel>
           </Border>
-          <TextBlock Text="Style" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
+          <TextBlock Text="スタイル" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
             <StackPanel>
               <ListBox x:Name="AppPhotorealStyleListBox"
-                       MinHeight="42" MaxHeight="112"
+                       MinHeight="80" MaxHeight="180"
                        Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
                        Foreground="{StaticResource TextPrimary}"
                        ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -3794,7 +3782,7 @@
                       ToolTip="小さい画像も長辺1536 pxへ拡大します。通常より処理時間・VRAM使用量・出力サイズが増えます。"
                       AutomationProperties.Name="試験用のAnything2Real V3 1536 px処理を使う"
                       AutomationProperties.HelpText="小さい画像も長辺1536 pxへ拡大する高負荷モードです。対応する認証済みローカルAIでのみ選べます。"/>
-            <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <TextBlock Text="スタイル" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalPhotorealStyleComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}"
                       DisplayMemberPath="Label"
@@ -3979,7 +3967,7 @@
             WindowChrome.IsHitTestVisibleInChrome="True"
             MouseLeftButtonDown="ModalVideoGenerationBackdrop_MouseLeftButtonDown"
             AutomationProperties.Name="Video generation board overlay">
-        <Border x:Name="ModalVideoGenerationBoardBorder" Width="430" MaxHeight="680" Padding="16" CornerRadius="7"
+        <Border x:Name="ModalVideoGenerationBoardBorder" Width="600" MaxHeight="680" Padding="16" CornerRadius="7"
                 HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
                 Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
                 KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
@@ -3989,7 +3977,7 @@
             <DockPanel LastChildFill="True" Margin="0,0,0,12">
               <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}"
                       Width="28" Height="28" Click="CloseVideoGenerationBoard_Click"
-                      ToolTip="Close video generation board"
+                      ToolTip="動画化メニューを閉じる"
                       AutomationProperties.Name="Close video generation board">
                 <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE711;" Foreground="{StaticResource TextSecondary}" FontSize="12"/>
               </Button>
@@ -3999,25 +3987,21 @@
                            Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,2,0,0"/>
               </StackPanel>
             </DockPanel>
-            <TextBlock Text="選んだ画像を最初のフレームとして使います。空欄なら選択モデルの既定モーションを使い、MiniMax H3はよく動くDynamicになります。"
+            <TextBlock Text="スタイルを選び、本文の色付き部分から動きを調整できます。選んだ画像が最初のフレームになります。"
                        Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
             <TextBlock x:Name="ModalVideoSourceText"
                        Text="入力: 拡大画面を開いた時点の画像"
                        Foreground="{StaticResource TextPrimary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,0,0,8"
                        AutomationProperties.Name="Video generation source version"/>
-            <TextBlock Text="Template" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
-            <ComboBox x:Name="ModalVideoPromptTemplateComboBox"
+            <ComboBox x:Name="ModalVideoPromptTemplateComboBox" Visibility="Collapsed"
                       Style="{StaticResource PhotorealSettingsComboBox}"
                       DisplayMemberPath="Label"
                       IsSynchronizedWithCurrentItem="False"
                       SelectionChanged="VideoPromptTemplate_SelectionChanged"
                       AutomationProperties.Name="Video prompt template"
                       AutomationProperties.HelpText="Apply a built-in motion prompt. MiniMax語化 can then add source-image details."/>
-            <TextBlock Text="用途と動き方の土台をPromptへ入れます。画像固有の動作・カメラ・表情はMiniMax語化で追加できます。"
-                       Foreground="{StaticResource TextTertiary}" FontSize="10.5"
-                       TextWrapping="Wrap" Margin="0,5,0,10"/>
-            <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <TextBlock Text="スタイル" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalVideoStyleComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}"
                       DisplayMemberPath="Label"
@@ -4049,7 +4033,7 @@
                       AutomationProperties.Name="Delete selected video generation style"/>
             </Grid>
             <Button x:Name="OpenModalVideoStylesFileButton"
-                    Style="{StaticResource GhostButton}" Content="Style保存ファイルを開く"
+                    Style="{StaticResource GhostButton}" Content="スタイルの保存先を開く"
                     Click="OpenVideoStylesFile_Click"
                     HorizontalAlignment="Left" Height="27" Padding="7,2" Margin="0,0,0,8"
                     Foreground="{StaticResource TextPrimary}"
@@ -4059,6 +4043,37 @@
                        Foreground="{StaticResource TextSecondary}" FontSize="10"
                        TextWrapping="Wrap" Margin="0,0,0,8"
                        AutomationProperties.LiveSetting="Polite"/>
+            <ContentControl x:Name="ModalVideoPromptAuthoringHost" HorizontalContentAlignment="Stretch"/>
+<Grid Visibility="Collapsed">
+              <TextBox x:Name="ModalVideoPromptTextBox"
+                       MinHeight="92" MaxHeight="480" MaxLength="8000"
+                       AcceptsReturn="True" TextWrapping="Wrap"
+                       VerticalScrollBarVisibility="Auto"
+                       Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6,25,6"
+                       TextChanged="VideoGenerationPrompt_TextChanged"
+                       AutomationProperties.Name="Video generation prompt"
+                       AutomationProperties.HelpText="Blank uses the built-in conservative Normal motion prompt. Drag the bottom-right grip to resize the editor vertically."/>
+              <Thumb x:Name="ModalVideoPromptResizeThumb" Tag="modal"
+                     Width="25" Height="20" Margin="0,0,2,2"
+                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                     Cursor="SizeNS" DragDelta="VideoPromptResizeThumb_DragDelta"
+                     AutomationProperties.Name="Resize video prompt editor"
+                     AutomationProperties.HelpText="Drag vertically to change the prompt editor height.">
+                <Thumb.Template>
+                  <ControlTemplate TargetType="{x:Type Thumb}">
+                    <Border Background="Transparent">
+                      <TextBlock Text="///" Foreground="{StaticResource TextTertiary}"
+                                 FontSize="12" FontWeight="SemiBold"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                  </ControlTemplate>
+                </Thumb.Template>
+              </Thumb>
+            </Grid>
+            <Expander Header="動画の設定 · 長さ・画質・シード" Foreground="{StaticResource TextPrimary}" Margin="0,12,0,10">
+              <StackPanel Margin="0,10,0,0">
             <TextBlock Text="Model · MiniMax H3" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalVideoModelComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0" Visibility="Collapsed"
@@ -4140,44 +4155,8 @@
                        Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,5,0,10"/>
             </StackPanel>
-            <DockPanel Margin="0,0,0,4">
-              <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
-                      Content="Reset" Height="24" Padding="8,2"
-                      Click="ResetVideoGenerationSettings_Click"
-                      AutomationProperties.Name="Reset video generation settings"/>
-              <TextBlock Text="Prompt" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
-            </DockPanel>
-            <Button Content="指示言語・日本語説明を編集" Style="{StaticResource GhostButton}"
-                    Click="OpenVideoPromptProgram_Click" HorizontalAlignment="Left" Margin="0,0,0,6"
-                    AutomationProperties.Name="Edit video instruction program"/>
-            <Grid>
-              <TextBox x:Name="ModalVideoPromptTextBox"
-                       MinHeight="92" MaxHeight="480" MaxLength="8000"
-                       AcceptsReturn="True" TextWrapping="Wrap"
-                       VerticalScrollBarVisibility="Auto"
-                       Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
-                       CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
-                       BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6,25,6"
-                       TextChanged="VideoGenerationPrompt_TextChanged"
-                       AutomationProperties.Name="Video generation prompt"
-                       AutomationProperties.HelpText="Blank uses the built-in conservative Normal motion prompt. Drag the bottom-right grip to resize the editor vertically."/>
-              <Thumb x:Name="ModalVideoPromptResizeThumb" Tag="modal"
-                     Width="25" Height="20" Margin="0,0,2,2"
-                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                     Cursor="SizeNS" DragDelta="VideoPromptResizeThumb_DragDelta"
-                     AutomationProperties.Name="Resize video prompt editor"
-                     AutomationProperties.HelpText="Drag vertically to change the prompt editor height.">
-                <Thumb.Template>
-                  <ControlTemplate TargetType="{x:Type Thumb}">
-                    <Border Background="Transparent">
-                      <TextBlock Text="///" Foreground="{StaticResource TextTertiary}"
-                                 FontSize="12" FontWeight="SemiBold"
-                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                  </ControlTemplate>
-                </Thumb.Template>
-              </Thumb>
-            </Grid>
+              </StackPanel>
+            </Expander>
             <Border x:Name="ModalVideoH3PromptRewritePanel"
                     Visibility="Collapsed" Margin="0,10,0,0" Padding="10"
                     CornerRadius="5" Background="{StaticResource SoftFill}"

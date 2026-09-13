@@ -77,7 +77,6 @@ public partial class MainWindow
     private const int DefaultVideoPlaybackFps = 16;
     private const int DefaultVideoMaximumPixelArea = 409_600;
     private const int MaxVideoPromptLength = 8_000;
-    private const int MaxVideoStyleCount = 32;
     private const int MaxVideoStyleNameLength = 40;
     private const string CustomVideoPromptTemplateId = "custom";
     private const string ImageAwareAutoVideoPromptTemplateId = "image-aware-auto";
@@ -196,7 +195,7 @@ public partial class MainWindow
         }
     }
 
-    private sealed record VideoStyleChoice(string Label, string? StyleName);
+    private sealed record VideoStyleChoice(string Label, string? StyleName, string? TemplateId = null);
 
     private sealed record VideoPromptTemplateChoice(
         string Id,
@@ -1792,6 +1791,7 @@ public partial class MainWindow
         InvalidateVideoH3PromptUndoAfterManualEdit();
         MarkVideoStyleAsCustom();
         SyncVideoPromptPeer(source);
+        RefreshVideoPromptAuthoringControls();
         VideoH3PromptRewriteContextChanged();
         UpdateVideoGenerationActionControls();
         SetVideoGenerationSettingsStatus(
@@ -1827,6 +1827,7 @@ public partial class MainWindow
     private void ResetVideoGenerationSettings_Click(object sender, RoutedEventArgs e)
     {
         _selectedVideoStyleName = null;
+        RestoreVideoPromptProgram(null);
         RestoreVideoGenerationSettings(
             null,
             null,
@@ -1865,7 +1866,13 @@ public partial class MainWindow
             return;
         }
 
+        ApplyVideoPromptTemplate(choice);
+    }
+
+    private void ApplyVideoPromptTemplate(VideoPromptTemplateChoice choice)
+    {
         _selectedVideoPromptTemplateId = choice.Id;
+        _selectedVideoStyleName = null;
         if (string.Equals(
                 choice.Id,
                 CustomVideoPromptTemplateId,
@@ -1877,19 +1884,21 @@ public partial class MainWindow
             return;
         }
 
-        TextBox target = ReferenceEquals(sender, AppVideoPromptTemplateComboBox)
-            ? AppVideoPromptTextBox
-            : ModalVideoPromptTextBox;
+        // A built-in style starts with its own body, never a previous style's
+        // instruction program or automatic choices.
+        RestoreVideoPromptProgram(null);
         _applyingVideoPromptTemplate = true;
         try
         {
-            target.Text = choice.Prompt;
+            ModalVideoPromptTextBox.Text = choice.Prompt;
         }
         finally
         {
             _applyingVideoPromptTemplate = false;
         }
         RefreshVideoPromptTemplateControls();
+        RefreshVideoStyleControls(updateNameFields: true);
+        RefreshVideoPromptAuthoringControls();
         SetVideoGenerationSettingsStatus(
             $"「{choice.Label}」をMiniMax H3形式でPromptへ反映しました。このまま動画化できます。画像固有に作り直す場合だけMiniMax語化してください。");
     }
@@ -1961,9 +1970,17 @@ public partial class MainWindow
         if (choice is null)
             return;
 
+        if (choice.TemplateId is { } templateId)
+        {
+            ApplyVideoPromptTemplate(VideoPromptTemplates.First(template => template.Id == templateId));
+            return;
+        }
+
         if (choice.StyleName is null)
         {
             _selectedVideoStyleName = null;
+            _selectedVideoPromptTemplateId = CustomVideoPromptTemplateId;
+            RefreshVideoPromptTemplateControls();
             VideoH3PromptRewriteContextChanged();
             RefreshVideoStyleControls(updateNameFields: false);
             SetVideoStyleStatus("現在の設定を使用します。Styleにはまだ保存されていません。");
@@ -2023,11 +2040,6 @@ public partial class MainWindow
         }
         else
         {
-            if (_videoStyles.Count >= MaxVideoStyleCount)
-            {
-                SetVideoStyleStatus($"Styleは最大{MaxVideoStyleCount}件です。不要なStyleを削除してください。");
-                return;
-            }
             _videoStyles.Add(style);
         }
 
@@ -2148,8 +2160,6 @@ public partial class MainWindow
                 continue;
 
             _videoStyles.Add(normalized);
-            if (_videoStyles.Count >= MaxVideoStyleCount)
-                break;
         }
         _videoStyles.Sort(static (left, right) =>
             StringComparer.CurrentCultureIgnoreCase.Compare(left.Name, right.Name));
@@ -2282,12 +2292,16 @@ public partial class MainWindow
 
         var choices = new List<VideoStyleChoice>
         {
-            new("カスタム（現在の設定）", null),
+            new("現在の設定（未保存）", null),
         };
+        choices.AddRange(VideoPromptTemplates.Where(template => template.Id != CustomVideoPromptTemplateId)
+            .Select(template => new VideoStyleChoice("基本 · " + BuiltInVideoStyleLabel(template), null, template.Id)));
         choices.AddRange(_videoStyles.Select(static style =>
             new VideoStyleChoice(style.Name, style.Name)));
         VideoStyleChoice selectedChoice = choices.FirstOrDefault(choice =>
-                string.Equals(choice.StyleName, _selectedVideoStyleName, StringComparison.OrdinalIgnoreCase))
+                _selectedVideoStyleName is not null
+                    ? string.Equals(choice.StyleName, _selectedVideoStyleName, StringComparison.OrdinalIgnoreCase)
+                    : choice.TemplateId == _selectedVideoPromptTemplateId)
             ?? choices[0];
 
         bool wasSyncing = _syncingVideoGenerationSettings;
@@ -2324,6 +2338,22 @@ public partial class MainWindow
             ? $"現在: {VideoModelLabel(_videoModelId)} / {MiniMaxH3ExactDurationSeconds(_videoDurationSeconds):F3}秒 / 24fps / 元画像比率・最大{_videoMaximumPixelArea.ToString("N0", CultureInfo.InvariantCulture)}px / {_videoSteps} STEP / AAC"
             : $"現在: {VideoModelLabel(_videoModelId)} / {VideoQualityLabel(_videoQualityId)} / {_videoDurationSeconds}秒 / 生成{_videoPlaybackFps}fps / {_videoMaximumPixelArea.ToString("N0", CultureInfo.InvariantCulture)}px";
     }
+
+    private static string BuiltInVideoStyleLabel(VideoPromptTemplateChoice template) => template.Id switch
+    {
+        "image-aware-auto" => "画像に合わせておまかせ",
+        "dynamic-general" => "はっきりした動き",
+        "cute-sexy" => "可愛らしさと艶やかさ",
+        "intense-allure" => "妖艶な雰囲気",
+        "cinematic-camera" => "映画のようなカメラ",
+        "natural-visible" => "自然な動き",
+        "expressive-emotion" => "表情と感情",
+        "action-power" => "力強いアクション",
+        "dreamy-flow" => "幻想的でゆったり",
+        "atmospheric-scene" => "風景と空気感",
+        "romantic-warm" => "温かく柔らかな雰囲気",
+        _ => template.Label,
+    };
 
     private void SetVideoStyleStatus(string message)
     {
@@ -2606,6 +2636,7 @@ public partial class MainWindow
         }
         RefreshVideoPromptTemplateControls();
         RefreshVideoH3PromptRewriteControls();
+        RefreshVideoPromptAuthoringControls();
         UpdateVideoGenerationActionControls();
     }
 
@@ -3411,7 +3442,11 @@ public partial class MainWindow
             && ModalVideoPromptTemplateComboBox.Items.Count
                 == VideoPromptTemplates.Count
             && AppVideoPromptTemplateComboBox.Items.Count
-                == VideoPromptTemplates.Count;
+                == VideoPromptTemplates.Count
+            && ModalVideoPromptTemplateComboBox.Visibility == Visibility.Collapsed
+            && AppVideoPromptTemplateComboBox.Visibility == Visibility.Collapsed
+            && ModalVideoStyleComboBox.Items.OfType<VideoStyleChoice>().Count(choice => choice.TemplateId is not null)
+                == VideoPromptTemplates.Count - 1;
 
     public IReadOnlyList<string> VideoPromptTemplateIdsForSmoke
         => VideoPromptTemplates.Select(static template => template.Id).ToList();
@@ -3423,16 +3458,16 @@ public partial class MainWindow
 
     public bool SelectVideoPromptTemplateForSmoke(string templateId)
     {
-        VideoPromptTemplateChoice? choice = ModalVideoPromptTemplateComboBox.Items
-            .OfType<VideoPromptTemplateChoice>()
+        VideoStyleChoice? choice = ModalVideoStyleComboBox.Items
+            .OfType<VideoStyleChoice>()
             .FirstOrDefault(candidate => string.Equals(
-                candidate.Id,
+                candidate.TemplateId ?? (candidate.StyleName is null ? CustomVideoPromptTemplateId : ""),
                 templateId,
                 StringComparison.Ordinal));
         if (choice is null)
             return false;
 
-        ModalVideoPromptTemplateComboBox.SelectedItem = choice;
+        ModalVideoStyleComboBox.SelectedItem = choice;
         return string.Equals(
             _selectedVideoPromptTemplateId,
             templateId,

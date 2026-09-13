@@ -145,9 +145,12 @@ public partial class App
                     checks["overrideNotRemembered"] = window.VideoPromptProgramKindForSmoke == "anime" && window.VideoPromptProgramEnqueueErrorForSmoke is not null;
                     window.SetVideoPromptProgramForSmoke(program);
                     checks["styleSaved"] = window.SaveVideoStyleForSmoke("Synthetic authoring style");
+                    for (int i = 0; i < 40; i++) window.SaveVideoStyleForSmoke($"Synthetic style {i:00}");
+                    checks["styleCountHasNo32ItemCap"] = window.VideoStyleNamesForSmoke.Count == 41;
                     window.FlushStateForSmoke();
                     MainWindow reload = HiddenWindow();
                     checks["styleRoundTrip"] = reload.SelectVideoStyleForSmoke("Synthetic authoring style")
+                        && reload.VideoStyleNamesForSmoke.Count == 41
                         && reload.VideoPromptProgramSnapshotForSmoke.GetProperty("Description").GetString() == program.Description
                         && reload.VideoPromptProgramSnapshotForSmoke.GetProperty("FutureNote").GetProperty("Keep").GetBoolean();
                     reload.Close();
@@ -169,6 +172,31 @@ public partial class App
                     checks["clickOpensOptionAndUpdatesText"] = editor.ExerciseManualOptionClickForSmoke(v => Capture("prompt-option", v));
                     editor.CaptureTabsForSmoke((i, v) => Capture(i == 0 ? "prompt-editor" : "prompt-tab-" + i, v));
                     editor.Close();
+                    checks["unifiedStyleLibrary"] = window.VideoPromptTemplateSurfaceForSmoke
+                        && window.SelectVideoPromptTemplateForSmoke("cinematic-camera")
+                        && !window.VideoPromptProgramSnapshotForSmoke.GetProperty("Enabled").GetBoolean()
+                        && window.SelectVideoStyleForSmoke("Synthetic authoring style");
+                    var inlineProgram = new VideoPromptProgram { Enabled = true,
+                        Template = "Camera: [slow push-in / orbit left / POV with gentle head movement].\n\nThe subject [smiles / looks curious] and {walks closer / turns / waves}.",
+                        Description = "カメラの動きと表情を、本文の中で選べます。日本語訳は生成へ送りません。" };
+                    window.SetVideoPromptProgramForSmoke(inlineProgram);
+                    window.OpenModalForSmoke();
+                    window.OpenVideoGenerationBoardForSmoke("original");
+                    checks["nativeInlineEditingAndReversibleOff"] = window.ExerciseVideoAuthoringForSmoke(Capture);
+                    const string originalWithNotes = "Original body [Shot 1].\r\n\r\n▼▼▼ 使用時はこの行から末尾まで全削除｜日本語訳 ▼▼▼\r\n説明はそのまま。\r\n";
+                    window.SelectVideoPromptTemplateForSmoke("dynamic-general");
+                    window.ConfigureVideoGenerationForSmoke(5, 24, 414720, originalWithNotes);
+                    var separated = window.VideoPromptProgramSnapshotForSmoke;
+                    checks["legacyNotesSeparatedLosslessly"] = window.VideoPromptForSmoke == "Original body [Shot 1].\r\n\r\n"
+                        && separated.GetProperty("Description").GetString() == "説明はそのまま。\r\n"
+                        && separated.GetProperty("OriginalStyleText").GetProperty("Prompt").GetString() == originalWithNotes;
+                    window.SelectInlineVideoSourceForSmoke("photoreal");
+                    var sourceProgram = window.VideoPromptProgramSnapshotForSmoke.Deserialize<VideoPromptProgram>()!;
+                    checks["inlineSourceOverridePreservesLiteralBody"] = sourceProgram.Enabled
+                        && window.VideoPromptProgramKindForSmoke == "photoreal"
+                        && sourceProgram.TryCompile("photoreal", "", 124, out string sourceInstruction, out _)
+                        && sourceInstruction.StartsWith("Original body [Shot 1].\r\n\r\n", StringComparison.Ordinal)
+                        && !sourceInstruction.Contains("説明はそのまま", StringComparison.Ordinal);
                     string stylePath = Path.GetFullPath(window.AiStylePathForSmoke);
                     if (!stylePath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Style fixture escaped its isolated root.");

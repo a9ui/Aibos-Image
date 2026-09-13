@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$DotNetPath = 'dotnet',
+    [string]$AssemblyPath = '',
     [switch]$SkipBuild,
     [switch]$NoRestore
 )
@@ -69,7 +70,7 @@ try {
 
     $dotNetExecutable = (Get-Command $DotNetPath -ErrorAction Stop).Source
     $dotNetRoot = Split-Path -Parent $dotNetExecutable
-    if (-not $SkipBuild) {
+    if (-not $SkipBuild -and [string]::IsNullOrWhiteSpace($AssemblyPath)) {
         $buildArguments = @('build', $project, '-c', $Configuration)
         if ($NoRestore) {
             $buildOutput = $buildRoot.TrimEnd('\', '/') `
@@ -87,8 +88,12 @@ try {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
-    $exe = Get-ChildItem -LiteralPath $buildRoot -Recurse -Filter 'PhotoViewer.Wpf.exe' `
-        -ErrorAction Stop | Select-Object -First 1 -ExpandProperty FullName
+    $exe = if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        Get-ChildItem -LiteralPath $buildRoot -Recurse -Filter 'PhotoViewer.Wpf.exe' `
+            -ErrorAction Stop | Select-Object -First 1 -ExpandProperty FullName
+    } else {
+        $dotNetExecutable
+    }
     if ([string]::IsNullOrWhiteSpace($exe) -or -not (Test-Path -LiteralPath $exe -PathType Leaf)) {
         throw 'The isolated WPF executable was not found.'
     }
@@ -102,13 +107,22 @@ try {
     [Environment]::SetEnvironmentVariable('DOTNET_ROOT', $dotNetRoot, 'Process')
     [Environment]::SetEnvironmentVariable('DOTNET_ROOT_X64', $dotNetRoot, 'Process')
 
+    $smokeArguments = @('--video-v2-ui-smoke', ('"{0}"' -f $resultPath))
+    if (-not [string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        $smokeArguments = @(('"{0}"' -f (Resolve-Path -LiteralPath $AssemblyPath).Path)) + $smokeArguments
+    }
     $process = Start-Process -FilePath $exe `
-        -ArgumentList @('--video-v2-ui-smoke', ('"{0}"' -f $resultPath)) `
+        -ArgumentList $smokeArguments `
         -RedirectStandardOutput $stdoutPath `
         -RedirectStandardError $stderrPath `
         -WindowStyle Hidden `
-        -PassThru `
-        -Wait
+        -PassThru
+    if (-not $process.WaitForExit(60000)) {
+        $process.Kill()
+        $process.WaitForExit()
+        throw 'The task-owned video UI smoke exceeded its 60 second timeout.'
+    }
+    $process.WaitForExit()
     if ($process.ExitCode -ne 0) {
         $stderr = if (Test-Path -LiteralPath $stderrPath) {
             Get-Content -Raw -LiteralPath $stderrPath

@@ -368,7 +368,7 @@ public partial class MainWindow
         => ModalMotionDirectorWarningText.Text;
 
     public bool MotionDirectorBoardWidthContractForSmoke
-        => Math.Abs(ModalVideoGenerationBoardBorder.Width - 430d) < 0.01
+        => Math.Abs(ModalVideoGenerationBoardBorder.Width - 600d) < 0.01
             && ModalMotionDirectorActionsPanel.Orientation
                 == Orientation.Horizontal
             && ModalMotionDirectorTimelineText.TextWrapping
