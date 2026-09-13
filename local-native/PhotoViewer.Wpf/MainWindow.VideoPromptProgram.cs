@@ -29,6 +29,7 @@ public partial class MainWindow
         _syncingVideoAuthoringControls = true;
         try
         {
+            ApplyDirectVideoSourceVariant();
             SeparateVideoPromptNotes();
             foreach (ContentControl host in new[] { ModalVideoPromptAuthoringHost, AppVideoPromptAuthoringHost })
             {
@@ -38,7 +39,7 @@ public partial class MainWindow
                     editor.Changed += VideoAuthoringChanged;
                     editor.SourceChanged += choice =>
                     {
-                        if (choice != "auto" && !_videoPromptProgram.Enabled)
+                        if (choice != "auto" && !_videoPromptProgram.Enabled && !_videoPromptProgram.UseSourceVariants)
                         {
                             string literal = VideoPromptAuthoringControl.EscapeLiteral(_videoPrompt);
                             if (literal.Length > 8000)
@@ -79,7 +80,9 @@ public partial class MainWindow
             _videoPromptProgram = program;
             if (rawPrompt is not null)
             {
-                _videoPromptProgram.BaseH3Template = rawPrompt;
+                if (_videoPromptProgram.UseSourceVariants && EffectiveVideoProgramSourceKind() == "photoreal")
+                    _videoPromptProgram.PhotorealBaseH3Template = rawPrompt;
+                else _videoPromptProgram.BaseH3Template = rawPrompt;
                 ModalVideoPromptTextBox.Text = rawPrompt;
             }
             MarkVideoStyleAsCustom();
@@ -101,6 +104,26 @@ public partial class MainWindow
         _videoProgramAppliedPrompt = null;
         VideoH3PromptRewriteContextChanged();
         UpdateVideoGenerationActionControls();
+    }
+
+    private void ApplyDirectVideoSourceVariant()
+    {
+        if (!_videoPromptProgram.UseSourceVariants || _videoPromptProgram.Enabled) return;
+        string prompt = _videoPromptProgram.BaseTemplateFor(EffectiveVideoProgramSourceKind());
+        if (_videoPrompt == prompt) return;
+        _videoPrompt = prompt;
+        bool wasSyncing = _syncingVideoGenerationSettings;
+        _syncingVideoGenerationSettings = true;
+        try { ModalVideoPromptTextBox.Text = prompt; AppVideoPromptTextBox.Text = prompt; }
+        finally { _syncingVideoGenerationSettings = wasSyncing; }
+        InvalidateVideoProgramAuthoring();
+    }
+
+    private void UpdateDirectVideoSourceVariant(string prompt)
+    {
+        if (!_videoPromptProgram.UseSourceVariants || _videoPromptProgram.Enabled) return;
+        if (EffectiveVideoProgramSourceKind() == "photoreal") _videoPromptProgram.PhotorealBaseH3Template = prompt;
+        else _videoPromptProgram.BaseH3Template = prompt;
     }
 
     private void SeparateVideoPromptNotes()
@@ -308,8 +331,8 @@ public partial class MainWindow
 
     private string? ValidateCapturedVideoProgram(string? context, string prompt)
     {
-        if (context is null && !_videoPromptProgram.Enabled) return null;
-        if (context is null || !_videoPromptProgram.Enabled || context != VideoProgramContext()
+        if (context is null && !_videoPromptProgram.Enabled && !_videoPromptProgram.UseSourceVariants) return null;
+        if (context is null || (!_videoPromptProgram.Enabled && !_videoPromptProgram.UseSourceVariants) || context != VideoProgramContext()
             || !string.Equals(prompt, _videoPrompt.Trim(), StringComparison.Ordinal))
             return "動画化の準備中に指示言語の設定が変わりました。確認して追加し直してください。";
         return ValidateVideoProgramForEnqueue();
@@ -345,4 +368,25 @@ public partial class MainWindow
 
     public void SelectInlineVideoSourceForSmoke(string kind)
         => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).SelectSourceForSmoke(kind);
+
+    public void EditInlineVideoVariantForSmoke(string body, string note)
+        => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).EditVariantForSmoke(body, note);
+
+    public void WrapInlineVideoPhraseForSmoke(string phrase)
+        => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).WrapPhraseForSmoke(phrase);
+
+    public bool DirectVariantCaptureInvalidatesForSmoke()
+    {
+        string context = VideoProgramContext();
+        string prompt = _videoPrompt.Trim();
+        bool valid = ValidateCapturedVideoProgram(context, prompt) is null;
+        SelectInlineVideoSourceForSmoke(EffectiveVideoProgramSourceKind() == "photoreal" ? "anime" : "photoreal");
+        return valid && ValidateCapturedVideoProgram(context, prompt) is not null;
+    }
+
+    public void CaptureVideoVariantForSmoke(Action<string, FrameworkElement> capture)
+    {
+        UpdateLayout();
+        capture("native-video-source-variants", ModalVideoGenerationBoardBorder);
+    }
 }

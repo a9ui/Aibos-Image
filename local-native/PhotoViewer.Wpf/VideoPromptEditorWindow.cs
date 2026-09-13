@@ -95,6 +95,11 @@ public sealed class VideoPromptEditorWindow : Window
         AddText(description, "日本語の説明・訳はこの欄へ。動画生成にもAI整形にも送信しません。スタイル保存で本文と一緒に残せます。");
         TextBox notes = AddEditor(description, "日本語の説明・訳（編集可能）", Program.Description, 8000, 220);
         notes.TextChanged += (_, _) => Program.Description = notes.Text;
+        if (Program.UseSourceVariants)
+        {
+            TextBox photoNotes = AddEditor(description, "実写用の日本語の説明・訳", Program.PhotorealDescription, 8000, 160);
+            photoNotes.TextChanged += (_, _) => Program.PhotorealDescription = photoNotes.Text;
+        }
         TextBox lora = AddEditor(description, "専用LoRAの候補ID／メモ", Program.PreferredLoraId, 200, 48);
         lora.TextChanged += (_, _) => Program.PreferredLoraId = lora.Text;
         AddText(description, "現在のH3生成経路はLoRA指定に未対応です。この欄は候補の記録専用で、適用・ダウンロードはしません。自動翻訳も現在は未接続です。");

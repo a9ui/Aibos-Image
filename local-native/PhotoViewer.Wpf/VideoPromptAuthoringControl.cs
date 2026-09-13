@@ -23,6 +23,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
     private readonly TextBox _notes = Editor("日本語訳・メモ", 70);
     private readonly TextBlock _reading = new() { TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 27, Foreground = Ink };
     private readonly TextBlock _hint = Label("青：手動選択　紫：画像AI　黄：条件判定", false);
+    private readonly TextBlock _variantHint = Label("", false);
     private readonly ScrollViewer _reader;
     private readonly WrapPanel _tools = new() { Margin = new Thickness(0, 0, 0, 6) };
     private readonly ComboBox _source = new() { MinHeight = 30, Margin = new Thickness(0, 0, 0, 10) };
@@ -45,6 +46,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         _source.ItemsSource = new[] { "自動で振り分ける", "アニメとして扱う", "実写として扱う" };
         AutomationProperties.SetName(_source, "今回の画像の扱い");
         panel.Children.Add(_source);
+        panel.Children.Add(_variantHint);
         _source.SelectionChanged += (_, _) =>
         {
             if (!_loading) SourceChanged?.Invoke(_source.SelectedIndex switch { 1 => "anime", 2 => "photoreal", _ => "auto" });
@@ -91,13 +93,16 @@ public sealed class VideoPromptAuthoringControl : UserControl
                 if (_photo) _program.PhotorealTemplate = _input.Text;
                 else _program.Template = _input.Text;
             }
+            else if (_photo && _program.UseSourceVariants) _program.PhotorealBaseH3Template = _input.Text;
+            else _program.BaseH3Template = _input.Text;
             Publish(_program.Enabled ? null : _input.Text);
             Render();
         };
         _notes.TextChanged += (_, _) =>
         {
             if (_loading) return;
-            _program.Description = _notes.Text;
+            if (_photo && _program.UseSourceVariants) _program.PhotorealDescription = _notes.Text;
+            else _program.Description = _notes.Text;
             Publish(null);
         };
         _baseInput.TextChanged += (_, _) =>
@@ -116,11 +121,13 @@ public sealed class VideoPromptAuthoringControl : UserControl
         try
         {
             _program = program.Clone();
-            _photo = effectiveKind == "photoreal" && !string.IsNullOrEmpty(program.PhotorealTemplate);
+            _photo = effectiveKind == "photoreal" && (program.UseSourceVariants || !string.IsNullOrEmpty(program.PhotorealTemplate));
             _sourcePrompt = sourcePrompt;
             _source.SelectedIndex = sourceOverride switch { "anime" => 1, "photoreal" => 2, _ => 0 };
             SetText(_input, program.Enabled ? program.TemplateFor(effectiveKind) : rawPrompt);
-            SetText(_notes, program.Description);
+            SetText(_notes, program.DescriptionFor(effectiveKind));
+            _variantHint.Visibility = program.UseSourceVariants ? Visibility.Visible : Visibility.Collapsed;
+            _variantHint.Text = $"アニメ・実写 共通スタイル · 今回は{(effectiveKind == "photoreal" ? "実写" : "アニメ")}用の本文を使用";
             SetText(_baseInput, program.BaseTemplateFor(effectiveKind));
             _base.Visibility = program.Enabled && !string.IsNullOrEmpty(_baseInput.Text) ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -239,6 +246,15 @@ public sealed class VideoPromptAuthoringControl : UserControl
         if (next.Length > 8000) { _hint.Text = "選択式にした本文が8000文字を超えます。"; return; }
         if (!_program.Enabled)
         {
+            if (_program.UseSourceVariants)
+            {
+                string anime = EscapeLiteral(_program.BaseH3Template);
+                string photo = EscapeLiteral(_program.PhotorealBaseH3Template);
+                if (anime.Length > 8000 || photo.Length > 8000)
+                { _hint.Text = "選択式にした本文が8000文字を超えます。"; return; }
+                _program.Template = anime;
+                _program.PhotorealTemplate = photo;
+            }
             _program.BaseH3Template = "";
             _program.PhotorealBaseH3Template = "";
         }
@@ -329,4 +345,10 @@ public sealed class VideoPromptAuthoringControl : UserControl
     }
 
     public void SelectSourceForSmoke(string kind) => _source.SelectedIndex = kind == "photoreal" ? 2 : kind == "anime" ? 1 : 0;
+    public void EditVariantForSmoke(string body, string note) { _input.Text = body; _notes.Text = note; }
+    public void WrapPhraseForSmoke(string phrase)
+    {
+        _input.Select(_input.Text.IndexOf(phrase, StringComparison.Ordinal), phrase.Length);
+        WrapSelection(false);
+    }
 }

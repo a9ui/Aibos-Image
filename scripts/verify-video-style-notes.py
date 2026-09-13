@@ -13,6 +13,61 @@ spec.loader.exec_module(notes)
 
 
 class StyleNotesChecks(unittest.TestCase):
+    def pair_fixture(self):
+        doc = self.fixture("Anime body [Shot 1].\r\n▼▼▼ 使用時はこの行から末尾まで全削除｜日本語訳 ▼▼▼\r\nアニメの説明\r\n")
+        doc["VideoStyles"][0]["Name"] = "Example_Anime-Wave"
+        photo = deepcopy(doc["VideoStyles"][0])
+        photo.update(Name="Example_Photo-Wave", Prompt="Photo body [Shot 1].\n▼▼▼ 使用時はこの行から末尾まで全削除｜日本語訳 ▼▼▼\n実写の説明\n")
+        doc["VideoStyles"].append(photo)
+        doc["SelectedVideoStyleName"] = photo["Name"]
+        return doc
+
+    def test_pairing_preserves_both_originals_and_selection(self):
+        source = self.pair_fixture()
+        untouched = deepcopy(source)
+        prepared, report = notes.prepare_document(source)
+        notes.merge_source_variants(source, prepared, report)
+        self.assertEqual(source, untouched)
+        self.assertEqual(len(prepared["VideoStyles"]), 1)
+        style = prepared["VideoStyles"][0]
+        self.assertEqual(style["Name"], "Example_Wave")
+        self.assertEqual(prepared["SelectedVideoStyleName"], style["Name"])
+        program = style["InstructionProgram"]
+        self.assertTrue(program["UseSourceVariants"])
+        self.assertFalse(program["Enabled"])
+        self.assertEqual(program["BaseH3Template"], "Anime body [Shot 1].\r\n")
+        self.assertEqual(program["PhotorealBaseH3Template"], "Photo body [Shot 1].\n")
+        self.assertEqual(program["PhotorealDescription"], "実写の説明\n")
+        self.assertEqual(program["OriginalStyleVariants"]["Anime"], source["VideoStyles"][0])
+        self.assertEqual(program["OriginalStyleVariants"]["Photo"], source["VideoStyles"][1])
+        self.assertEqual(style["FutureStyle"], [1, 2])
+        self.assertEqual(prepared["FutureRoot"], source["FutureRoot"])
+        self.assertEqual(notes.read_document(notes.encode_document(prepared).encode()), prepared)
+        again, report = notes.prepare_document(prepared)
+        notes.merge_source_variants(prepared, again, report)
+        self.assertEqual(again, prepared)
+
+    def test_pairing_refuses_name_collision_and_keeps_different_settings(self):
+        source = self.pair_fixture()
+        source["VideoStyles"].append({"Name": "Example_Wave", "Prompt": "Existing style"})
+        prepared, report = notes.prepare_document(source)
+        with self.assertRaises(ValueError):
+            notes.merge_source_variants(source, prepared, report)
+        source = self.pair_fixture()
+        source["VideoStyles"][1]["Steps"] = 40
+        prepared, report = notes.prepare_document(source)
+        notes.merge_source_variants(source, prepared, report)
+        self.assertEqual(len(prepared["VideoStyles"]), 2)
+        self.assertEqual(report["skippedPairs"][0]["reason"], "different-settings")
+
+    def test_pairing_does_not_overwrite_authored_options(self):
+        source = self.pair_fixture()
+        source["VideoStyles"][0]["InstructionProgram"] = {"Version": 1, "Enabled": True, "Template": "[wave / turn]"}
+        prepared, report = notes.prepare_document(source)
+        notes.merge_source_variants(source, prepared, report)
+        self.assertEqual(len(prepared["VideoStyles"]), 2)
+        self.assertEqual(prepared["VideoStyles"][0]["InstructionProgram"], source["VideoStyles"][0]["InstructionProgram"])
+
     def fixture(self, prompt):
         return {"Version": 1, "FutureRoot": {"ratio": Decimal("0.123456789012345678901")},
                 "PhotorealStyles": [{"Untouched": True}], "SelectedVideoStyleName": "Sample",

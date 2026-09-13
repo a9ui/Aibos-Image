@@ -11,11 +11,13 @@ public sealed class VideoPromptProgram
 {
     public int Version { get; set; } = 1;
     public bool Enabled { get; set; }
+    public bool UseSourceVariants { get; set; }
     public string Template { get; set; } = "";
     public string PhotorealTemplate { get; set; } = "";
     public string BaseH3Template { get; set; } = "";
     public string PhotorealBaseH3Template { get; set; } = "";
     public string Description { get; set; } = "";
+    public string PhotorealDescription { get; set; } = "";
     public string ActionSamples { get; set; } = "";
     public bool SourceRules { get; set; }
     public bool ImageChoices { get; set; }
@@ -66,7 +68,7 @@ public sealed class VideoPromptProgram
         if (Version != 1 || OriginalDefault is not ("anime" or "photoreal")
             || !Bounded(Template, 8000) || !Bounded(PhotorealTemplate, 8000)
             || !Bounded(BaseH3Template, 8000) || !Bounded(PhotorealBaseH3Template, 8000)
-            || !Bounded(Description, 8000) || !Bounded(ActionSamples, 4000)
+            || !Bounded(Description, 8000) || !Bounded(PhotorealDescription, 8000) || !Bounded(ActionSamples, 4000)
             || !Bounded(PreferredLoraId, 200) || Options is null || Options.Count > 128)
             return false;
         foreach ((string key, VideoPromptOption option) in Options)
@@ -92,6 +94,9 @@ public sealed class VideoPromptProgram
     public string BaseTemplateFor(string sourceKind)
         => sourceKind == "photoreal" && !string.IsNullOrWhiteSpace(PhotorealBaseH3Template)
             ? PhotorealBaseH3Template : BaseH3Template;
+
+    public string DescriptionFor(string sourceKind)
+        => UseSourceVariants && sourceKind == "photoreal" ? PhotorealDescription : Description;
 
     public VideoPromptOption OptionFor(VideoPromptToken token)
         => Options.TryGetValue(token.Key, out VideoPromptOption? option) ? option

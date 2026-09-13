@@ -156,12 +156,84 @@ def prepare_document(source: dict) -> tuple[dict, dict]:
     return prepared, report
 
 
-def prepare_file(source_path: Path, output_directory: Path) -> dict:
+def merge_source_variants(source: dict, prepared: dict, report: dict) -> None:
+    """Pair explicitly named legacy variants without interpreting their bodies."""
+    pattern = re.compile(r"^(?P<prefix>(?:.*[_ -])?)(?P<kind>Anime|Photo)-(?P<stem>.+)$", re.IGNORECASE)
+    originals = source["VideoStyles"]
+    names = {}
+    groups = {}
+    for index, style in enumerate(originals):
+        name = style.get("Name")
+        if not isinstance(name, str) or not name or name.casefold() in names:
+            raise ValueError("Style names must be nonempty and unambiguous.")
+        names[name.casefold()] = index
+        match = pattern.fullmatch(name)
+        if match:
+            family = match["prefix"] + match["stem"]
+            members = groups.setdefault(family.casefold(), {})
+            kind = match["kind"].lower()
+            if kind in members:
+                raise ValueError("A source variant is duplicated; no styles were merged.")
+            members[kind] = (index, family)
+
+    replacements, consumed, renamed, skipped = {}, set(), {}, []
+    for key, pair in groups.items():
+        if set(pair) != {"anime", "photo"}:
+            continue
+        ai, name = pair["anime"]
+        pi, _ = pair["photo"]
+        if key in names:
+            raise ValueError("A merged style name already exists; no styles were merged.")
+        # Authored programs may have independent decisions. Keep them intact.
+        if originals[ai].get("InstructionProgram") is not None or originals[pi].get("InstructionProgram") is not None:
+            skipped.append({"indices": [ai + 1, pi + 1], "reason": "existing-program"})
+            continue
+        def settings(index):
+            return {k: v for k, v in originals[index].items() if k not in ("Name", "Prompt", "InstructionProgram")}
+        if settings(ai) != settings(pi):
+            skipped.append({"indices": [ai + 1, pi + 1], "reason": "different-settings"})
+            continue
+        anime, photo = prepared["VideoStyles"][ai], prepared["VideoStyles"][pi]
+        merged = deepcopy(anime)
+        merged["Name"] = name
+        program = merged["InstructionProgram"]
+        program["UseSourceVariants"] = True
+        program["PhotorealBaseH3Template"] = photo["Prompt"]
+        program["PhotorealDescription"] = photo["InstructionProgram"]["Description"]
+        program["OriginalStyleVariants"] = {
+            "Kind": "paired-anime-photo-v1",
+            "Anime": deepcopy(originals[ai]), "Photo": deepcopy(originals[pi]),
+        }
+        for kind, index, body, description in [
+            ("Anime", ai, program["BaseH3Template"], program["Description"]),
+            ("Photo", pi, program["PhotorealBaseH3Template"], program["PhotorealDescription"]),
+        ]:
+            _, separator, _ = split_note(originals[index]["Prompt"])
+            if body + separator + description != originals[index]["Prompt"]:
+                raise ValueError("A source variant did not reconstruct exactly.")
+            if program["OriginalStyleVariants"][kind] != originals[index]:
+                raise ValueError("A source style snapshot changed unexpectedly.")
+            renamed[originals[index]["Name"].casefold()] = name
+        replacements[min(ai, pi)] = merged
+        consumed.update((ai, pi))
+    prepared["VideoStyles"] = [replacements[i] if i in replacements else style
+        for i, style in enumerate(prepared["VideoStyles"]) if i in replacements or i not in consumed]
+    selected = prepared.get("SelectedVideoStyleName")
+    if isinstance(selected, str) and selected.casefold() in renamed:
+        prepared["SelectedVideoStyleName"] = renamed[selected.casefold()]
+    report.update({"sourceStyleCount": report["styleCount"], "styleCount": len(prepared["VideoStyles"]),
+        "stylesMerged": bool(replacements), "mergedPairs": len(replacements), "skippedPairs": skipped,
+        "sourceVariantOriginalsRetained": True})
+
+
+def prepare_file(source_path: Path, output_directory: Path, merge_variants: bool = False) -> dict:
     source_path = source_path.resolve(strict=True)
     with source_path.open("rb") as handle:
         raw = handle.read(MAX_BYTES + 1)
     source = read_document(raw)
     prepared, report = prepare_document(source)
+    if merge_variants:
+        merge_source_variants(source, prepared, report)
     encoded = (encode_document(prepared) + "\n").encode("utf-8")
     if len(encoded) > MAX_BYTES:
         raise ValueError("The prepared document exceeds the native 4 MiB storage bound.")
@@ -186,13 +258,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("output_directory", type=Path, help="A new private directory, outside the repository.")
+    parser.add_argument("--merge-source-variants", action="store_true", help="Pair matching Anime-/Photo- legacy styles, retaining both exact originals.")
     args = parser.parse_args()
     repository = Path(__file__).resolve().parent.parent
     output = args.output_directory.resolve()
     if output == repository or repository in output.parents:
         parser.error("Private style copies must be kept outside the repository.")
     try:
-        result = prepare_file(args.source, output)
+        result = prepare_file(args.source, output, args.merge_source_variants)
     except (OSError, ValueError, UnicodeError, RecursionError) as error:
         parser.exit(1, f"Preparation failed: {error}\n")
     print(json.dumps(result, indent=2))

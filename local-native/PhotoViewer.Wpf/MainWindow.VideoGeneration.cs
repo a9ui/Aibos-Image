@@ -1787,6 +1787,7 @@ public partial class MainWindow
         _videoPrompt = source.Text.Length <= MaxVideoPromptLength
             ? source.Text
             : source.Text[..MaxVideoPromptLength];
+        UpdateDirectVideoSourceVariant(_videoPrompt);
         MarkVideoPromptTemplateAsCustom();
         InvalidateVideoH3PromptUndoAfterManualEdit();
         MarkVideoStyleAsCustom();
@@ -2170,6 +2171,7 @@ public partial class MainWindow
         _selectedVideoStyleName = selected is not null && VideoStyleMatchesCurrent(selected)
             ? selected.Name
             : null;
+        RefreshVideoPromptAuthoringControls();
         RefreshVideoStyleControls(updateNameFields: true);
     }
 
@@ -2256,7 +2258,9 @@ public partial class MainWindow
             && style.PlaybackFps == _videoPlaybackFps
             && style.MaximumPixelArea == _videoMaximumPixelArea
             && (style.Steps ?? MiniMaxH3VideoSteps) == _videoSteps
-            && string.Equals(style.Prompt, _videoPrompt, StringComparison.Ordinal);
+            && (string.Equals(style.Prompt, _videoPrompt, StringComparison.Ordinal)
+                || (VideoPromptProgram.TryRead(style.InstructionProgram, out var program) && program.UseSourceVariants
+                    && !program.Enabled && (_videoPrompt == program.BaseH3Template || _videoPrompt == program.PhotorealBaseH3Template)));
 
     private void MarkVideoStyleAsCustom()
     {
@@ -2720,7 +2724,7 @@ public partial class MainWindow
 
         VideoGenerationRequestSettings settings =
             CurrentVideoGenerationRequestSettings();
-        string? capturedProgramContext = _videoPromptProgram.Enabled ? VideoProgramContext() : null;
+        string? capturedProgramContext = _videoPromptProgram.Enabled || _videoPromptProgram.UseSourceVariants ? VideoProgramContext() : null;
         _videoGenerationRequestPending = true;
         string? pendingDeliveryRequestId = null;
         UpdateVideoGenerationActionControls();

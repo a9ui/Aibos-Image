@@ -147,9 +147,10 @@ public partial class App
                     checks["styleSaved"] = window.SaveVideoStyleForSmoke("Synthetic authoring style");
                     for (int i = 0; i < 40; i++) window.SaveVideoStyleForSmoke($"Synthetic style {i:00}");
                     checks["styleCountHasNo32ItemCap"] = window.VideoStyleNamesForSmoke.Count == 41;
+                    window.SelectVideoStyleForSmoke("Synthetic authoring style");
                     window.FlushStateForSmoke();
                     MainWindow reload = HiddenWindow();
-                    checks["styleRoundTrip"] = reload.SelectVideoStyleForSmoke("Synthetic authoring style")
+                    checks["styleRoundTrip"] = reload.SelectedVideoStyleNameForSmoke == "Synthetic authoring style"
                         && reload.VideoStyleNamesForSmoke.Count == 41
                         && reload.VideoPromptProgramSnapshotForSmoke.GetProperty("Description").GetString() == program.Description
                         && reload.VideoPromptProgramSnapshotForSmoke.GetProperty("FutureNote").GetProperty("Keep").GetBoolean();
@@ -197,6 +198,47 @@ public partial class App
                         && sourceProgram.TryCompile("photoreal", "", 124, out string sourceInstruction, out _)
                         && sourceInstruction.StartsWith("Original body [Shot 1].\r\n\r\n", StringComparison.Ordinal)
                         && !sourceInstruction.Contains("説明はそのまま", StringComparison.Ordinal);
+                    string animeBody = CreateVideoH3Candidate("ANIME_VARIANT");
+                    string photoBody = CreateVideoH3Candidate("PHOTO_VARIANT");
+                    var variants = new VideoPromptProgram { UseSourceVariants = true,
+                        BaseH3Template = animeBody, PhotorealBaseH3Template = photoBody,
+                        Description = "アニメ用の説明", PhotorealDescription = "実写用の説明" };
+                    window.SetVideoPromptProgramForSmoke(variants);
+                    window.SyncVideoGenerationSettingsForSmoke();
+                    checks["sourceVariantsUseOriginalWithoutInference"] = window.VideoPromptForSmoke == animeBody
+                        && window.VideoPromptProgramEnqueueErrorForSmoke is null;
+                    window.SaveVideoStyleForSmoke("Synthetic paired style");
+                    window.SelectInlineVideoSourceForSmoke("photoreal");
+                    checks["sourceVariantsSwitchLiteralBodyAndKeepStyle"] = window.VideoPromptForSmoke == photoBody
+                        && window.SelectedVideoStyleNameForSmoke == "Synthetic paired style"
+                        && !window.VideoPromptProgramSnapshotForSmoke.GetProperty("Enabled").GetBoolean();
+                    string photoEdited = photoBody.Replace("PHOTO_VARIANT", "PHOTO_EDITED", StringComparison.Ordinal);
+                    window.EditInlineVideoVariantForSmoke(photoEdited, "編集した実写用の説明");
+                    window.SelectInlineVideoSourceForSmoke("anime");
+                    checks["sourceVariantEditsDoNotOverwriteOtherBody"] = window.VideoPromptForSmoke == animeBody;
+                    window.SelectInlineVideoSourceForSmoke("photoreal");
+                    checks["sourceVariantBodyAndNoteEditsSurviveSwitch"] = window.VideoPromptForSmoke == photoEdited
+                        && window.VideoPromptProgramSnapshotForSmoke.GetProperty("PhotorealDescription").GetString() == "編集した実写用の説明"
+                        && window.VideoPromptProgramSnapshotForSmoke.GetProperty("Description").GetString() == "アニメ用の説明";
+                    window.SaveVideoStyleForSmoke("Synthetic paired style");
+                    window.FlushStateForSmoke();
+                    reload = HiddenWindow();
+                    checks["pairedStyleRoundTripAndOverrideNotPersisted"] = reload.SelectedVideoStyleNameForSmoke == "Synthetic paired style"
+                        && reload.VideoPromptForSmoke == animeBody
+                        && reload.VideoPromptProgramSnapshotForSmoke.GetProperty("PhotorealBaseH3Template").GetString() == photoEdited;
+                    reload.Close();
+                    checks["sourceVariantChangeInvalidatesCapturedEnqueue"] = window.DirectVariantCaptureInvalidatesForSmoke();
+                    window.SelectInlineVideoSourceForSmoke("anime");
+                    window.WrapInlineVideoPhraseForSmoke("ANIME_VARIANT");
+                    var converted = window.VideoPromptProgramSnapshotForSmoke.Deserialize<VideoPromptProgram>()!;
+                    checks["inlineConversionPreservesOtherVariant"] = converted.Enabled
+                        && converted.TryCompile("photoreal", "", 124, out string convertedPhoto, out _)
+                        && convertedPhoto.StartsWith(photoEdited, StringComparison.Ordinal)
+                        && converted.TryCompile("anime", "", 124, out string convertedAnime, out _)
+                        && convertedAnime.StartsWith(animeBody, StringComparison.Ordinal);
+                    window.SelectVideoStyleForSmoke("Synthetic paired style");
+                    window.SelectInlineVideoSourceForSmoke("photoreal");
+                    window.CaptureVideoVariantForSmoke(Capture);
                     string stylePath = Path.GetFullPath(window.AiStylePathForSmoke);
                     if (!stylePath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Style fixture escaped its isolated root.");

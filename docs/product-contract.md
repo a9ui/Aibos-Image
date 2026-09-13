@@ -514,6 +514,20 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   shares the Original template. A manual source-kind override is transient,
   scoped to the captured source and cleared after successful enqueue. It is
   never written to the source image or remembered as an image classification.
+- A paired style may set `UseSourceVariants` without enabling the instruction
+  language. Its Original and photoreal base prompts remain literal H3 text;
+  changing the captured source or the transient source-kind selection chooses
+  the matching body and description without inference. Editing one variant
+  preserves the other, and saving the style retains both. Converting a literal
+  variant to inline options escapes both bodies before enabling the instruction
+  program. Direct variants also participate in enqueue-context validation, so a
+  source-kind change during preparation cannot publish the earlier selection.
+  `prepare-video-style-notes.py --merge-source-variants` mechanically pairs
+  matching `Anime-` and `Photo-` names with identical settings. It removes the
+  source-kind word from the shared name, retains each exact original style in
+  compatible extension data, and keeps separate descriptions. Existing authored
+  programs and differing settings are kept separate; name collisions fail before
+  output. Prepared files are separate copies, never automatic live replacements.
 - The explicit H3 candidate action expands a program before calling the
   existing authenticated rewrite route. Authoring syntax is distinct from H3
   reference syntax: unescaped H3 reference labels in authoring text are errors.
