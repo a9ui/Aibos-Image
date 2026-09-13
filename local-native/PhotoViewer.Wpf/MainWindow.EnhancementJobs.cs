@@ -1962,7 +1962,11 @@ public partial class MainWindow
     {
         if (_enhancementWorkspaceMutationPending
             || _enhancementWorkspaceHealthPollPending)
+        {
+            ResetEnhancementWorkspaceThumbnailRetry();
+            RequestEnhancementWorkspaceReconciliation();
             return;
+        }
         var operationWatch = Stopwatch.StartNew();
         string operationOutcome = "failed";
         try
@@ -2153,7 +2157,7 @@ public partial class MainWindow
         }
         finally
         {
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             EnhancementJobsRefreshButton.IsEnabled = !_enhancementWorkspaceRefreshPending;
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
@@ -2175,6 +2179,11 @@ public partial class MainWindow
                 || (_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == _enhancementWorkspaceGeneration))
                 return;
 
+            if (_enhancementWorkspaceRequestedRefreshGeneration == _enhancementWorkspaceGeneration)
+            {
+                ScheduleRequestedEnhancementWorkspaceReconciliation();
+                return;
+            }
             _enhancementWorkspacePollCount++;
             await PollEnhancementJobsWorkspaceAsync(_enhancementWorkspaceGeneration);
         }
@@ -2273,6 +2282,7 @@ public partial class MainWindow
         finally
         {
             _enhancementWorkspaceHealthPollPending = false;
+            ScheduleRequestedEnhancementWorkspaceReconciliation();
         }
     }
 
@@ -2285,10 +2295,19 @@ public partial class MainWindow
         long? observedHealthCatalogRevision = null,
         int healthInventoryCoalesceAttemptsRemaining = 1)
     {
-        if ((_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == generation)
-            || EnhancementJobsDialog.Visibility != Visibility.Visible)
+        if (EnhancementJobsDialog.Visibility != Visibility.Visible)
             return;
+        if (_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == generation)
+        {
+            if (!isPoll)
+                RequestEnhancementWorkspaceReconciliation();
+            return;
+        }
 
+        // A read beginning now also serves any earlier explicit request. Only
+        // requests arriving after this point need a replacement snapshot.
+        if (_enhancementWorkspaceRequestedRefreshGeneration == generation)
+            _enhancementWorkspaceRequestedRefreshGeneration = null;
         _enhancementWorkspaceRefreshPending = true;
         _enhancementWorkspaceRefreshGeneration = generation;
         long queuePresentationRevision =
@@ -2520,6 +2539,7 @@ public partial class MainWindow
                 if (EnhancementJobsRefreshButton is not null)
                     EnhancementJobsRefreshButton.IsEnabled = !_enhancementWorkspaceMutationPending;
                 RefreshEnhancementQueuePauseControl();
+                ScheduleRequestedEnhancementWorkspaceReconciliation();
             }
         }
 
@@ -5547,7 +5567,7 @@ public partial class MainWindow
         finally
         {
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -5570,7 +5590,7 @@ public partial class MainWindow
         {
             if (startsFlush)
             {
-                _enhancementWorkspaceMutationPending = false;
+                CompleteEnhancementWorkspaceMutation();
                 _enhancementWorkspaceConfirmedQueueOrder = null;
             }
             return false;
@@ -5762,7 +5782,7 @@ public partial class MainWindow
             _enhancementWorkspacePendingQueueOrder = null;
             _enhancementWorkspaceConfirmedQueueOrder = null;
             _enhancementWorkspaceQueueOrderFlushTask = null;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -6065,7 +6085,7 @@ public partial class MainWindow
         }
         finally
         {
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -6206,7 +6226,7 @@ public partial class MainWindow
                 optimisticJobIds,
                 optimisticVisibleJobs,
                 revealRows: true);
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -6422,7 +6442,7 @@ public partial class MainWindow
                 optimisticJobIds,
                 optimisticVisibleJobs,
                 revealRows: removeOriginalAfterSuccess);
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -6655,7 +6675,7 @@ public partial class MainWindow
                 optimisticJobIds,
                 optimisticVisibleJobs,
                 revealRows: true);
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -6903,7 +6923,7 @@ public partial class MainWindow
                 optimisticJobIds,
                 optimisticVisibleJobs,
                 revealRows: true);
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -7308,7 +7328,7 @@ public partial class MainWindow
         finally
         {
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -8007,7 +8027,7 @@ public partial class MainWindow
                     pendingDeliveryRequestId);
             }
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -8273,7 +8293,7 @@ public partial class MainWindow
         finally
         {
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -8707,6 +8727,19 @@ public partial class MainWindow
             }
 
             EnhancementJobsStatusText.Text = successMessage;
+            if (method == HttpMethod.Post
+                && string.Equals(route,
+                    $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel",
+                    StringComparison.Ordinal))
+            {
+                // The authenticated response already describes this row. Do
+                // not hold all queue actions behind two more health requests.
+                await ApplyConfirmedEnhancementWorkspaceResponsesAsync([response], job.Id);
+                RequestEnhancementWorkspaceReconciliation();
+                AibosOperationLog.Write(operationLogName, "completed",
+                    operationWatch.ElapsedMilliseconds, response.StatusCode);
+                return true;
+            }
             await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
             AibosOperationLog.Write(
                 operationLogName,
@@ -8722,7 +8755,7 @@ public partial class MainWindow
                 optimisticVisibleJobs,
                 revealRows: true);
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -9506,7 +9539,7 @@ public partial class MainWindow
         finally
         {
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -10188,14 +10221,18 @@ public partial class MainWindow
         RefreshEnhancementQueuePauseControl();
     }
 
-    public async Task<bool> CancelEnhancementJobForSmokeAsync(string id)
+    public async Task<bool> CancelEnhancementJobForSmokeAsync(string id, bool waitForRefresh = true)
     {
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
         if (job is null || !job.CanCancel)
             return false;
-        await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel", "中止を受け付けました。");
-        await WaitForEnhancementWorkspaceIdleForSmokeAsync();
-        return true;
+        bool accepted = await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel", "中止を受け付けました。");
+        if (waitForRefresh)
+        {
+            await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+            await WaitForEnhancementReconciliationForSmokeAsync();
+        }
+        return accepted;
     }
 
     public async Task<bool> RetryEnhancementJobForSmokeAsync(string id)
@@ -10653,6 +10690,9 @@ public partial class MainWindow
 
     public object? EnhancementJobViewIdentityForSmoke(string id)
         => _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+
+    public void ClickRefreshEnhancementJobsForSmoke()
+        => EnhancementJobsRefreshButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
     public async Task RefreshEnhancementJobsForSmokeAsync()
     {
