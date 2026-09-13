@@ -23157,6 +23157,38 @@ public partial class App : Application
                     && window.EnhancementJobViewIdentityForSmoke("active-job")
                         is EnhancementWorkspaceJobView { Status: "running", CancelRequested: true };
 
+                string cancellationResponseJson = JsonSerializer.Serialize(new
+                {
+                    job = VideoJob("active-job", "running", 17,
+                        cancelRequested: true, createdAt: "2026-07-23T00:00:01.000Z"),
+                });
+                const string cancellationField = "\"cancelRequested\":true,";
+                bool incompleteCancelResponsesPreserved = cancellationResponseJson.Contains(
+                    cancellationField, StringComparison.Ordinal);
+                foreach (string replacement in new[]
+                {
+                    "",
+                    "\"cancelRequested\":false,",
+                    "\"cancelRequested\":null,",
+                    "\"cancelRequested\":\"true\",",
+                    "\"cancelRequested\":1,",
+                    "\"cancelRequested\":true,\"cancelRequested\":true,",
+                })
+                {
+                    using JsonDocument incompleteCancellation = JsonDocument.Parse(
+                        cancellationResponseJson.Replace(
+                            cancellationField, replacement, StringComparison.Ordinal));
+                    await window.ApplyConfirmedEnhancementResponseForSmokeAsync(
+                        incompleteCancellation.RootElement, expectedJobId: "active-job");
+                    incompleteCancelResponsesPreserved &=
+                        window.EnhancementJobViewIdentityForSmoke("active-job")
+                            is EnhancementWorkspaceJobView
+                            {
+                                Status: "running", CancelRequested: true,
+                                CanCancel: false, Progress: 43,
+                            };
+                }
+
                 TaskCompletionSource<bool> heldHealthRelease = healthGetGate;
                 healthGetGate = null;
                 healthGetEntered = null;
@@ -24251,6 +24283,7 @@ public partial class App : Application
                     && cancelResponseVisibleBeforeHealth
                     && enqueueResponseVisibleBeforeHealth
                     && unconfirmedResponsesNotProjected
+                    && incompleteCancelResponsesPreserved
                     && responseRefreshRequestDrained
                     && legacyPromptUpdateCapabilitySafe
                     && legacyPauseCapabilitySafe
@@ -24421,6 +24454,7 @@ public partial class App : Application
                     cancelResponseVisibleBeforeHealth,
                     enqueueResponseVisibleBeforeHealth,
                     unconfirmedResponsesNotProjected,
+                    incompleteCancelResponsesPreserved,
                     responseRefreshRequestDrained,
                     afterHealthInventoryRaceReconcile,
                     legacyPromptUpdateCapabilitySafe,

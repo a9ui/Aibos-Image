@@ -543,6 +543,7 @@ try {
         'cancelResponseVisibleBeforeHealth',
         'enqueueResponseVisibleBeforeHealth',
         'unconfirmedResponsesNotProjected',
+        'incompleteCancelResponsesPreserved',
         'responseRefreshRequestDrained',
         'cachedReopenAvoidedFullInventory',
         'staleQueueRefreshSuppressed',

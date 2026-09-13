@@ -52,6 +52,11 @@ public partial class MainWindow
                         || expectedJobId is not null
                             && !string.Equals(candidate.Id, expectedJobId, StringComparison.Ordinal))
                         continue;
+                    if (expectedJobId is not null && candidate.IsActive
+                        && (!HasSingleProperty(row, "cancelRequested")
+                            || !row.TryGetProperty("cancelRequested", out JsonElement cancellation)
+                            || cancellation.ValueKind != JsonValueKind.True))
+                        continue;
                     if (!ids.Add(candidate.Id))
                         return [];
                     parsed.Add(candidate);
