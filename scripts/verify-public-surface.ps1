@@ -50,6 +50,7 @@ try {
         'local-native/PhotoViewer.Wpf/PhotoViewer.Wpf.csproj',
         'start_aibos.bat',
         'start_wpf.bat',
+        'scripts/start-wpf-detached.ps1',
         'scripts/start-aibos-desktop.ps1',
         'scripts/request-aibos-desktop.ps1',
         'scripts/lib/DesktopActivation.ps1',
@@ -90,6 +91,7 @@ try {
     $publicSurface = @(
         'AGENTS.md', 'CLAUDE.md', 'README.md', 'SECURITY.md',
         'docs/product-contract.md', 'start_aibos.bat', 'start_wpf.bat',
+        'scripts/start-wpf-detached.ps1',
         'scripts/start-aibos-desktop.ps1',
         'scripts/install-aibos-desktop-launcher.ps1',
         'scripts/request-aibos-desktop.ps1', 'scripts/lib/DesktopActivation.ps1'
@@ -180,8 +182,14 @@ try {
     }
     if ([regex]::Matches(
             $wpfLauncher,
-            '(?im)^\s*start\s+""\s+/wait\s+/normal\s+').Count -ne 2) {
-        Add-Finding 'wpf-launch-priority' 'start_wpf.bat' 1 'The production launcher must explicitly start both WPF targets with normal process priority.'
+            '(?im)^\s*powershell\s+.*-File\s+"\.\\scripts\\start-wpf-detached\.ps1"').Count -ne 2) {
+        Add-Finding 'wpf-launch-detachment' 'start_wpf.bat' 1 'Both production targets must use the console-independent launcher.'
+    }
+    $detachedLauncher = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $repoRoot 'scripts/start-wpf-detached.ps1')
+    if ($detachedLauncher -notmatch 'UseShellExecute\s*=\s*\$false' -or
+        $detachedLauncher -notmatch 'CreateNoWindow\s*=\s*\$true' -or
+        $detachedLauncher -notmatch 'ProcessPriorityClass\]::Normal') {
+        Add-Finding 'wpf-launch-isolation' 'scripts/start-wpf-detached.ps1' 1 'The launcher must detach console ownership and set normal process priority.'
     }
 
     $desktopRunner = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $repoRoot 'scripts/start-aibos-desktop.ps1')

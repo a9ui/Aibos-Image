@@ -54,9 +54,9 @@ if "%CHECK_CODE%"=="10" (
 echo [Aibos WPF] Launching with %DOTNET_CMD%...
 echo.
 if exist "%LOCAL_DOTNET10%" (
-    start "" /wait /normal "%DOTNET_CMD%" "%TARGET_DLL%" %*
+    powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\start-wpf-detached.ps1" "%DOTNET_CMD%" "%TARGET_DLL%" %*
 ) else (
-    start "" /wait /normal "%TARGET%" %*
+    powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\start-wpf-detached.ps1" "%TARGET%" %*
 )
 
 :capture_exit_code
