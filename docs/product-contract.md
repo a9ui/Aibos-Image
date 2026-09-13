@@ -466,6 +466,20 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   base fields, which are not parsed as bracket options. Option settings are
   shared by identical bracket text. Compatible unknown members are preserved;
   malformed or future programs fail style validation without rewriting storage.
+- Offline legacy-style note preparation is available through
+  `scripts/prepare-video-style-notes.py`. It writes a new private directory
+  outside the repository containing the exact original bytes, a prepared
+  style-document copy, and a content-free verification report. It never
+  replaces live settings. Only an explicit, recognized Japanese-translation
+  separator splits the original prompt into the unchanged H3 body, separator,
+  and editable description. Their concatenation must exactly reconstruct the
+  original string. A compatible `OriginalStyleText` program extension retains
+  that source text and its SHA-256; unknown settings and numeric values remain
+  unchanged. Existing programs are preserved. Ambiguous separators, duplicate
+  members, unsupported versions, and bounds violations refuse preparation
+  without truncation. Preparation does not infer options, merge named styles,
+  or enable inference. Synthetic coverage is in
+  `scripts/verify-video-style-notes.py`.
 - Manual options take priority over automatic rules. Conditions use bounded,
   case-insensitive literal matching, not executable code or regular expressions.
   Unavailable source metadata uses the option's explicit fallback; it is not
