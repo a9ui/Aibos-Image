@@ -304,6 +304,14 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   retry-all stays disabled whenever history extends beyond the loaded window.
 - Queue ordering, pause, claim, retry, cancellation, and queued-setting updates
   share the locks and idempotency rules in `PV-ENHANCE-QUEUE-001`.
+  Confirmed enqueue and single-row cancellation responses may update validated
+  Jobs rows before passive health and inventory reconciliation completes. A
+  cancellation request for a running job remains running with cancellation
+  pending until a terminal state is confirmed. Saved inbox reservations and
+  incomplete or mismatched responses never fabricate rows or terminal states.
+  Earlier in-flight snapshots cannot overwrite these confirmed changes, and
+  explicit refresh requests received during a read are coalesced for a later
+  snapshot. Database totals remain subject to full-snapshot reconciliation.
   When exact batch reorder is advertised, rapid WPF moves update the complete
   queued presentation immediately and coalesce to the latest full order. The
   companion applies that order in one write only if the queued-id snapshot is
