@@ -10,11 +10,61 @@ public partial class MainWindow
     private long? _enhancementWorkspaceRequestedRefreshGeneration;
     private bool _enhancementWorkspaceReconciliationScheduled;
 
-    // Only explicit, authenticated mutation results enter this path. A saved
-    // inbox reservation is not a Job and must never become a fabricated row.
+    // A receipt acknowledges publication, not the contents or relative order
+    // of its optional row. Read the authoritative inventory without waiting
+    // for health; this also includes queue orders shifted by enqueue-next.
+    private async Task RefreshConfirmedEnhancementEnqueueWorkspaceAsync(
+        IReadOnlyList<EnhancementApiResponse> responses)
+    {
+        EnhancementApiResponse? confirmed = responses.FirstOrDefault(
+            static response => response.Ok && !response.SavedForDelivery);
+        if (confirmed is null)
+            return;
+        long presentationRevision = ++_enhancementWorkspaceQueuePresentationRevision;
+        long generation = _enhancementWorkspaceGeneration;
+        NoteEnhancementWorkspaceMutationDebt(confirmed, null);
+        if (EnhancementJobsDialog.Visibility != Visibility.Visible
+            || _aiProcessingMinimizedMode || Dispatcher.HasShutdownStarted)
+            return;
+        try
+        {
+            _enhancementWorkspaceGetCount++;
+            var (parsed, jobs, _) = await ReadEnhancementWorkspaceInventoryAsync(
+                CancellationToken.None);
+            if (!parsed || generation != _enhancementWorkspaceGeneration
+                || presentationRevision != _enhancementWorkspaceQueuePresentationRevision
+                || _enhancementWorkspaceQueueOrderFlushTask is not null
+                || EnhancementJobsDialog.Visibility != Visibility.Visible
+                || _aiProcessingMinimizedMode || Dispatcher.HasShutdownStarted)
+                return;
+
+            // Also invalidate a full read that started while this read awaited
+            // storage. Its later health response cannot replace this inventory.
+            _enhancementWorkspaceQueuePresentationRevision++;
+            ApplyEnhancementWorkspaceHighlights(jobs);
+            ReconcileEnhancementWorkspaceJobs(jobs);
+            ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
+            RefreshEnhancementQueueBulkControls();
+            EnhancementJobsHeaderSummary.Text = "登録後の一覧を反映しました · 稼働状況を確認しています…";
+        }
+        catch (Exception ex)
+        {
+            // The action is already accepted. A presentation failure must not
+            // turn it into an enqueue retry or discard the current valid rows.
+            AibosOperationLog.Write("jobs_enqueue_reconcile", "failed", 0,
+                mode: ex.GetType().Name);
+        }
+        finally
+        {
+            RequestEnhancementWorkspaceReconciliation();
+        }
+    }
+
+    // Only exact cancellation responses enter this path. Enqueue receipts
+    // instead use the authoritative reader above.
     private async Task ApplyConfirmedEnhancementWorkspaceResponsesAsync(
         IReadOnlyList<EnhancementApiResponse> responses,
-        string? expectedJobId = null)
+        string expectedJobId)
     {
         EnhancementApiResponse[] confirmed = responses
             .Where(static response => response.Ok && !response.SavedForDelivery)
@@ -49,10 +99,9 @@ public partial class MainWindow
                     EnhancementWorkspaceJobView? candidate = ParseEnhancementWorkspaceJob(
                         row, ordinal + parsed.Count, buildRequestDetails: false);
                     if (candidate is null
-                        || expectedJobId is not null
-                            && !string.Equals(candidate.Id, expectedJobId, StringComparison.Ordinal))
+                        || !string.Equals(candidate.Id, expectedJobId, StringComparison.Ordinal))
                         continue;
-                    if (expectedJobId is not null && candidate.IsActive
+                    if (candidate.IsActive
                         && (!HasSingleProperty(row, "cancelRequested")
                             || !row.TryGetProperty("cancelRequested", out JsonElement cancellation)
                             || cancellation.ValueKind != JsonValueKind.True))
@@ -92,6 +141,7 @@ public partial class MainWindow
                 EnhancementWorkspaceJobView existing = updated[index];
                 if (!existing.HasSameImmutableIdentity(candidate)
                     || existing.UpdatedAt > candidate.UpdatedAt
+                    || candidate.IsActive && existing.Status != candidate.Status
                     || !existing.IsActive && candidate.IsActive)
                     continue;
                 updated[index] = candidate;
@@ -99,9 +149,7 @@ public partial class MainWindow
             else
             {
                 // A cancel response must only update its exact existing row.
-                if (expectedJobId is not null)
-                    continue;
-                updated.Add(candidate);
+                continue;
             }
             changed = true;
         }
@@ -173,9 +221,13 @@ public partial class MainWindow
 
     public Task ApplyConfirmedEnhancementResponseForSmokeAsync(
         JsonElement payload, bool savedForDelivery = false, string? expectedJobId = null)
-        => ApplyConfirmedEnhancementWorkspaceResponsesAsync(
-            [new EnhancementApiResponse(true, 200, payload.Clone(), "",
-                SavedForDelivery: savedForDelivery)], expectedJobId);
+    {
+        EnhancementApiResponse[] responses =
+            [new(true, 200, payload.Clone(), "", SavedForDelivery: savedForDelivery)];
+        return expectedJobId is null
+            ? RefreshConfirmedEnhancementEnqueueWorkspaceAsync(responses)
+            : ApplyConfirmedEnhancementWorkspaceResponsesAsync(responses, expectedJobId);
+    }
 
     public async Task WaitForEnhancementReconciliationForSmokeAsync()
     {

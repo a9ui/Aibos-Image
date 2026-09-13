@@ -1783,7 +1783,7 @@ public partial class MainWindow
                 recoverySourceIdentity,
                 item.RequestId, actionEpoch: actionEpoch);
         }
-        await ApplyConfirmedEnhancementWorkspaceResponsesAsync([normalized]);
+        await RefreshConfirmedEnhancementEnqueueWorkspaceAsync([normalized]);
         return normalized;
     }
 
@@ -2126,7 +2126,7 @@ public partial class MainWindow
             }
         }
 
-        await ApplyConfirmedEnhancementWorkspaceResponsesAsync(responses);
+        await RefreshConfirmedEnhancementEnqueueWorkspaceAsync(responses);
         return new DurableEnhancementBatchResponse(
             responses,
             nudgeCount,

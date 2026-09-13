@@ -304,7 +304,10 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   retry-all stays disabled whenever history extends beyond the loaded window.
 - Queue ordering, pause, claim, retry, cancellation, and queued-setting updates
   share the locks and idempotency rules in `PV-ENHANCE-QUEUE-001`.
-  Confirmed enqueue and single-row cancellation responses may update validated
+  Confirmed enqueue receipts trigger an authoritative inventory read without
+  waiting for passive health, including all queue orders shifted by enqueue-next.
+  Optional enqueue response rows are not projected before request-specific
+  validation. Exact single-row cancellation responses may update validated
   Jobs rows before passive health and inventory reconciliation completes. A
   cancellation request for a running job remains running with cancellation
   pending until a terminal state is confirmed. Saved inbox reservations and
