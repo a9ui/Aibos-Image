@@ -145,6 +145,9 @@ public partial class MainWindow
             if (index >= 0)
             {
                 EnhancementWorkspaceJobView existing = updated[index];
+                // A worker may claim a queued job before cancel is handled.
+                // Accept that forward transition with cancellation pending,
+                // but never let a stale response move a running job backward.
                 if (!existing.HasSameImmutableIdentity(candidate)
                     || existing.UpdatedAt > candidate.UpdatedAt
                     || existing.Status == "running" && candidate.Status == "queued"
