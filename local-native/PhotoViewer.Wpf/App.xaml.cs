@@ -22364,7 +22364,25 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool healthRecovered = recoveredHealth.HealthState == "処理中"
                     && recoveredHealth.HealthRevision == "ローカルAI 69684954";
-                bool pauseIssued = await window.SetEnhancementQueuePausedForSmokeAsync(true);
+                healthGetEntered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGateAfterCount = healthGetCount;
+                int inventoriesBeforePause = recoveredHealth.GetRequests;
+                Task<bool> pauseWithHeldHealth = window.SetEnhancementQueuePausedForSmokeAsync(true);
+                await healthGetEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                window.ClickRefreshEnhancementJobsForSmoke();
+                TaskCompletionSource<bool> pauseHealthRelease = healthGetGate;
+                healthGetGate = null;
+                healthGetEntered = null;
+                healthGetGateAfterCount = int.MaxValue;
+                pauseHealthRelease.SetResult(true);
+                bool pauseIssued = await pauseWithHeldHealth;
+                await window.WaitForEnhancementReconciliationForSmokeAsync();
+                bool refreshDuringMutationDrained =
+                    window.EnhancementJobsWorkspaceForSmoke().GetRequests
+                        == inventoriesBeforePause + 2;
                 EnhancementJobsWorkspaceSmokeSnapshot pausedQueue =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool pauseCurrentContinues = pauseIssued
@@ -23256,6 +23274,23 @@ public partial class App : Application
                 bool activeCancelStatusRegressionRejected =
                     window.EnhancementJobViewIdentityForSmoke("active-job")
                         is EnhancementWorkspaceJobView { Status: "running", CancelRequested: true, Progress: 43 };
+
+                JsonElement queuedBeforeClaim = CurrentJobs()
+                    .Select(job => JsonSerializer.SerializeToElement(job))
+                    .Single(job => job.GetProperty("id").GetString() == "confirmed-response-job");
+                Dictionary<string, JsonElement> claimedCancellation = JsonSerializer.Deserialize<
+                    Dictionary<string, JsonElement>>(queuedBeforeClaim.GetRawText())!;
+                claimedCancellation["status"] = JsonSerializer.SerializeToElement("running");
+                claimedCancellation["cancelRequested"] = JsonSerializer.SerializeToElement(true);
+                claimedCancellation["progress"] = JsonSerializer.SerializeToElement(11);
+                claimedCancellation["updatedAt"] = JsonSerializer.SerializeToElement("2026-07-23T00:01:01.000Z");
+                await window.ApplyConfirmedEnhancementResponseForSmokeAsync(
+                    JsonSerializer.SerializeToElement(new { job = claimedCancellation }),
+                    expectedJobId: "confirmed-response-job");
+                bool queuedCancelClaimRaceReflected =
+                    window.EnhancementJobViewIdentityForSmoke("confirmed-response-job")
+                        is EnhancementWorkspaceJobView
+                        { Status: "running", CancelRequested: true, CanCancel: false, Progress: 11 };
 
                 includeConfirmedEnqueue = false;
                 activeCancelPendingJobReads = 0;
@@ -24354,9 +24389,11 @@ public partial class App : Application
                     && enqueueInventoryVisibleBeforeHealth
                     && enqueueNextInventoryOrderPreserved
                     && activeCancelStatusRegressionRejected
+                    && queuedCancelClaimRaceReflected
                     && unconfirmedResponsesNotProjected
                     && incompleteCancelResponsesPreserved
                     && refreshClickDuringHealthPollDrained
+                    && refreshDuringMutationDrained
                     && responseRefreshRequestDrained
                     && legacyPromptUpdateCapabilitySafe
                     && legacyPauseCapabilitySafe
@@ -24528,9 +24565,11 @@ public partial class App : Application
                     enqueueInventoryVisibleBeforeHealth,
                     enqueueNextInventoryOrderPreserved,
                     activeCancelStatusRegressionRejected,
+                    queuedCancelClaimRaceReflected,
                     unconfirmedResponsesNotProjected,
                     incompleteCancelResponsesPreserved,
                     refreshClickDuringHealthPollDrained,
+                    refreshDuringMutationDrained,
                     responseRefreshRequestDrained,
                     afterHealthInventoryRaceReconcile,
                     legacyPromptUpdateCapabilitySafe,

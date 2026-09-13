@@ -1863,9 +1863,7 @@ public partial class MainWindow
             if (!canReuseCachedInventory)
                 ApplyEnhancementQueueHealthUnavailable("処理待ち列の状態を確認しています…");
             EnhancementJobsEmptyText.Visibility = Visibility.Collapsed;
-            if (_enhancementWorkspaceJobs.Count > 0)
-                ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
-            else if (!restoreReturnViewport && !canReuseCachedInventory)
+            if (!restoreReturnViewport && !canReuseCachedInventory)
                 EnhancementJobsList.ItemsSource = null;
             long generation = ++_enhancementWorkspaceGeneration;
             _ = Dispatcher.BeginInvoke(
@@ -2159,7 +2157,7 @@ public partial class MainWindow
         }
         finally
         {
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             EnhancementJobsRefreshButton.IsEnabled = !_enhancementWorkspaceRefreshPending;
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
@@ -5569,7 +5567,7 @@ public partial class MainWindow
         finally
         {
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -5592,7 +5590,7 @@ public partial class MainWindow
         {
             if (startsFlush)
             {
-                _enhancementWorkspaceMutationPending = false;
+                CompleteEnhancementWorkspaceMutation();
                 _enhancementWorkspaceConfirmedQueueOrder = null;
             }
             return false;
@@ -5784,7 +5782,7 @@ public partial class MainWindow
             _enhancementWorkspacePendingQueueOrder = null;
             _enhancementWorkspaceConfirmedQueueOrder = null;
             _enhancementWorkspaceQueueOrderFlushTask = null;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -6087,7 +6085,7 @@ public partial class MainWindow
         }
         finally
         {
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -6228,7 +6226,7 @@ public partial class MainWindow
                 optimisticJobIds,
                 optimisticVisibleJobs,
                 revealRows: true);
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -6444,7 +6442,7 @@ public partial class MainWindow
                 optimisticJobIds,
                 optimisticVisibleJobs,
                 revealRows: removeOriginalAfterSuccess);
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -6677,7 +6675,7 @@ public partial class MainWindow
                 optimisticJobIds,
                 optimisticVisibleJobs,
                 revealRows: true);
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -6925,7 +6923,7 @@ public partial class MainWindow
                 optimisticJobIds,
                 optimisticVisibleJobs,
                 revealRows: true);
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
@@ -7330,7 +7328,7 @@ public partial class MainWindow
         finally
         {
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -8029,7 +8027,7 @@ public partial class MainWindow
                     pendingDeliveryRequestId);
             }
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -8295,7 +8293,7 @@ public partial class MainWindow
         finally
         {
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }
@@ -8757,9 +8755,8 @@ public partial class MainWindow
                 optimisticVisibleJobs,
                 revealRows: true);
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
-            ScheduleRequestedEnhancementWorkspaceReconciliation();
         }
     }
 
@@ -9542,7 +9539,7 @@ public partial class MainWindow
         finally
         {
             job.IsBusy = false;
-            _enhancementWorkspaceMutationPending = false;
+            CompleteEnhancementWorkspaceMutation();
             RefreshEnhancementQueueBulkControls();
         }
     }

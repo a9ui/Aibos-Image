@@ -10,6 +10,12 @@ public partial class MainWindow
     private long? _enhancementWorkspaceRequestedRefreshGeneration;
     private bool _enhancementWorkspaceReconciliationScheduled;
 
+    private void CompleteEnhancementWorkspaceMutation()
+    {
+        _enhancementWorkspaceMutationPending = false;
+        ScheduleRequestedEnhancementWorkspaceReconciliation();
+    }
+
     // A receipt acknowledges publication, not the contents or relative order
     // of its optional row. Read the authoritative inventory without waiting
     // for health; this also includes queue orders shifted by enqueue-next.
@@ -141,7 +147,7 @@ public partial class MainWindow
                 EnhancementWorkspaceJobView existing = updated[index];
                 if (!existing.HasSameImmutableIdentity(candidate)
                     || existing.UpdatedAt > candidate.UpdatedAt
-                    || candidate.IsActive && existing.Status != candidate.Status
+                    || existing.Status == "running" && candidate.Status == "queued"
                     || !existing.IsActive && candidate.IsActive)
                     continue;
                 updated[index] = candidate;
