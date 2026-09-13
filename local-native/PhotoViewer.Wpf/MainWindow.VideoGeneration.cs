@@ -1981,6 +1981,7 @@ public partial class MainWindow
 
         _selectedVideoStyleName = style.Name;
         _selectedVideoPromptTemplateId = CustomVideoPromptTemplateId;
+        RestoreVideoPromptProgram(style.InstructionProgram);
         RestoreVideoGenerationSettings(
             style.DurationSeconds,
             style.PlaybackFps,
@@ -2154,6 +2155,8 @@ public partial class MainWindow
             StringComparer.CurrentCultureIgnoreCase.Compare(left.Name, right.Name));
 
         VideoStyleState? selected = FindVideoStyle(selectedStyleName);
+        if (selected is not null)
+            RestoreVideoPromptProgram(selected.InstructionProgram);
         _selectedVideoStyleName = selected is not null && VideoStyleMatchesCurrent(selected)
             ? selected.Name
             : null;
@@ -2163,6 +2166,9 @@ public partial class MainWindow
     private static VideoStyleState? NormalizeVideoStyle(VideoStyleState? candidate)
     {
         if (candidate is null)
+            return null;
+
+        if (!VideoPromptProgram.TryRead(candidate.InstructionProgram, out _))
             return null;
 
         string name = candidate.Name?.Trim() ?? "";
@@ -2204,6 +2210,7 @@ public partial class MainWindow
                     ? steps
                     : MiniMaxH3VideoSteps,
             Prompt = prompt,
+            InstructionProgram = candidate.InstructionProgram?.Clone(),
             ExtensionData = CloneExtensionData(candidate.ExtensionData),
         };
     }
@@ -2223,6 +2230,7 @@ public partial class MainWindow
             MaximumPixelArea = _videoMaximumPixelArea,
             Steps = _videoSteps,
             Prompt = _videoPrompt,
+            InstructionProgram = _videoPromptProgram.Snapshot(),
         };
 
     private VideoStyleState? FindVideoStyle(string? name)
@@ -2338,6 +2346,7 @@ public partial class MainWindow
                 MaximumPixelArea = style.MaximumPixelArea,
                 Steps = style.Steps,
                 Prompt = style.Prompt,
+                InstructionProgram = style.InstructionProgram?.Clone(),
                 ExtensionData = CloneExtensionData(style.ExtensionData),
             }).ToList();
 
@@ -2644,6 +2653,12 @@ public partial class MainWindow
         if (_videoGenerationRequestPending)
             return false;
 
+        if (ValidateVideoProgramForEnqueue() is string programError)
+        {
+            SetVideoGenerationSettingsStatus(programError);
+            return false;
+        }
+
         if (!TryRevalidateCapturedVideoSource(
                 out VideoSourceChoice source,
                 out string sourceError))
@@ -2674,6 +2689,7 @@ public partial class MainWindow
 
         VideoGenerationRequestSettings settings =
             CurrentVideoGenerationRequestSettings();
+        string? capturedProgramContext = _videoPromptProgram.Enabled ? VideoProgramContext() : null;
         _videoGenerationRequestPending = true;
         string? pendingDeliveryRequestId = null;
         UpdateVideoGenerationActionControls();
@@ -2740,7 +2756,8 @@ public partial class MainWindow
                 requireExactHealthValidation: h3Selected,
                 recoverySourceIdentity: source.SourceIdentity,
                 prePublishValidator: () =>
-                    ValidateVideoSourceImmediatelyBeforePublish(
+                    ValidateCapturedVideoProgram(capturedProgramContext, settings.Prompt)
+                    ?? ValidateVideoSourceImmediatelyBeforePublish(
                         capturedSourceTile,
                         source,
                         sourceStamp,
@@ -2772,6 +2789,7 @@ public partial class MainWindow
                 SetTransientStatusToast(
                     $"{Path.GetFileName(source.SourceIdentity)}: 動画化の予約を保存しました。登録を継続しています。");
                 ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
+                ResetVideoProgramOverrideAfterEnqueue();
                 return true;
             }
             if (!response.Ok
@@ -2815,6 +2833,7 @@ public partial class MainWindow
             }
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
             QueueEnhancedStateRefreshIfChanged();
+            ResetVideoProgramOverrideAfterEnqueue();
             return true;
         }
         finally

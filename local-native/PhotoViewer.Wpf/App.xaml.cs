@@ -500,6 +500,13 @@ public partial class App : Application
             return;
         }
 
+        int videoPromptProgramSmokeIdx = Array.IndexOf(e.Args, "--video-prompt-program-smoke");
+        if (videoPromptProgramSmokeIdx >= 0 && videoPromptProgramSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoPromptProgramSmoke(e.Args[videoPromptProgramSmokeIdx + 1]);
+            return;
+        }
+
         int videoToolsSmokeIdx = Array.IndexOf(
             e.Args,
             "--video-tools-smoke");

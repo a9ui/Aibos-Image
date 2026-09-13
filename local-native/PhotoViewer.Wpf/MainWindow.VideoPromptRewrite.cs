@@ -72,7 +72,7 @@ public partial class MainWindow
             return;
         }
 
-        await RewriteVideoPromptForH3Async();
+        await RewriteVideoPromptProgramAsync();
     }
 
     private void VideoH3RewriteMode_SelectionChanged(
@@ -142,7 +142,7 @@ public partial class MainWindow
         return true;
     }
 
-    private async Task<bool> RewriteVideoPromptForH3Async()
+    private async Task<bool> RewriteVideoPromptForH3Async(string? authoringInstruction = null)
     {
         if (_videoH3RewritePending || !IsMiniMaxH3VideoModel(_videoModelId))
             return false;
@@ -174,8 +174,8 @@ public partial class MainWindow
         VideoH3PromptRewriteMode baseMode = _videoH3RewriteMode;
         long baseContextRevision = _videoH3RewriteContextRevision;
         if (!TryBuildVideoH3RewriteRequestPrompt(
-                basePrompt,
-                baseMode,
+                authoringInstruction ?? basePrompt,
+                authoringInstruction is null ? baseMode : VideoH3PromptRewriteMode.Polish,
                 out string requestPrompt))
         {
             SetVideoH3PromptRewriteStatus(VideoH3Localized(
@@ -435,6 +435,8 @@ public partial class MainWindow
         SetVideoH3PromptRewriteStatus(VideoH3Localized(
             "UiVideoH3StatusApplied",
             "候補を入力プロンプトへ反映しました。動画化はまだ開始していません。"));
+        RecordAppliedVideoProgram();
+        RefreshVideoH3PromptRewriteControls(updateStatus: false);
         return true;
     }
 
@@ -598,7 +600,7 @@ public partial class MainWindow
             rewriteButtonHelp);
         ModalVideoH3RewritePromptButton.ToolTip = rewriteButtonHelp;
         ModalVideoH3RewriteModeComboBox.IsEnabled = h3Selected
-            && !_videoH3RewritePending;
+            && !_videoH3RewritePending && !_videoPromptProgram.Enabled;
         ModalVideoH3PromptCandidateTextBox.IsEnabled = h3Selected
             && !_videoH3RewritePending
             && !string.IsNullOrEmpty(_videoH3PromptCandidate);
@@ -658,6 +660,8 @@ public partial class MainWindow
 
     private bool CanApplyVideoH3PromptCandidate(bool? knownFresh = null)
     {
+        if (!VideoProgramCandidateCanApply())
+            return false;
         if (!IsMiniMaxH3VideoModel(_videoModelId)
             || _videoH3RewritePending
             || !(knownFresh ?? IsVideoH3PromptCandidateFresh())
@@ -671,7 +675,8 @@ public partial class MainWindow
         return !string.Equals(
             _videoPrompt,
             normalizedCandidate,
-            StringComparison.Ordinal);
+            StringComparison.Ordinal)
+            || (_videoPromptProgram.Enabled && _videoProgramAppliedContext != VideoProgramContext());
     }
 
     private bool CanUndoAppliedVideoH3Prompt()

@@ -450,12 +450,46 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   style, or mode context disable Apply without repairing the candidate. The
   guide revision and diagnostic evidence are defined by
   `PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001`.
-- Motion Director is a deterministic, WPF-local planning surface for MiniMax
-  H3. It compiles bounded action, camera, and frame-timeline choices into a
-  transient prompt candidate. Opening it, changing its controls, or building a
-  candidate creates no Job and publishes no durable reservation. Only the
-  existing explicit Apply action changes the video prompt; video generation
-  still requires its separate explicit enqueue action.
+- Motion Director's standalone controls are retired from the visible H3 board.
+  Its deterministic planner remains an isolated regression seam. Gaze,
+  expression, action, and camera choices now belong to inline square-bracket
+  options in the unified instruction editor. Camera choices include orbit,
+  tracking, push/pull, pan, restrained handheld, and first-person head motion.
+  Candidate generation and Apply remain distinct from explicit video enqueue.
+- Video instruction programs are optional WPF-local style authoring data,
+  stored separately from the resolved H3 generation prompt. Version 1 supports
+  manual square-bracket options, source-prompt conditions, brace alternatives,
+  independent image-assisted selection and action planning, editable description,
+  action examples, and conservative physical-continuity instructions. Opening
+  the editor or changing an option never invokes inference or queues work.
+  Existing H3 style text can be copied into separate Original and photoreal
+  base fields, which are not parsed as bracket options. Option settings are
+  shared by identical bracket text. Compatible unknown members are preserved;
+  malformed or future programs fail style validation without rewriting storage.
+- Manual options take priority over automatic rules. Conditions use bounded,
+  case-insensitive literal matching, not executable code or regular expressions.
+  Unavailable source metadata uses the option's explicit fallback; it is not
+  evidence of absence. Description and LoRA notes never reach the model.
+  Only explicit candidate preparation rereads the original PNG metadata, with
+  cancellation, a bounded reader, and a source-file change check.
+- Original inputs use the style's configurable default (initially anime).
+  Proven Photorealized outputs use the photoreal variant; an empty variant
+  shares the Original template. A manual source-kind override is transient,
+  scoped to the captured source and cleared after successful enqueue. It is
+  never written to the source image or remembered as an image classification.
+- The explicit H3 candidate action expands a program before calling the
+  existing authenticated rewrite route. Authoring syntax is distinct from H3
+  reference syntax: unescaped H3 reference labels in authoring text are errors.
+  The candidate must pass the existing H3 checks and match the program, source,
+  source metadata, model, and duration before Apply and enqueue. A change while
+  preparing enqueue fails before durable publication. Jobs retain the resolved
+  prompt under the existing video protocol, not executable authoring syntax.
+- Physical continuity is optional prompt guidance, not a physics simulation or
+  a quality guarantee. It preserves support and attachment constraints, adds no
+  unrequested release, and does not infer velocity from an ambiguous still.
+  Style LoRA IDs are notes only until a separately verified runtime capability
+  and versioned protocol support application. Automatic translation is not
+  connected; the separate description remains manually editable.
 - Video Tools version 1 keeps `operation=video` and selects one succeeded,
   exact managed video by producer Job id. A client path is never source
   authority. Retake accepts a half-open frame selection on an exact 24 fps H3

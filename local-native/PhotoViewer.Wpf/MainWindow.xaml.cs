@@ -12019,7 +12019,11 @@ public partial class MainWindow : Window
     }
 
     private static PngParametersMetadata? ReadPngParametersMetadata(string path, CancellationToken token)
+        => ReadPngParametersMetadata(path, token, out _);
+
+    private static PngParametersMetadata? ReadPngParametersMetadata(string path, CancellationToken token, out bool promptKnown)
     {
+        promptKnown = false;
         if (!string.Equals(Path.GetExtension(path), ".png", StringComparison.OrdinalIgnoreCase))
             return null;
 
@@ -12048,6 +12052,8 @@ public partial class MainWindow : Window
                 string type = Encoding.ASCII.GetString(chunkHeader, 4, 4);
                 if (string.Equals(type, "IDAT", StringComparison.Ordinal))
                 {
+                    promptKnown = (parametersChunkSeen ? parametersMetadata : comfyPromptFallback) is not null
+                        || (!parametersChunkSeen && !comfyPromptChunkSeen);
                     return parametersChunkSeen
                         ? parametersMetadata
                         : comfyPromptFallback;
@@ -32916,6 +32922,8 @@ public sealed class VideoStyleState
     public int MaximumPixelArea { get; set; }
     public int? Steps { get; set; }
     public string Prompt { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? InstructionProgram { get; set; }
     [System.Text.Json.Serialization.JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }

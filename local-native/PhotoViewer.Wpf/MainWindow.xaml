@@ -2828,6 +2828,9 @@
                         AutomationProperties.Name="Reset default video generation settings"/>
                 <TextBlock Text="Default prompt" Foreground="{StaticResource TextSecondary}" FontSize="10.5" VerticalAlignment="Center"/>
               </DockPanel>
+              <Button Content="指示言語・日本語説明を編集" Style="{StaticResource GhostButton}"
+                      Click="OpenVideoPromptProgram_Click" HorizontalAlignment="Left" Margin="0,0,0,6"
+                      AutomationProperties.Name="Edit default video instruction program"/>
               <Grid>
                 <TextBox x:Name="AppVideoPromptTextBox"
                          MinHeight="78" MaxHeight="480" MaxLength="8000"
@@ -4144,6 +4147,9 @@
                       AutomationProperties.Name="Reset video generation settings"/>
               <TextBlock Text="Prompt" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
             </DockPanel>
+            <Button Content="指示言語・日本語説明を編集" Style="{StaticResource GhostButton}"
+                    Click="OpenVideoPromptProgram_Click" HorizontalAlignment="Left" Margin="0,0,0,6"
+                    AutomationProperties.Name="Edit video instruction program"/>
             <Grid>
               <TextBox x:Name="ModalVideoPromptTextBox"
                        MinHeight="92" MaxHeight="480" MaxLength="8000"
@@ -4176,8 +4182,11 @@
                     Visibility="Collapsed" Margin="0,10,0,0" Padding="10"
                     CornerRadius="5" Background="{StaticResource SoftFill}"
                     BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
-                    AutomationProperties.Name="{DynamicResource UiMotionDirectorPanelAutomation}">
+                    AutomationProperties.Name="H3 prompt candidate">
               <StackPanel>
+                <!-- Retained as a deterministic regression seam. Production
+                     authoring now uses inline options in the unified editor. -->
+                <StackPanel x:Name="LegacyMotionDirectorPanel" Visibility="Collapsed">
                 <DockPanel LastChildFill="True" Margin="0,0,0,5">
                   <Button x:Name="ModalMotionDirectorBuildButton"
                           DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}"
@@ -4282,6 +4291,7 @@
                            FontSize="10" TextWrapping="Wrap" Margin="0,0,0,5"
                            AutomationProperties.LiveSetting="Polite"/>
                 <Border Height="1" Background="{StaticResource BorderStrong}" Margin="0,3,0,7"/>
+                </StackPanel>
                 <DockPanel LastChildFill="True" Margin="0,0,0,5">
                   <Button x:Name="ModalVideoH3RewritePromptButton"
                           DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
