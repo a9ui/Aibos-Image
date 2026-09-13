@@ -20378,6 +20378,7 @@ public partial class App : Application
                 bool outputDeleted = false;
                 bool videoOutputDeleted = false;
                 bool reverseJobsForReturn = false;
+                bool includeConfirmedEnqueue = false;
                 string healthMode = "available";
                 string? healthLastClaimAt = null;
                 string? healthLastTerminalAt = null;
@@ -20633,7 +20634,7 @@ public partial class App : Application
                             terminalHandoff
                                 ? "succeeded"
                                 : activeCanceled ? "canceled" : "running",
-                            terminalHandoff ? 100 : activeCanceled ? 43 : 42,
+                            terminalHandoff ? 100 : activeCancelRequested ? 43 : 42,
                             output: terminalHandoff ? videoOutputPath : null,
                             cancelRequested: activeCancelRequested,
                             createdAt: "2026-07-23T00:00:01.000Z",
@@ -20830,6 +20831,25 @@ public partial class App : Application
                             JsonSerializer.Serialize(job).Contains(
                                 $"\"id\":\"{id}\"",
                                 StringComparison.Ordinal)));
+                    }
+                    if (includeConfirmedEnqueue)
+                    {
+                        // Model the atomic enqueue-next store update, including
+                        // the old queue head moving from position zero to one.
+                        jobs = jobs.Select(job =>
+                        {
+                            Dictionary<string, JsonElement> row = JsonSerializer.Deserialize<
+                                Dictionary<string, JsonElement>>(JsonSerializer.Serialize(job))!;
+                            if (row["status"].GetString() == "queued"
+                                && row.TryGetValue("queueOrder", out JsonElement order)
+                                && order.ValueKind == JsonValueKind.Number
+                                && order.TryGetInt32(out int position))
+                                row["queueOrder"] = JsonSerializer.SerializeToElement(position + 1);
+                            return (object)row;
+                        }).ToList();
+                        jobs.Add(Job("confirmed-response-job", "queued", 0,
+                            operation: "photoreal", queueOrder: 0,
+                            createdAt: "2026-07-23T00:01:00.000Z"));
                     }
                     if (reverseJobsForReturn)
                         jobs.Reverse();
@@ -21183,6 +21203,8 @@ public partial class App : Application
 
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
+                window.ShowActivated = false;
+                window.ShowInTaskbar = false;
                 bool mutationRefreshDebtContract =
                     window.EnhancementWorkspaceMutationDebtContractForSmoke();
                 window.ConfigureEnhancementJobsBulkConfirmationForSmoke(
@@ -21248,7 +21270,8 @@ public partial class App : Application
                                     "active-job",
                                     "running",
                                     43,
-                                    cancelRequested: true),
+                                    cancelRequested: true,
+                                    createdAt: "2026-07-23T00:00:01.000Z"),
                             }));
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/failed-cancel-job/cancel", StringComparison.Ordinal))
@@ -21986,6 +22009,30 @@ public partial class App : Application
                     && afterHealthOnlyPoll.PollRequests
                         == afterInvalidRecovery.PollRequests + 1
                     && afterHealthOnlyPoll.Total == afterInvalidRecovery.Total;
+                healthGetEntered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGateAfterCount = healthGetCount;
+                Task heldManualRefreshPoll = window.PollEnhancementJobsForSmokeAsync();
+                await healthGetEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                window.ClickRefreshEnhancementJobsForSmoke();
+                window.ClickRefreshEnhancementJobsForSmoke();
+                bool refreshClickDuringHealthPollDrained =
+                    !heldManualRefreshPoll.IsCompleted
+                    && window.EnhancementJobsWorkspaceForSmoke().GetRequests
+                        == afterHealthOnlyPoll.GetRequests;
+                TaskCompletionSource<bool> manualRefreshHealthRelease = healthGetGate;
+                healthGetGate = null;
+                healthGetEntered = null;
+                healthGetGateAfterCount = int.MaxValue;
+                manualRefreshHealthRelease.SetResult(true);
+                await heldManualRefreshPoll;
+                await window.WaitForEnhancementReconciliationForSmokeAsync();
+                refreshClickDuringHealthPollDrained &=
+                    window.EnhancementJobsWorkspaceForSmoke().GetRequests
+                        == afterHealthOnlyPoll.GetRequests + 1;
+                afterHealthOnlyPoll = window.EnhancementJobsWorkspaceForSmoke();
                 queueOrderRevision++;
                 await window.PollEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot
@@ -22317,7 +22364,25 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool healthRecovered = recoveredHealth.HealthState == "処理中"
                     && recoveredHealth.HealthRevision == "ローカルAI 69684954";
-                bool pauseIssued = await window.SetEnhancementQueuePausedForSmokeAsync(true);
+                healthGetEntered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGateAfterCount = healthGetCount;
+                int inventoriesBeforePause = recoveredHealth.GetRequests;
+                Task<bool> pauseWithHeldHealth = window.SetEnhancementQueuePausedForSmokeAsync(true);
+                await healthGetEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                window.ClickRefreshEnhancementJobsForSmoke();
+                TaskCompletionSource<bool> pauseHealthRelease = healthGetGate;
+                healthGetGate = null;
+                healthGetEntered = null;
+                healthGetGateAfterCount = int.MaxValue;
+                pauseHealthRelease.SetResult(true);
+                bool pauseIssued = await pauseWithHeldHealth;
+                await window.WaitForEnhancementReconciliationForSmokeAsync();
+                bool refreshDuringMutationDrained =
+                    window.EnhancementJobsWorkspaceForSmoke().GetRequests
+                        == inventoriesBeforePause + 2;
                 EnhancementJobsWorkspaceSmokeSnapshot pausedQueue =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool pauseCurrentContinues = pauseIssued
@@ -23087,7 +23152,26 @@ public partial class App : Application
                             StringComparer.Ordinal)
                     && queuedOrderBatchBodies.Count
                         == queuedOrderBatchesBeforeHealthRace + 1;
-                bool cancelIssued = await window.CancelEnhancementJobForSmokeAsync("active-job");
+                var healthAfterInventoryReorderEvidence = new
+                {
+                    movesDuringHealthAfterInventory,
+                    beforeReleaseIds = afterMovesDuringHealthAfterInventory.VisibleIds.Take(4).ToArray(),
+                    afterReleaseIds = afterHealthAfterInventoryRace.VisibleIds.Take(4).ToArray(),
+                    batchCountDelta = queuedOrderBatchBodies.Count - queuedOrderBatchesBeforeHealthRace,
+                };
+                // Hold health indefinitely: confirmed row changes and a second
+                // action must finish without waiting for the inventory refresh.
+                healthGetEntered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGateAfterCount = healthGetCount;
+                Task heldActionHealthRefresh = window.RefreshEnhancementJobsForSmokeAsync();
+                await healthGetEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                int inventoriesBeforeConfirmedResponses =
+                    window.EnhancementJobsWorkspaceForSmoke().GetRequests;
+                bool cancelIssued = await window.CancelEnhancementJobForSmokeAsync("active-job", waitForRefresh: false)
+                    .WaitAsync(TimeSpan.FromSeconds(3));
                 EnhancementJobsWorkspaceSmokeSnapshot afterCancel = window.EnhancementJobsWorkspaceForSmoke();
                 var cancelPendingVideoView =
                     window.EnhancementJobViewIdentityForSmoke("active-job")
@@ -23099,6 +23183,127 @@ public partial class App : Application
                         CancelRequested: true,
                         CanCancel: false,
                     };
+                bool failedCancelIssued = await window.CancelEnhancementJobForSmokeAsync("failed-cancel-job", waitForRefresh: false)
+                    .WaitAsync(TimeSpan.FromSeconds(3));
+                bool cancelResponseVisibleBeforeHealth = videoCancelPendingSafe
+                    && failedCancelIssued
+                    && window.EnhancementJobViewIdentityForSmoke("failed-cancel-job")
+                        is EnhancementWorkspaceJobView { Status: "canceled", IsBusy: false }
+                    && !heldActionHealthRefresh.IsCompleted;
+
+                JsonElement confirmedEnqueue = JsonSerializer.SerializeToElement(new
+                {
+                    // A mismatched optional receipt row must not be projected.
+                    job = Job("mismatched-receipt-job", "queued", 0, operation: "upscale"),
+                });
+                includeConfirmedEnqueue = true;
+                activeCancelPendingJobReads = 100;
+                await window.ApplyConfirmedEnhancementResponseForSmokeAsync(confirmedEnqueue)
+                    .WaitAsync(TimeSpan.FromSeconds(3));
+                bool enqueueInventoryVisibleBeforeHealth =
+                    window.EnhancementJobsWorkspaceForSmoke().VisibleIds.Contains(
+                        "confirmed-response-job", StringComparer.Ordinal)
+                    && window.EnhancementJobViewIdentityForSmoke("mismatched-receipt-job") is null
+                    && window.EnhancementJobsWorkspaceForSmoke().GetRequests
+                        == inventoriesBeforeConfirmedResponses + 1
+                    && !heldActionHealthRefresh.IsCompleted;
+                bool enqueueNextInventoryOrderPreserved =
+                    window.EnhancementJobsWorkspaceForSmoke().VisibleIds.Take(2)
+                        .SequenceEqual(["active-job", "confirmed-response-job"], StringComparer.Ordinal);
+                await window.ApplyConfirmedEnhancementResponseForSmokeAsync(
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        job = Job("saved-reservation-only", "queued", 0, operation: "photoreal"),
+                    }), savedForDelivery: true);
+                await window.ApplyConfirmedEnhancementResponseForSmokeAsync(
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        job = Job("wrong-cancel-response-id", "canceled", 0, operation: "photoreal"),
+                    }), expectedJobId: "active-job");
+                await window.ApplyConfirmedEnhancementResponseForSmokeAsync(
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        // The same ID with a different creation identity is not
+                        // permission to replace the displayed executable row.
+                        job = VideoJob("active-job", "canceled", 43),
+                    }), expectedJobId: "active-job");
+                bool unconfirmedResponsesNotProjected =
+                    window.EnhancementJobViewIdentityForSmoke("saved-reservation-only") is null
+                    && window.EnhancementJobViewIdentityForSmoke("wrong-cancel-response-id") is null
+                    && window.EnhancementJobViewIdentityForSmoke("active-job")
+                        is EnhancementWorkspaceJobView { Status: "running", CancelRequested: true };
+
+                string cancellationResponseJson = JsonSerializer.Serialize(new
+                {
+                    job = VideoJob("active-job", "running", 17,
+                        cancelRequested: true, createdAt: "2026-07-23T00:00:01.000Z"),
+                });
+                const string cancellationField = "\"cancelRequested\":true,";
+                bool incompleteCancelResponsesPreserved = cancellationResponseJson.Contains(
+                    cancellationField, StringComparison.Ordinal);
+                foreach (string replacement in new[]
+                {
+                    "",
+                    "\"cancelRequested\":false,",
+                    "\"cancelRequested\":null,",
+                    "\"cancelRequested\":\"true\",",
+                    "\"cancelRequested\":1,",
+                    "\"cancelRequested\":true,\"cancelRequested\":true,",
+                })
+                {
+                    using JsonDocument incompleteCancellation = JsonDocument.Parse(
+                        cancellationResponseJson.Replace(
+                            cancellationField, replacement, StringComparison.Ordinal));
+                    await window.ApplyConfirmedEnhancementResponseForSmokeAsync(
+                        incompleteCancellation.RootElement, expectedJobId: "active-job");
+                    incompleteCancelResponsesPreserved &=
+                        window.EnhancementJobViewIdentityForSmoke("active-job")
+                            is EnhancementWorkspaceJobView
+                            {
+                                Status: "running", CancelRequested: true,
+                                CanCancel: false, Progress: 43,
+                            };
+                }
+
+                await window.ApplyConfirmedEnhancementResponseForSmokeAsync(
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        job = VideoJob("active-job", "queued", 17,
+                            cancelRequested: true, createdAt: "2026-07-23T00:00:01.000Z"),
+                    }), expectedJobId: "active-job");
+                bool activeCancelStatusRegressionRejected =
+                    window.EnhancementJobViewIdentityForSmoke("active-job")
+                        is EnhancementWorkspaceJobView { Status: "running", CancelRequested: true, Progress: 43 };
+
+                JsonElement queuedBeforeClaim = CurrentJobs()
+                    .Select(job => JsonSerializer.SerializeToElement(job))
+                    .Single(job => job.GetProperty("id").GetString() == "confirmed-response-job");
+                Dictionary<string, JsonElement> claimedCancellation = JsonSerializer.Deserialize<
+                    Dictionary<string, JsonElement>>(queuedBeforeClaim.GetRawText())!;
+                claimedCancellation["status"] = JsonSerializer.SerializeToElement("running");
+                claimedCancellation["cancelRequested"] = JsonSerializer.SerializeToElement(true);
+                claimedCancellation["progress"] = JsonSerializer.SerializeToElement(11);
+                claimedCancellation["updatedAt"] = JsonSerializer.SerializeToElement("2026-07-23T00:01:01.000Z");
+                await window.ApplyConfirmedEnhancementResponseForSmokeAsync(
+                    JsonSerializer.SerializeToElement(new { job = claimedCancellation }),
+                    expectedJobId: "confirmed-response-job");
+                bool queuedCancelClaimRaceReflected =
+                    window.EnhancementJobViewIdentityForSmoke("confirmed-response-job")
+                        is EnhancementWorkspaceJobView
+                        { Status: "running", CancelRequested: true, CanCancel: false, Progress: 11 };
+
+                includeConfirmedEnqueue = false;
+                activeCancelPendingJobReads = 0;
+                TaskCompletionSource<bool> heldHealthRelease = healthGetGate;
+                healthGetGate = null;
+                healthGetEntered = null;
+                heldHealthRelease.SetResult(true);
+                await heldActionHealthRefresh;
+                await window.WaitForEnhancementReconciliationForSmokeAsync();
+                bool responseRefreshRequestDrained =
+                    window.EnhancementJobsWorkspaceForSmoke().GetRequests
+                        > inventoriesBeforeConfirmedResponses
+                    && window.EnhancementJobViewIdentityForSmoke("confirmed-response-job") is null;
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterVideoCancelSettled =
                     window.EnhancementJobsWorkspaceForSmoke();
@@ -23114,7 +23319,6 @@ public partial class App : Application
                     && !canceledVideoView.DetailText.Contains(
                         "Waiting for the exact GPU prompt",
                         StringComparison.Ordinal);
-                bool failedCancelIssued = await window.CancelEnhancementJobForSmokeAsync("failed-cancel-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterFailedCancel = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("canceled");
                 EnhancementJobsWorkspaceSmokeSnapshot canceledAfterActions =
@@ -24181,6 +24385,16 @@ public partial class App : Application
                     && catalogRevisionTerminalHandoffRefreshBounded
                     && healthSignatureNeverBoundToStaleInventory
                     && mutationRefreshDebtContract
+                    && cancelResponseVisibleBeforeHealth
+                    && enqueueInventoryVisibleBeforeHealth
+                    && enqueueNextInventoryOrderPreserved
+                    && activeCancelStatusRegressionRejected
+                    && queuedCancelClaimRaceReflected
+                    && unconfirmedResponsesNotProjected
+                    && incompleteCancelResponsesPreserved
+                    && refreshClickDuringHealthPollDrained
+                    && refreshDuringMutationDrained
+                    && responseRefreshRequestDrained
                     && legacyPromptUpdateCapabilitySafe
                     && legacyPauseCapabilitySafe
                     && legacyHealthFallback
@@ -24347,6 +24561,16 @@ public partial class App : Application
                     completedAfterTerminalHandoff,
                     healthSignatureNeverBoundToStaleInventory,
                     mutationRefreshDebtContract,
+                    cancelResponseVisibleBeforeHealth,
+                    enqueueInventoryVisibleBeforeHealth,
+                    enqueueNextInventoryOrderPreserved,
+                    activeCancelStatusRegressionRejected,
+                    queuedCancelClaimRaceReflected,
+                    unconfirmedResponsesNotProjected,
+                    incompleteCancelResponsesPreserved,
+                    refreshClickDuringHealthPollDrained,
+                    refreshDuringMutationDrained,
+                    responseRefreshRequestDrained,
                     afterHealthInventoryRaceReconcile,
                     legacyPromptUpdateCapabilitySafe,
                     legacyPauseCapabilitySafe,
@@ -24403,6 +24627,7 @@ public partial class App : Application
                     afterStaleRefresh,
                     healthAfterInventoryReorderSuppressed,
                     afterHealthAfterInventoryRace,
+                    healthAfterInventoryReorderEvidence,
                     afterMove,
                     afterCancel,
                     videoCancelPendingSafe,
