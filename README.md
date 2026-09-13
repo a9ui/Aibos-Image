@@ -17,6 +17,11 @@ dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --
 ```
 
 `start_wpf.bat` remains as a compatibility entry point.
+Normal batch startup returns after launching Aibos, so a double-clicked CMD
+window closes without closing Aibos. Both the apphost and local dotnet host
+start without a console; an existing terminal is left open and may be closed
+independently. Build errors and immediate startup errors remain visible.
+`PHOTOVIEWER_WPF_DOTNET_RUN=1` is the foreground development exception.
 When a rebuild is required, the launcher prefers the local .NET 10 SDK and
 uses a one-shot build that does not retain a shared compiler or build server.
 Repair builds regenerate outputs without incremental reuse before recording
@@ -117,6 +122,7 @@ a prerequisite for every change.
 | Changed behavior | Focused verification entry point |
 |---|---|
 | Launch freshness / Release artifacts | `scripts/verify-wpf-launch-target.ps1` (synthetic artifacts and real .NET repair build, no WPF launch) |
+| CMD-independent launch / argument forwarding | `scripts/verify-wpf-launch-detachment.ps1` (bounded synthetic apphost and dotnet children; no real Aibos state) |
 | Retained server / desktop relaunch | `scripts/verify-desktop-relaunch.ps1` (unique real scheduled task and synthetic processes; requires a Windows interactive session) |
 | Desktop repeat activation | `scripts/verify-desktop-activation.ps1` (synthetic identity against the WPF coordinator) |
 | Desktop installation / rollback | `scripts/verify-desktop-launcher-install.ps1` (TEMP shortcuts, mocked scheduler writes) |

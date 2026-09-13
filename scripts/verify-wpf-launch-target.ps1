@@ -72,6 +72,7 @@ finally { [IO.File]::WriteAllText($stampPath, $savedStamp, $utf8) }
 Invoke-Check 10 'source-content-mismatch'
 # Exercise the actual launcher repair path with real MSBuild, not dummy hashes.
 Copy-Item -LiteralPath (Join-Path $repoRoot 'start_wpf.bat') -Destination $runRoot
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'start-wpf-detached.ps1') -Destination $fixtureScripts
 $dependencyRoot = Join-Path $projectRoot 'dependencies'
 New-Item -ItemType Directory -Path $dependencyRoot -Force | Out-Null
 foreach ($name in $artifactNames | Where-Object { $_ -match '^(Microsoft.Data.Sqlite|SQLitePCLRaw)' }) {

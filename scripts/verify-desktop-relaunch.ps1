@@ -11,7 +11,7 @@ $lib = Join-Path $fixtureScripts 'lib'
 New-Item -ItemType Directory -Path $lib -Force | Out-Null
 $utf8 = [Text.UTF8Encoding]::new($false)
 $powerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-foreach ($name in @('start-aibos-desktop.ps1', 'request-aibos-desktop.ps1')) {
+foreach ($name in @('start-aibos-desktop.ps1', 'request-aibos-desktop.ps1', 'start-wpf-detached.ps1')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $fixtureScripts
 }
 $helper = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'lib\DesktopActivation.ps1'))
@@ -46,7 +46,7 @@ try {
 }
 finally { $event.Dispose() }
 '@, $utf8)
-[IO.File]::WriteAllText((Join-Path $runRoot 'start_aibos.bat'), ('@echo off' + "`r`n" + 'powershell -NoProfile -ExecutionPolicy Bypass -File "{0}" -Suffix "{1}"' -f $primaryPath, $suffix) + "`r`nexit /b %ERRORLEVEL%`r`n", $utf8)
+[IO.File]::WriteAllText((Join-Path $runRoot 'start_aibos.bat'), ('@echo off' + "`r`n" + 'powershell -NoProfile -ExecutionPolicy Bypass -File "{0}" powershell -NoProfile -ExecutionPolicy Bypass -File "{1}" -Suffix "{2}"' -f (Join-Path $fixtureScripts 'start-wpf-detached.ps1'), $primaryPath, $suffix) + "`r`nexit /b %ERRORLEVEL%`r`n", $utf8)
 function Wait-Condition([scriptblock]$Check, [string]$Message) {
     $deadline = [DateTime]::UtcNow.AddSeconds(25)
     while (-not (& $Check)) {
