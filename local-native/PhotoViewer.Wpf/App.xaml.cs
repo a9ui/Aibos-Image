@@ -21989,6 +21989,30 @@ public partial class App : Application
                     && afterHealthOnlyPoll.PollRequests
                         == afterInvalidRecovery.PollRequests + 1
                     && afterHealthOnlyPoll.Total == afterInvalidRecovery.Total;
+                healthGetEntered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGateAfterCount = healthGetCount;
+                Task heldManualRefreshPoll = window.PollEnhancementJobsForSmokeAsync();
+                await healthGetEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                window.ClickRefreshEnhancementJobsForSmoke();
+                window.ClickRefreshEnhancementJobsForSmoke();
+                bool refreshClickDuringHealthPollDrained =
+                    !heldManualRefreshPoll.IsCompleted
+                    && window.EnhancementJobsWorkspaceForSmoke().GetRequests
+                        == afterHealthOnlyPoll.GetRequests;
+                TaskCompletionSource<bool> manualRefreshHealthRelease = healthGetGate;
+                healthGetGate = null;
+                healthGetEntered = null;
+                healthGetGateAfterCount = int.MaxValue;
+                manualRefreshHealthRelease.SetResult(true);
+                await heldManualRefreshPoll;
+                await window.WaitForEnhancementReconciliationForSmokeAsync();
+                refreshClickDuringHealthPollDrained &=
+                    window.EnhancementJobsWorkspaceForSmoke().GetRequests
+                        == afterHealthOnlyPoll.GetRequests + 1;
+                afterHealthOnlyPoll = window.EnhancementJobsWorkspaceForSmoke();
                 queueOrderRevision++;
                 await window.PollEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot
@@ -23090,6 +23114,13 @@ public partial class App : Application
                             StringComparer.Ordinal)
                     && queuedOrderBatchBodies.Count
                         == queuedOrderBatchesBeforeHealthRace + 1;
+                var healthAfterInventoryReorderEvidence = new
+                {
+                    movesDuringHealthAfterInventory,
+                    beforeReleaseIds = afterMovesDuringHealthAfterInventory.VisibleIds.Take(4).ToArray(),
+                    afterReleaseIds = afterHealthAfterInventoryRace.VisibleIds.Take(4).ToArray(),
+                    batchCountDelta = queuedOrderBatchBodies.Count - queuedOrderBatchesBeforeHealthRace,
+                };
                 // Hold health indefinitely: confirmed row changes and a second
                 // action must finish without waiting for the inventory refresh.
                 healthGetEntered = new TaskCompletionSource<bool>(
@@ -24284,6 +24315,7 @@ public partial class App : Application
                     && enqueueResponseVisibleBeforeHealth
                     && unconfirmedResponsesNotProjected
                     && incompleteCancelResponsesPreserved
+                    && refreshClickDuringHealthPollDrained
                     && responseRefreshRequestDrained
                     && legacyPromptUpdateCapabilitySafe
                     && legacyPauseCapabilitySafe
@@ -24455,6 +24487,7 @@ public partial class App : Application
                     enqueueResponseVisibleBeforeHealth,
                     unconfirmedResponsesNotProjected,
                     incompleteCancelResponsesPreserved,
+                    refreshClickDuringHealthPollDrained,
                     responseRefreshRequestDrained,
                     afterHealthInventoryRaceReconcile,
                     legacyPromptUpdateCapabilitySafe,
@@ -24512,6 +24545,7 @@ public partial class App : Application
                     afterStaleRefresh,
                     healthAfterInventoryReorderSuppressed,
                     afterHealthAfterInventoryRace,
+                    healthAfterInventoryReorderEvidence,
                     afterMove,
                     afterCancel,
                     videoCancelPendingSafe,

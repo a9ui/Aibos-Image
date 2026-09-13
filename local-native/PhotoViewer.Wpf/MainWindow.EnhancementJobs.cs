@@ -1964,7 +1964,11 @@ public partial class MainWindow
     {
         if (_enhancementWorkspaceMutationPending
             || _enhancementWorkspaceHealthPollPending)
+        {
+            ResetEnhancementWorkspaceThumbnailRetry();
+            RequestEnhancementWorkspaceReconciliation();
             return;
+        }
         var operationWatch = Stopwatch.StartNew();
         string operationOutcome = "failed";
         try
@@ -10689,6 +10693,9 @@ public partial class MainWindow
 
     public object? EnhancementJobViewIdentityForSmoke(string id)
         => _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+
+    public void ClickRefreshEnhancementJobsForSmoke()
+        => EnhancementJobsRefreshButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
     public async Task RefreshEnhancementJobsForSmokeAsync()
     {

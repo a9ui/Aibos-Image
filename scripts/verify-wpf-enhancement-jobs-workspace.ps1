@@ -544,6 +544,7 @@ try {
         'enqueueResponseVisibleBeforeHealth',
         'unconfirmedResponsesNotProjected',
         'incompleteCancelResponsesPreserved',
+        'refreshClickDuringHealthPollDrained',
         'responseRefreshRequestDrained',
         'cachedReopenAvoidedFullInventory',
         'staleQueueRefreshSuppressed',
