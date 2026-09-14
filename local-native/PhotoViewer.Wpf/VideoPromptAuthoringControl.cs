@@ -30,6 +30,9 @@ public sealed class VideoPromptAuthoringControl : UserControl
     private readonly TextBlock _variantHint = Label("", false);
     private readonly Border _reader;
     private readonly WrapPanel _tools = new() { Margin = new Thickness(0, 0, 0, 6) };
+    private readonly ComboBox _openingMotion = new() { MinHeight = 32, MaxDropDownHeight = 340 };
+    private readonly ComboBox _expression = new() { MinHeight = 32, MaxDropDownHeight = 340 };
+    private readonly ComboBox _mood = new() { MinHeight = 32, MaxDropDownHeight = 340 };
     private readonly ComboBox _source = new() { MinHeight = 30, Margin = new Thickness(0, 0, 0, 10) };
     private readonly Expander _base = new() { Header = "元のスタイル本文", Foreground = Muted, Margin = new Thickness(0, 6, 0, 6) };
     private readonly TextBox _baseInput = Editor("元のスタイル本文", 90);
@@ -63,6 +66,14 @@ public sealed class VideoPromptAuthoringControl : UserControl
         header.Children.Add(_edit);
         header.Children.Add(Label("プロンプト", true));
         panel.Children.Add(header);
+        var acting = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
+        AddActingChoice(acting, _openingMotion, "冒頭の動き", "開始直後の1〜2秒", "#6EE7D0", VideoSubjectDirection.Opening,
+            value => _program.OpeningMotionId = value);
+        AddActingChoice(acting, _expression, "表情", "動画全体の表情", "#F0ABFC", VideoSubjectDirection.Expressions,
+            value => _program.ExpressionId = value);
+        AddActingChoice(acting, _mood, "ムード", "演じ方・全体の雰囲気", "#FDE68A", VideoSubjectDirection.Moods,
+            value => _program.MoodId = value);
+        panel.Children.Add(acting);
         SetEditStyle();
         AutomationProperties.SetName(_edit, "本文を編集");
         _edit.ToolTip = "もう一度押すと、本文の選択操作に戻ります";
@@ -127,6 +138,9 @@ public sealed class VideoPromptAuthoringControl : UserControl
         try
         {
             _program = program.Clone();
+            _openingMotion.SelectedValue = program.OpeningMotionId;
+            _expression.SelectedValue = program.ExpressionId;
+            _mood.SelectedValue = program.MoodId;
             _photo = effectiveKind == "photoreal" && (program.UseSourceVariants || !string.IsNullOrEmpty(program.PhotorealTemplate));
             _sourcePrompt = sourcePrompt;
             _imageAutomationEnabled = imageAutomationEnabled;
@@ -141,6 +155,54 @@ public sealed class VideoPromptAuthoringControl : UserControl
         finally { _loading = false; }
         Render();
     }
+
+    private void AddActingChoice(WrapPanel panel, ComboBox selector, string title, string help, string color,
+        VideoSubjectDirection.Choice[] choices, Action<string> select)
+    {
+        var group = new StackPanel { Width = 235, Margin = new Thickness(0, 0, 12, 6) };
+        group.Children.Add(new TextBlock { Text = title + " · " + help, Foreground = ColorBrush(color), Margin = new Thickness(0, 0, 0, 5), FontSize = 12 });
+        selector.ItemsSource = choices;
+        selector.DisplayMemberPath = nameof(VideoSubjectDirection.Choice.Label);
+        selector.SelectedValuePath = nameof(VideoSubjectDirection.Choice.Id);
+        selector.SetResourceReference(StyleProperty, "PhotorealSettingsComboBox");
+        AutomationProperties.SetName(selector, title);
+        selector.ToolTip = help + "。元の指示を使う場合は追加しません。";
+        selector.SelectionChanged += (_, _) =>
+        {
+            if (_loading || selector.SelectedValue is not string value) return;
+            if (!_program.Enabled)
+            {
+                string original = _program.UseSourceVariants && _photo ? _program.BaseH3Template : _input.Text;
+                string photo = _program.UseSourceVariants && _photo ? _input.Text : _program.PhotorealBaseH3Template;
+                if (EscapeLiteral(original).Length > 8000 || EscapeLiteral(photo).Length > 8000)
+                {
+                    _hint.Text = "本文が長いため演技の指定を追加できません。元の本文は変更していません。";
+                    _loading = true;
+                    try { selector.SelectedValue = "original"; } finally { _loading = false; }
+                    return;
+                }
+                // Convert literal variants losslessly only on an explicit choice.
+                if (!_program.UseSourceVariants) _program.BaseH3Template = _input.Text;
+                else if (_photo) _program.PhotorealBaseH3Template = _input.Text;
+                else _program.BaseH3Template = _input.Text;
+                _program.Template = EscapeLiteral(_program.BaseH3Template);
+                _program.PhotorealTemplate = EscapeLiteral(_program.PhotorealBaseH3Template);
+                _program.Enabled = true;
+                _program.AnnotatedH3 = true;
+                _loading = true;
+                try { SetText(_input, _program.TemplateFor(_photo ? "photoreal" : "anime")); }
+                finally { _loading = false; }
+            }
+            select(value);
+            Publish(null);
+            Render();
+        };
+        group.Children.Add(selector);
+        panel.Children.Add(group);
+    }
+
+    public void SelectActingForSmoke(string opening, string expression, string mood)
+    { _openingMotion.SelectedValue = opening; _expression.SelectedValue = expression; _mood.SelectedValue = mood; }
 
     private static void SetText(TextBox box, string text)
     {

@@ -42,6 +42,7 @@ public partial class App
             File.WriteAllText(Path.Combine(root, "enhance/jobs.json"), "{\"jobs\":[]}");
             byte[] jobs = File.ReadAllBytes(Path.Combine(root, "enhance/jobs.json"));
 
+            VerifySubjectDirections(checks);
             var program = new VideoPromptProgram
             {
                 Enabled = true, Template = "[look toward the camera] smile {walk / run / jump}",

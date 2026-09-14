@@ -27,6 +27,9 @@ public sealed class VideoPromptProgram
     public bool ImageChoices { get; set; }
     public bool ActionPlot { get; set; }
     public bool PhysicalContinuity { get; set; }
+    public string OpeningMotionId { get; set; } = "original";
+    public string ExpressionId { get; set; } = "original";
+    public string MoodId { get; set; } = "original";
     public string OriginalDefault { get; set; } = "anime";
     public string PreferredLoraId { get; set; } = "";
     public Dictionary<string, VideoPromptOption> Options { get; set; } = new(StringComparer.Ordinal);
@@ -69,7 +72,7 @@ public sealed class VideoPromptProgram
     public bool Validate(out string error)
     {
         error = "未対応または不正な指示言語の設定です。保存内容は変更しません。";
-        if (Version != 1 || OriginalDefault is not ("anime" or "photoreal")
+        if (!VideoSubjectDirection.IsValid(this) || Version != 1 || OriginalDefault is not ("anime" or "photoreal")
             || !Bounded(Template, 8000) || !Bounded(PhotorealTemplate, 8000)
             || !Bounded(BaseH3Template, 8000) || !Bounded(PhotorealBaseH3Template, 8000)
             || !Bounded(Description, 8000) || !Bounded(PhotorealDescription, 8000) || !Bounded(ActionSamples, 4000)
@@ -126,7 +129,7 @@ public sealed class VideoPromptProgram
     public bool TryGetUnchangedH3(string kind, out string prompt)
     {
         prompt = "";
-        if (!Enabled || !AnnotatedH3 || SourceRules || ImageChoices || ActionPlot || PhysicalContinuity
+        if (VideoSubjectDirection.IsSelected(this) || !Enabled || !AnnotatedH3 || SourceRules || ImageChoices || ActionPlot || PhysicalContinuity
             || !Validate(out _) || !VideoPromptLanguage.TryParse(TemplateFor(kind), out var tokens, out _))
             return false;
         var resolved = new StringBuilder();
@@ -192,6 +195,7 @@ public sealed class VideoPromptProgram
             body = MiniMaxH3I2vaPromptConformance.Opening + MiniMaxH3I2vaPromptConformance.IntegratedPrefix + body
                 + MiniMaxH3I2vaPromptConformance.SoundscapePrefix + "N/A"
                 + MiniMaxH3I2vaPromptConformance.MusicPrefix + "N/A";
+        body = VideoSubjectDirection.Apply(body, this);
         if (body.Length > 8000) { error = "生成用の本文を8,000文字以内にしてください。"; return false; }
         // Conformance remains available for AI candidates. Direct enqueue does
         // not force rewriting or alter the user's existing H3 sections.
@@ -271,6 +275,7 @@ public sealed class VideoPromptProgram
             text.Append(" Keep the requested actions; do not invent an additional action plot.");
         if (PhysicalContinuity)
             text.Append("\nPhysical continuity: Treat the reference as the initial frame, not a frozen pose throughout the clip. Preserve visible support, attachment points, and contact constraints. After an explicitly requested and visibly plausible release, allow unsupported soft tissue, fabric, hair, and objects to move continuously under gravity, inertia, and damped settling. If already unsupported and clearly temporarily displaced, continue that existing state smoothly without inventing a release event or an initial velocity direction. Do not force supported parts downward, change anatomy, or snap to a guessed resting pose. If support or displacement is uncertain, add no inferred physical action. Describe any supported transition in time order within the selected duration.");
+        if (VideoSubjectDirection.IsSelected(this)) text.Append("\n\n" + VideoSubjectDirection.Instruction(this));
         instruction = text.ToString();
         if (instruction.Length > 8000 || Encoding.UTF8.GetByteCount(instruction) > 14000)
         {

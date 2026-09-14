@@ -619,6 +619,20 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   visible while scrolling. These layout operations do not prepare or enqueue.
   Pending metadata reads or rewrites block duplicate preparation and enqueue.
   Preparation failures expose their reason and leave the current prompt intact.
+- Every video style, including legacy literal styles and both source variants,
+  exposes optional shared acting selectors above its editor. `OpeningMotionId`
+  selects movement immediately after the reference frame within the first one
+  to two seconds; `ExpressionId` controls facial direction throughout the clip;
+  `MoodId` controls the overall manner of performing the existing action.
+  These optional version-1 program fields default to `original`, which adds
+  nothing and retains the original body. Catalog choices are defined in
+  `VideoSubjectDirection.cs`; unknown IDs protect the stored style. Explicit
+  choices append scoped directions to the generation copy, including deferred
+  AI instructions, while keeping camera, main action, dialogue and sound fields.
+  Literal styles convert losslessly only when a user chooses an acting preset.
+  The three selectors are independent and saved with the style; loading an old
+  style never rewrites its text or user state. Resetting all three to `original`
+  removes the added acting directions.
 - Physical continuity is optional prompt guidance, not a physics simulation or
   a quality guarantee. It preserves support and attachment constraints, adds no
   unrequested release, and does not infer velocity from an ambiguous still.

@@ -124,12 +124,20 @@ public partial class App
         checks["formatDiagnosticNeverRequiresAiToEnqueue"] = window.VideoGenerationQueueEnabledForSmoke
             && await window.SubmitVideoGenerationForSmokeAsync() && enqueues == 7 && rewrites == 0
             && !lastRequested.TryGetProperty("promptEnhancement", out _) && publishedPrompt.Contains("<d>[Japanese]こんにちは。</d>");
+        window.SetVideoPromptProgramForSmoke(new VideoPromptProgram { UseSourceVariants = true, BaseH3Template = speechPrompt, PhotorealBaseH3Template = speechPrompt });
+        window.SyncVideoGenerationSettingsForSmoke();
+        window.SelectActingForSmoke("approach", "annoyed", "lighthearted");
+        string actingPrompt = window.VideoPromptForSmoke;
+        checks["actingSelectorsWorkForLegacyStylesWithoutAi"] = actingPrompt.Contains("first one to two seconds")
+            && actingPrompt.Contains("mildly annoyed") && actingPrompt.Contains("lighthearted")
+            && actingPrompt.Contains("<d>[Japanese]こんにちは。</d>") && rewrites == 0;
+        checks["actingSelectionEnqueuesWithoutAi"] = await window.SubmitVideoGenerationForSmokeAsync() && enqueues == 8 && publishedPrompt == actingPrompt;
         window.OpenVideoGenerationBoardForSmoke("original");
         window.Height = 1020;
         window.UpdateLayout();
         window.CaptureVideoVariantForSmoke((_, visual) => capture("video-studio", visual));
         window.OpenVideoSubmissionPreviewForSmoke();
         checks["separateStyleManagementIsPassiveAndRestoresControls"] = window.VerifyVideoStyleManagementForSmoke(v => capture("video-style-management", v))
-            && enqueues == 7 && unexpectedPosts == 0;
+            && enqueues == 8 && unexpectedPosts == 0;
     }
 }
