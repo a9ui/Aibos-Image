@@ -1806,10 +1806,6 @@
                   <ComboBoxItem Content="500件（標準）" Tag="500"/>
                   <ComboBoxItem Content="1,000件" Tag="1000"/>
                 </ComboBox>
-                <Button x:Name="EnhancementJobsPauseResumeButton" Style="{StaticResource GhostButton}" Content="一時停止"
-                        Click="ToggleEnhancementQueuePaused_Click" IsEnabled="False" MinHeight="30" Margin="0,12,0,0"
-                        AutomationProperties.Name="AI処理待ち列を一時停止"
-                        ToolTip="処理中の1件は完了させ、次の待機ジョブから止めます"/>
                 <Button x:Name="EnhancementJobsUpdateQueuedPromptsButton" Style="{StaticResource GhostButton}" Content="待機中を現在設定へ"
                         Click="UpdateAllQueuedPhotorealPrompts_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
                         AutomationProperties.Name="待機中の実写化設定をすべて更新"
@@ -1821,8 +1817,10 @@
                       <Button x:Name="CompanionStartButton" Content="起動" Click="StartCompanion_Click" Style="{StaticResource GhostButton}" MinHeight="30" Margin="0,0,4,4" AutomationProperties.Name="AIサーバーを起動"/>
                       <Button x:Name="CompanionRestartButton" Content="再起動" Click="RestartCompanion_Click" Style="{StaticResource GhostButton}" MinHeight="30" Margin="0,0,4,4" AutomationProperties.Name="AIサーバーを再起動"/>
                       <Button x:Name="CompanionStopButton" Content="停止" Click="StopCompanion_Click" Style="{StaticResource GhostButton}" MinHeight="30" Margin="0,0,0,4" AutomationProperties.Name="AIサーバーを停止"/>
+                      <Button x:Name="EnhancementJobsPauseResumeButton" Content="復旧して再開" Click="ToggleEnhancementQueuePaused_Click" Style="{StaticResource GhostButton}" IsEnabled="False" MinHeight="30" Margin="4,0,0,4" ToolTip="中断した処理を確認し、待機順を保ったままキューを再開します" AutomationProperties.Name="AIキューを復旧して再開"/>
+                      <Button x:Name="CompanionCancelButton" Content="待機を取り消す" Click="CancelCompanionControl_Click" Style="{StaticResource GhostButton}" MinHeight="30" Margin="4,0,0,4" Visibility="Collapsed" AutomationProperties.Name="サーバー操作の待機を取り消す"/>
                     </WrapPanel>
-                    <TextBlock x:Name="CompanionControlStatusText" Text="起動だけではキューを再開しません。停止・再起動には実行中の処理を中断する確認が必要です。" TextWrapping="Wrap" FontSize="10.5" Foreground="{StaticResource TextSecondary}" AutomationProperties.LiveSetting="Polite"/>
+                    <TextBlock x:Name="CompanionControlStatusText" Text="処理の再開は「復旧して再開」から。" TextWrapping="Wrap" FontSize="11.5" Foreground="{StaticResource TextPrimary}" AutomationProperties.LiveSetting="Polite"/>
                     <TextBlock x:Name="EnhancementJobsHealthStateText" Text="状態を取得できません" Foreground="{StaticResource TextTertiary}"
                                FontSize="11.5" FontWeight="SemiBold" Margin="0,10,0,0"
                                AutomationProperties.Name="AI処理待ち列の状態"

@@ -254,6 +254,7 @@ public partial class MainWindow
         try
         {
         token.ThrowIfCancellationRequested();
+        RetireExitedEnhancementCompanion();
         const string readinessRoute = "api/enhance/health";
         bool queueRecoveryCompleted = !recoverQueueBeforeHealth;
 
@@ -502,6 +503,7 @@ public partial class MainWindow
         EnsureEnhancementCompanionOwnershipForPassiveReadAsync(
             CancellationToken token)
     {
+        RetireExitedEnhancementCompanion();
         if (_enhancementCompanionOwnershipVerified)
             return null;
 
@@ -2900,6 +2902,8 @@ public partial class MainWindow
             string authToken,
             CancellationToken token)
     {
+        using var probeTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        probeTimeout.CancelAfter(TimeSpan.FromSeconds(5));
         string challenge = Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
         Uri endpoint = new(
             ResolveBrowserEnhancementBaseUri(),
@@ -2912,12 +2916,12 @@ public partial class MainWindow
         {
             using HttpResponseMessage response = await _modalEnhancementSender(
                 request,
-                token);
+                probeTimeout.Token);
             int statusCode = (int)response.StatusCode;
             byte[]? responseBytes = await ReadBoundedEnhancementResponseAsync(
                 response.Content,
                 EnhancementCompanionIdentityResponseMaxBytes,
-                token);
+                probeTimeout.Token);
             if (responseBytes is null)
             {
                 return new(
@@ -2985,6 +2989,11 @@ public partial class MainWindow
             _verifiedEnhancementCompanionInstanceId = instanceId;
             _verifiedEnhancementCompanionServerStartedAtUtc = serverStartedAtRaw;
             return new(true, false, false, statusCode, payload, "");
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            return new(false, true, false, 0, null,
+                "The local AI companion did not respond within five seconds. Try connecting again.");
         }
         catch (Exception ex) when (
             ex is HttpRequestException
@@ -3489,7 +3498,19 @@ public partial class MainWindow
             try
             {
                 process.Exited += (_, _) =>
+                {
                     LogEnhancementCompanionProcessExit(process, observation);
+                    if (!Dispatcher.HasShutdownStarted)
+                        _ = Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            if (!ReferenceEquals(_ownedEnhancementCompanion, process)
+                                || _enhancementCompanionLifetimeCts.IsCancellationRequested
+                                || _companionControlPending) return;
+                            RetireExitedEnhancementCompanion();
+                            ApplyEnhancementQueueHealthUnavailable("サーバーが終了しました。表示中のJobsは保存済みの記録です。「復旧して再開」で処理を再開できます。");
+                            CompanionControlStatusText.Text = "サーバーが終了しました。復旧して再開できます。";
+                        }));
+                };
                 process.EnableRaisingEvents = true;
             }
             catch (Exception ex) when (ex is
@@ -3701,7 +3722,12 @@ public partial class MainWindow
         var candidates = new List<(string ProgramFilesRoot, string CandidatePath)>();
         string? programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         if (!string.IsNullOrWhiteSpace(programFiles))
+        {
+            // A dedicated installed runtime can be patched without replacing
+            // Node used by other applications. Never search PATH or user data.
+            candidates.Add((programFiles, Path.Combine(programFiles, "Aibos Image", "CompanionRuntime", "node.exe")));
             candidates.Add((programFiles, Path.Combine(programFiles, "nodejs", "node.exe")));
+        }
         string? programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
         if (!string.IsNullOrWhiteSpace(programFilesX86))
             candidates.Add((programFilesX86, Path.Combine(programFilesX86, "nodejs", "node.exe")));
@@ -3729,20 +3755,20 @@ public partial class MainWindow
             if (!Directory.Exists(lexicalProgramFilesRoot))
                 return false;
 
-            string expectedCandidate = Path.GetFullPath(
-                Path.Combine(lexicalProgramFilesRoot, "nodejs", "node.exe"));
-            if (!string.Equals(
-                    Path.GetFullPath(candidatePath),
-                    expectedCandidate,
-                    StringComparison.OrdinalIgnoreCase)
-                || !File.Exists(expectedCandidate))
+            string fullCandidate = Path.GetFullPath(candidatePath);
+            string? expectedCandidate = new[]
+            {
+                Path.Combine(lexicalProgramFilesRoot, "Aibos Image", "CompanionRuntime", "node.exe"),
+                Path.Combine(lexicalProgramFilesRoot, "nodejs", "node.exe"),
+            }.FirstOrDefault(candidate => string.Equals(fullCandidate, candidate, StringComparison.OrdinalIgnoreCase));
+            if (expectedCandidate is null || !File.Exists(expectedCandidate))
             {
                 return false;
             }
 
             string canonicalProgramFilesRoot = ResolveFinalPathCore(lexicalProgramFilesRoot);
             string canonicalNodeDirectory = ResolveFinalPathCore(
-                Path.Combine(lexicalProgramFilesRoot, "nodejs"));
+                Path.GetDirectoryName(expectedCandidate)!);
             string canonicalCandidate = ResolveFinalPathCore(expectedCandidate);
             if (!Directory.Exists(canonicalProgramFilesRoot)
                 || !Directory.Exists(canonicalNodeDirectory)
@@ -3810,7 +3836,18 @@ public partial class MainWindow
         }
     }
 
-    private void ReleaseOwnedEnhancementCompanion()
+    private void RetireExitedEnhancementCompanion()
+    {
+        if (_ownedEnhancementCompanion is not null && _ownedEnhancementCompanion.HasExited)
+        {
+            ReleaseOwnedEnhancementCompanion();
+            _enhancementCompanionOwnershipVerified = false;
+            _verifiedEnhancementCompanionInstanceId = null;
+            _verifiedEnhancementCompanionServerStartedAtUtc = null;
+        }
+    }
+
+    private void ReleaseOwnedEnhancementCompanion(string reason = "operation_finished")
     {
         // Disposing a Process wrapper does not stop the OS process. Once the
         // loopback companion is ready, it is an independent durable worker so
@@ -3840,7 +3877,7 @@ public partial class MainWindow
                         "ownership_released",
                         elapsedMilliseconds: (long)Stopwatch.GetElapsedTime(
                             observation.StartedTimestamp).TotalMilliseconds,
-                        errorCode: "wpf_closed",
+                        errorCode: reason,
                         mode: "released",
                         relatedProcessId: observation.ProcessId);
                 },
@@ -3864,7 +3901,7 @@ public partial class MainWindow
             return;
         }
 
-        ReleaseOwnedEnhancementCompanion();
+        ReleaseOwnedEnhancementCompanion("wpf_closed");
     }
 
     private void CompleteOwnedEnhancementCompanionAfterBootstrapFailure()

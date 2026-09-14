@@ -2016,6 +2016,7 @@ public partial class MainWindow
         CancellationToken actionEpoch = CaptureEnhancementCompanionOperationToken();
         if (_enhancementWorkspaceMutationPending
             || _enhancementWorkspaceRefreshPending
+            || _companionControlPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
         {
             return false;
@@ -2591,8 +2592,16 @@ public partial class MainWindow
         _enhancementWorkspaceHealthEndpointSupported = true;
         if (!response.Ok || response.Payload is not JsonElement payload)
         {
+            if (response.InnerStatusAuthoritative
+                && EnhancementApiErrorCode(response) == "QUEUE_HEALTH_UNAVAILABLE")
+            {
+                ApplyCompanionQueueRecoveryRequired();
+                return null;
+            }
             ApplyEnhancementQueueHealthUnavailable(
                 "処理待ち列の状態を取得できません。Jobsは引き続き確認できます。");
+            if (!_companionControlPending)
+                CompanionControlStatusText.Text = "サーバーの状態を確認できません";
             return null;
         }
 
@@ -3141,6 +3150,8 @@ public partial class MainWindow
 
     private void ApplyEnhancementQueueHealth(EnhancementQueueHealthView health)
     {
+        if (!_companionControlPending)
+            CompanionControlStatusText.Text = "サーバー接続済み";
         _enhancementWorkspaceHealthInventoryRevisionSupported =
             health.InventoryRevision is not null;
         _enhancementWorkspaceLastHealthInventoryRevision =
@@ -3283,12 +3294,13 @@ public partial class MainWindow
             _enhancementWorkspaceQueuePaused is null
             && _usingDefaultModalEnhancementSender;
         EnhancementJobsPauseResumeButton.Content = connectToResume
-            ? "接続して再開"
+            ? "復旧して再開"
             : resume
-                ? "再開"
+                ? _enhancementWorkspaceQueueRecoveryRequired ? "復旧して再開" : "再開"
                 : "一時停止";
         EnhancementJobsPauseResumeButton.IsEnabled =
             (_enhancementWorkspaceQueuePaused.HasValue || connectToResume)
+            && !_companionControlPending
             && !_enhancementWorkspaceMutationPending
             && !_enhancementWorkspaceRefreshPending;
         AutomationProperties.SetName(

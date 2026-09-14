@@ -7,6 +7,7 @@ namespace PhotoViewer.Wpf;
 public partial class MainWindow
 {
     private bool _companionControlPending;
+    private CancellationTokenSource? _companionControlCts;
 
     public Task StartEnhancementCompanionApiForApplicationLaunchAsync()
         => StartCompanionApiOnlyAsync();
@@ -18,29 +19,48 @@ public partial class MainWindow
     {
         if (_companionControlPending || _enhancementCompanionLifetimeCts.IsCancellationRequested)
             return;
+        using var control = CancellationTokenSource.CreateLinkedTokenSource(_enhancementCompanionLifetimeCts.Token);
+        control.CancelAfter(TimeSpan.FromSeconds(45));
+        _companionControlCts = control;
         SetCompanionControlsPending(true);
         CompanionControlStatusText.Text = "サーバーに接続しています…";
         try
         {
             // Starting the API is not consent to recover, drain, resume or wake Jobs.
             EnhancementApiResponse response = await EnsureEnhancementCompanionApiReadyAsync(
-                token: _enhancementCompanionLifetimeCts.Token,
+                token: control.Token,
                 recoverQueueBeforeHealth: false);
+            control.Token.ThrowIfCancellationRequested();
             if (response.Ok && response.Payload is JsonElement payload
                 && TryParseEnhancementQueueHealth(payload, out EnhancementQueueHealthView health))
             {
                 ApplyEnhancementQueueHealth(health);
                 CompanionControlStatusText.Text = "接続済み（キューの再開は別操作）";
             }
+            else if (response.InnerStatusAuthoritative
+                && EnhancementApiErrorCode(response) == "QUEUE_HEALTH_UNAVAILABLE")
+            {
+                ApplyCompanionQueueRecoveryRequired();
+            }
             else
-                CompanionControlStatusText.Text = "接続できませんでした。閲覧は継続できます。";
+            {
+                ApplyEnhancementQueueHealthUnavailable("サーバーに接続できません。起動または再起動を試してください。");
+                CompanionControlStatusText.Text = "接続できませんでした。起動・再起動をもう一度試せます。";
+            }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            CompanionControlStatusText.Text = "接続待ちを終了しました。起動・再起動をもう一度試せます。";
+        }
         catch (Exception)
         {
             CompanionControlStatusText.Text = "サーバーを起動できませんでした。";
         }
-        finally { SetCompanionControlsPending(false); }
+        finally
+        {
+            _companionControlCts = null;
+            SetCompanionControlsPending(false);
+        }
     }
 
     private void SetCompanionControlsPending(bool pending)
@@ -49,6 +69,16 @@ public partial class MainWindow
         CompanionStartButton.IsEnabled = !pending;
         CompanionRestartButton.IsEnabled = !pending;
         CompanionStopButton.IsEnabled = !pending;
+        CompanionCancelButton.Visibility = pending ? Visibility.Visible : Visibility.Collapsed;
+        CompanionCancelButton.IsEnabled = pending;
+        RefreshEnhancementQueuePauseControl();
+    }
+
+    private void CancelCompanionControl_Click(object sender, RoutedEventArgs e)
+    {
+        CompanionCancelButton.IsEnabled = false;
+        CompanionControlStatusText.Text = "接続待ちを取り消しています…";
+        _companionControlCts?.Cancel();
     }
 
     private async void StopCompanion_Click(object sender, RoutedEventArgs e)
@@ -72,39 +102,54 @@ public partial class MainWindow
         {
             InvalidateEnhancementCompanionOperations();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_enhancementCompanionLifetimeCts.Token);
+            _companionControlCts = timeout;
             timeout.CancelAfter(TimeSpan.FromSeconds(20));
             await _enhancementCompanionLaunchGate.WaitAsync(timeout.Token);
             locked = true;
             // Only retire a missing/exited owned epoch; retain live-owner constraints.
-            if (_ownedEnhancementCompanion is null || _ownedEnhancementCompanion.HasExited)
-                ReleaseOwnedEnhancementCompanion();
+            RetireExitedEnhancementCompanion();
             if (!TryGetOrCreateEnhancementCompanionAuthToken(out string authToken, out _))
                 throw new InvalidOperationException();
             EnhancementCompanionOwnershipProbe proof =
                 await ProbeEnhancementCompanionOwnershipAsync(authToken, timeout.Token);
-            if (!proof.Verified || proof.Payload is not JsonElement identity)
-                throw new InvalidOperationException();
-            using Process observed = Process.GetProcessById(identity.GetProperty("processId").GetInt32());
-            // Pin the OS process handle, then freshly prove the same server epoch.
-            _ = observed.Handle;
-            EnhancementCompanionOwnershipProbe repeated =
-                await ProbeEnhancementCompanionOwnershipAsync(authToken, timeout.Token);
-            if (!repeated.Verified || repeated.Payload is not JsonElement current
-                || observed.HasExited
-                || current.GetProperty("processId").GetInt32() != observed.Id
-                || current.GetProperty("instanceId").GetString() != identity.GetProperty("instanceId").GetString()
-                || current.GetProperty("serverStartedAtUtc").GetString() != identity.GetProperty("serverStartedAtUtc").GetString())
-                throw new InvalidOperationException();
-            // Explicit Stop/Restart consent, distinct from automatic window-close policy.
-            observed.Kill(entireProcessTree: true);
-            await observed.WaitForExitAsync(timeout.Token);
-            if (_ownedEnhancementCompanion?.Id == observed.Id) ReleaseOwnedEnhancementCompanion();
-            _enhancementCompanionOwnershipVerified = false;
-            _verifiedEnhancementCompanionInstanceId = null;
-            _verifiedEnhancementCompanionServerStartedAtUtc = null;
-            stopped = true;
-            ApplyEnhancementQueueHealthUnavailable("サーバーを停止しました。Jobsの記録は保持されています。");
-            CompanionControlStatusText.Text = "サーバー停止済み";
+            // With no owned process and no response there is nothing we may
+            // signal. Restart can still try the normal authenticated startup.
+            if (proof.TransportUnavailable && _ownedEnhancementCompanion is null)
+            {
+                stopped = true;
+                ApplyEnhancementQueueHealthUnavailable("サーバーは応答していません。Jobsの記録は保持されています。");
+                CompanionControlStatusText.Text = "サーバーから応答がありません";
+            }
+            else
+            {
+                if (!proof.Verified || proof.Payload is not JsonElement identity)
+                    throw new InvalidOperationException();
+                using Process observed = Process.GetProcessById(identity.GetProperty("processId").GetInt32());
+                // Pin the OS process handle, then freshly prove the same server epoch.
+                _ = observed.Handle;
+                EnhancementCompanionOwnershipProbe repeated =
+                    await ProbeEnhancementCompanionOwnershipAsync(authToken, timeout.Token);
+                if (!repeated.Verified || repeated.Payload is not JsonElement current
+                    || observed.HasExited
+                    || current.GetProperty("processId").GetInt32() != observed.Id
+                    || current.GetProperty("instanceId").GetString() != identity.GetProperty("instanceId").GetString()
+                    || current.GetProperty("serverStartedAtUtc").GetString() != identity.GetProperty("serverStartedAtUtc").GetString())
+                    throw new InvalidOperationException();
+                // Explicit Stop/Restart consent, distinct from automatic window-close policy.
+                observed.Kill(entireProcessTree: true);
+                await observed.WaitForExitAsync(timeout.Token);
+                if (_ownedEnhancementCompanion?.Id == observed.Id) ReleaseOwnedEnhancementCompanion();
+                _enhancementCompanionOwnershipVerified = false;
+                _verifiedEnhancementCompanionInstanceId = null;
+                _verifiedEnhancementCompanionServerStartedAtUtc = null;
+                stopped = true;
+                ApplyEnhancementQueueHealthUnavailable("サーバーを停止しました。Jobsの記録は保持されています。");
+                CompanionControlStatusText.Text = "サーバー停止済み";
+                }
+        }
+        catch (OperationCanceledException)
+        {
+            CompanionControlStatusText.Text = "停止の確認を終了しました。再操作できます。";
         }
         catch (Exception)
         {
@@ -113,9 +158,17 @@ public partial class MainWindow
         finally
         {
             if (locked) _enhancementCompanionLaunchGate.Release();
+            _companionControlCts = null;
             SetCompanionControlsPending(false);
         }
         if (stopped && restart) await StartCompanionApiOnlyAsync();
+    }
+
+    private void ApplyCompanionQueueRecoveryRequired()
+    {
+        ApplyEnhancementQueueHealthUnavailable("キューの状態を読めません。「復旧して再開」で中断した処理を確認し、待機順を保って再開します。");
+        EnhancementJobsHealthStateText.Text = "キューの復旧待ち";
+        CompanionControlStatusText.Text = "サーバー接続済み";
     }
 
     public async Task<bool> AuthenticatedCompanionStopForSmokeAsync()

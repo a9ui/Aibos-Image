@@ -283,6 +283,16 @@ The executable cases for these meanings are routed by
   identity proof for the same server epoch, including a reused server. They
   preserve Jobs records and never signal an unverified listener. Restart starts only the API; queue
   recovery and resume remain separate actions.
+- An offline Restart can attempt authenticated API startup without signalling
+  a process. Expired owned-process identity is retired before reconnecting;
+  identity reads have a five-second bound and Jobs API startup has a cancellable
+  45-second bound. An authenticated unavailable queue snapshot is shown as a
+  connected server awaiting queue recovery, with an explicit recovery/resume
+  control. It must not be presented as successful queue execution.
+- Companion startup prefers an optional dedicated `Aibos Image/CompanionRuntime/node.exe`
+  installation under the canonical Windows Program Files root, then the
+  existing `nodejs/node.exe` installation. Neither PATH nor a user-writable
+  runtime directory is a launch authority.
 
 The exact capability storage, identity proof, tunnel, request, response, and
 startup rules are in `contracts/enhancement-companion-auth-v2.json`.

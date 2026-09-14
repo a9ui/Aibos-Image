@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$DotnetPath = '',
+    [string]$AssemblyPath = '',
     [switch]$KeepArtifacts
 )
 
@@ -68,11 +69,15 @@ try {
     Assert-True $explicitActionAutoStartPreserved 'Explicit Enhancement action lost owned Companion auto-start.'
     Assert-True $explicitRecoveryBoundaryExact 'Queue recovery escaped Resume or the post-publish durable-inbox boundary.'
 
-    & $DotnetPath build $project -c $Configuration --artifacts-path $artifacts --nologo
-    Assert-True ($LASTEXITCODE -eq 0) 'Aibos WPF build failed.'
-    $wpfDll = Join-Path $artifacts (
-        'bin\PhotoViewer.Wpf\{0}\PhotoViewer.Wpf.dll' -f
-            $Configuration.ToLowerInvariant())
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        & $DotnetPath build $project -c $Configuration --artifacts-path $artifacts --nologo
+        Assert-True ($LASTEXITCODE -eq 0) 'Aibos WPF build failed.'
+        $wpfDll = Join-Path $artifacts (
+            'bin\PhotoViewer.Wpf\{0}\PhotoViewer.Wpf.dll' -f
+                $Configuration.ToLowerInvariant())
+    } else {
+        $wpfDll = [IO.Path]::GetFullPath($AssemblyPath)
+    }
     Assert-True (Test-Path -LiteralPath $wpfDll -PathType Leaf) 'PhotoViewer.Wpf.dll build output is missing.'
 
     & $DotnetPath $wpfDll --enhancement-companion-lifetime-smoke $resultPath
@@ -100,6 +105,7 @@ try {
     Assert-True (Test-Path -LiteralPath $lazyResumeResultPath -PathType Leaf) 'Queue lazy Resume result is missing.'
     $lazyResumeResult = Get-Content -LiteralPath $lazyResumeResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-True ($lazyResumeExitCode -eq 0 -and $lazyResumeResult.ok -eq $true) 'Queue lazy Resume smoke failed.'
+    Assert-True ($lazyResumeResult.recoveryControls -eq $true) 'Offline Restart, dead-epoch reconnect, WAL recovery controls or cancellable bounded probing failed.'
     Assert-True ($lazyResumeResult.passiveDidNotStart -eq $true) 'Passive queue UI started the Companion.'
     Assert-True ($lazyResumeResult.explicitResumeExact -eq $true) 'Explicit queue Resume was not exact.'
     Assert-True ($lazyResumeResult.duplicateGuarded -eq $true) 'Duplicate queue Resume was not guarded.'
