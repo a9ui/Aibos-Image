@@ -49,7 +49,7 @@ public partial class MainWindow
                 VideoAutomationSettingsHost.Content = options;
             }
             ((VideoPromptAutomationControl)VideoAutomationSettingsHost.Content).Load(_videoPromptProgram, _videoEnhanceAtExecution);
-            CancelVideoSubmissionButton.Visibility = _videoAutomaticSubmissionPending && !_videoGenerationRequestPending
+            CancelVideoSubmissionButton.Visibility = _videoAutomaticSubmissionPending && _videoActiveSubmission is not null
                 ? Visibility.Visible : Visibility.Collapsed;
             CancelVideoSubmissionButton.IsEnabled = _videoActiveSubmission is not null;
             RefreshVideoSubmissionPreview();

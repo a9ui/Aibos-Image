@@ -140,5 +140,27 @@ public partial class App
         window.OpenVideoSubmissionPreviewForSmoke();
         checks["separateStyleManagementIsPassiveAndRestoresControls"] = window.VerifyVideoStyleManagementForSmoke(v => capture("video-style-management", v))
             && enqueues == 8 && unexpectedPosts == 0;
+        // Closing or canceling during health validation must still invalidate
+        // the draft; request-pending is earlier than durable publication.
+        foreach (bool enhance in new[] { false, true })
+        foreach (bool close in new[] { false, true })
+        {
+            window.OpenVideoGenerationBoardForSmoke("original");
+            window.SetVideoEnhanceAtExecutionForSmoke(enhance);
+            healthGate = new TaskCompletionSource();
+            healthEntered = new TaskCompletionSource();
+            Task<bool> pending = window.SubmitVideoGenerationForSmokeAsync();
+            await healthEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            bool cancelAvailable = window.VideoSubmissionCancelVisibleForSmoke;
+            if (close) window.CloseVideoSubmissionForSmoke();
+            else window.CancelVideoSubmissionForSmoke();
+            healthGate.SetResult();
+            checks[$"{(enhance ? "enhanced" : "direct")}{(close ? "Close" : "Cancel")}BeforePublicationAddsNothing"] =
+                cancelAvailable && !await pending && enqueues == 8 && rewrites == 0;
+            healthGate = null;
+        }
+        window.OpenVideoGenerationBoardForSmoke("original");
+        checks["canceledRegistrationCanBeExplicitlyRetried"] =
+            await window.SubmitVideoGenerationForSmokeAsync() && enqueues == 9;
     }
 }

@@ -141,7 +141,7 @@ public partial class MainWindow
 
     private void CancelVideoSubmission_Click(object sender, RoutedEventArgs e)
     {
-        if (!_videoAutomaticSubmissionPending || _videoGenerationRequestPending) return;
+        if (!_videoAutomaticSubmissionPending || _videoActiveSubmission is null) return;
         _videoActiveSubmission = null;
         CancelVideoH3PromptRewrite();
         _videoSubmissionStopReason = "追加を取り消しました。キューには追加していません。";
@@ -153,7 +153,6 @@ public partial class MainWindow
     {
         if (_videoAutomaticSubmissionPending || _videoGenerationRequestPending || VideoPromptPreparationPending) return false;
         ApplyDirectVideoSourceVariant();
-        if (!_videoEnhanceAtExecution) return await QueueVideoGenerationAsync();
         long attempt = ++_videoSubmissionRevision;
         _videoActiveSubmission = attempt;
         _videoSubmissionStopReason = "";
@@ -164,6 +163,8 @@ public partial class MainWindow
             ? null : "内容の変更または取消しのため追加していません。新しい内容で追加してください。";
         try
         {
+            if (!_videoEnhanceAtExecution)
+                return await QueueVideoGenerationAsync(validateSubmission: ValidateAttempt);
             string instruction = _videoPrompt;
             if (_videoPromptProgram.Enabled && !_videoPromptProgram.TryCompile(
                 EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), MiniMaxH3FrameCountForDuration(_videoDurationSeconds),

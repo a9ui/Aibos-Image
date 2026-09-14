@@ -1535,7 +1535,7 @@ public partial class MainWindow
 
     private void CloseModalVideoGenerationBoard()
     {
-        if (!_videoGenerationRequestPending) _videoActiveSubmission = null;
+        _videoActiveSubmission = null;
         CancelVideoH3PromptRewrite();
         if (ModalVideoGenerationPopup is not null)
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
@@ -2854,7 +2854,8 @@ public partial class MainWindow
                             source);
                         // After this durable boundary the immutable submission
                         // belongs to delivery recovery, not the editable draft.
-                        if (preparedPrompt is not null || promptEnhancement is not null) _videoActiveSubmission = null;
+                        _videoActiveSubmission = null;
+                        RefreshVideoStudio();
                         return publishLease;
                     }
                     catch
