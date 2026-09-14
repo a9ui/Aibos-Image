@@ -192,7 +192,7 @@ public static class VideoSubjectDirection
         if (opening.Length > 0) parts.Add("Opening movement, immediately after the reference frame during the first one to two seconds: " + opening
             + " Continue smoothly from the exact reference pose; respect visible supports and available space. Do not teleport or turn this into repeated movement throughout the clip.");
         if (arms.Length > 0) parts.Add("Arm and hand direction: " + arms
-            + " Start smoothly from the reference pose during the opening, then retain the resulting relaxed pose or subtle gesture as appropriate. This controls only arms and hands, not travel, camera or facial expression. If opening movement suggests incidental arm gestures, use this selected arm direction instead. Keep existing hand contact, held objects and weight-bearing support; hand movements required by the main action take priority. Do not force an unavailable gesture, add an object, or repeat a one-off gesture.");
+            + " Start smoothly from the reference pose during the opening, then retain the resulting relaxed pose or subtle gesture as appropriate. This controls only arms and hands, not travel, camera or facial expression. If opening movement suggests incidental arm gestures, use this selected arm direction instead. Preserve contact, held objects and weight-bearing support required by the main action; hand movements required by the main action take priority. Initial contact that is not required may be released when the selected arm direction explicitly calls for it. Do not invent a release, hand-off, or dropped object. Do not force an unavailable gesture, add an object, or repeat a one-off gesture.");
         if (expression.Length > 0) parts.Add("Facial direction throughout the clip: " + expression
             + " Let the expression respond naturally to the ongoing action; do not freeze the face.");
         if (mood.Length > 0) parts.Add("Overall performance mood: " + mood);
@@ -200,11 +200,6 @@ public static class VideoSubjectDirection
         return string.Join("\n", parts);
     }
 
-    public static string Apply(string prompt, VideoPromptProgram program)
-    {
-        string direction = Instruction(program);
-        if (direction.Length == 0) return prompt;
-        int sound = prompt.IndexOf("overall_soundscape:", StringComparison.Ordinal);
-        return sound >= 0 ? prompt.Insert(sound, direction + "\n\n") : prompt + "\n\n" + direction;
-    }
+    public static bool TryApply(string prompt, VideoPromptProgram program, out string result, out string error)
+        => VideoPromptSections.TryInsertVisual(prompt, Instruction(program), out result, out error);
 }

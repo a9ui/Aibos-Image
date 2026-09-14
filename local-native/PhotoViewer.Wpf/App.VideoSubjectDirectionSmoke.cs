@@ -55,6 +55,81 @@ public partial class App
         program.ArmMotionId = "future-unknown";
         checks["unknownArmPresetProtectsStoredStyle"] = !VideoPromptProgram.TryRead(program.Snapshot(), out _);
         program.ArmMotionId = "original";
+        var selected = new VideoPromptProgram { ExpressionId = "bright", ArmMotionId = "lower" };
+        string spoken = "<d>[Japanese]見出しは\noverall_soundscape: と\nnon_diegetic_music: です。</d>";
+        string structural = CreateVideoH3Candidate("The presenter says " + spoken + ".\nShe reads \"\noverall_soundscape: quoted\".");
+        string selectedDirection = VideoSubjectDirection.Instruction(selected);
+        checks["actingInsertionSkipsDialogueAndQuotedSectionMarkers"] =
+            VideoSubjectDirection.TryApply(structural, selected, out string inserted, out _)
+            && inserted.Replace(selectedDirection + "\n\n", "", StringComparison.Ordinal) == structural
+            && inserted.Contains(spoken) && inserted.IndexOf(selectedDirection, StringComparison.Ordinal) > inserted.IndexOf("quoted", StringComparison.Ordinal)
+            && inserted.IndexOf(selectedDirection, StringComparison.Ordinal) < inserted.LastIndexOf("overall_soundscape:", StringComparison.Ordinal);
+        string musicOnly = MiniMaxH3I2vaPromptConformance.Opening + MiniMaxH3I2vaPromptConformance.IntegratedPrefix
+            + "The presenter waves." + MiniMaxH3I2vaPromptConformance.MusicPrefix + "N/A";
+        checks["actingInsertionUsesMusicBoundaryWhenSoundIsMissing"] =
+            VideoSubjectDirection.TryApply(musicOnly, selected, out inserted, out _)
+            && inserted.IndexOf(selectedDirection, StringComparison.Ordinal) < inserted.IndexOf("non_diegetic_music:", StringComparison.Ordinal)
+            && inserted.Replace(selectedDirection + "\n\n", "", StringComparison.Ordinal) == musicOnly;
+        string malformed = structural.Replace("</d>", "", StringComparison.Ordinal);
+        checks["ambiguousBoundaryFailsOnlySelectedDirections"] =
+            !VideoSubjectDirection.TryApply(malformed, selected, out _, out string insertionError) && insertionError.Length > 0
+            && VideoSubjectDirection.TryApply(malformed, new(), out inserted, out _) && inserted == malformed;
+        checks["armPriorityPermitsExplicitReleaseWithoutDroppingRequiredSupport"] =
+            selectedDirection.Contains("support required by the main action")
+            && selectedDirection.Contains("may be released when the selected arm direction explicitly calls for it")
+            && selectedDirection.Contains("Do not invent a release, hand-off, or dropped object");
+        var bound = new VideoPromptProgram
+        {
+            Enabled = true, AnnotatedH3 = true,
+            Template = "[She steps forward.] [She folds her arms.] [She looks stern.] [The mood is serious.] The presenter holds the cup and says <d>\\[Japanese\\]こんにちは。</d>.",
+        };
+        foreach (var pair in new[]
+        {
+            ("[She steps forward.]", "opening"), ("[She folds her arms.]", "arms"),
+            ("[She looks stern.]", "expression"), ("[The mood is serious.]", "mood"),
+        }) bound.Options[pair.Item1] = new() { DirectionAspect = pair.Item2 };
+        bound.TryResolveH3("anime", null, out string allOriginal, out _);
+        bound.BaseH3Template = allOriginal;
+        bound.PhotorealTemplate = bound.Template;
+        bound.PhotorealBaseH3Template = allOriginal;
+        var snapshot = bound.Snapshot();
+        bool replaces = true;
+        foreach (string kind in new[] { "anime", "photoreal" })
+        {
+            bound.OpeningMotionId = "step-back"; bound.ArmMotionId = "lower";
+            bound.ExpressionId = "bright"; bound.MoodId = "relaxed";
+            replaces &= bound.TryResolveH3(kind, null, out string resolved, out _)
+                && !resolved.Contains("She steps forward.") && !resolved.Contains("She folds her arms.")
+                && !resolved.Contains("She looks stern.") && !resolved.Contains("The mood is serious.")
+                && resolved.Contains("holds the cup") && resolved.Contains("<d>[Japanese]こんにちは。</d>")
+                && bound.TryCompile(kind, null, 362, out string compiled, out _)
+                && !compiled.Contains("She looks stern.") && !compiled.Contains("The mood is serious.");
+        }
+        checks["reviewedClausesAreReplacedInsteadOfContradicted"] = replaces;
+        bound.RestoreOriginalDirection("opening"); bound.RestoreOriginalDirection("arms");
+        bound.RestoreOriginalDirection("expression"); bound.RestoreOriginalDirection("mood");
+        checks["resetBindingsRetainsOriginalOptionsAndContent"] = bound.TryResolveH3("anime", null, out string reset, out _)
+            && reset == allOriginal && bound.Options.Values.All(option => option.Mode == "on")
+            && VideoPromptProgram.TryRead(snapshot, out var boundCopy) && boundCopy.Options.Values.All(option => option.DirectionAspect.Length > 0);
+        var mixed = new VideoPromptProgram
+        {
+            Enabled = true, AnnotatedH3 = true,
+            Template = "She holds the cup [with a stern expression].",
+            ExpressionId = "bright",
+            Options = new() { ["[with a stern expression]"] = new()
+            { DirectionAspect = "expression", DirectionReplacement = "with the selected expression" } },
+        };
+        checks["mixedDirectionClauseKeepsMainActionAndGrammar"] = mixed.TryResolveH3("anime", null, out string mixedPrompt, out _)
+            && mixedPrompt.Contains("She holds the cup with the selected expression.") && !mixedPrompt.Contains("stern")
+            && mixed.TryCompile("anime", null, 362, out string mixedInstruction, out _) && !mixedInstruction.Contains("stern");
+        var editor = new VideoPromptAuthoringControl();
+        editor.Load(mixed, "", "anime", "anime", null);
+        checks["replacedDirectionIsVisibleAsStruckTextWithReplacement"] =
+            ((System.Windows.Controls.TextBlock)editor.ReadingSurfaceForSmoke).Inlines
+                .OfType<System.Windows.Documents.Hyperlink>().Single().TextDecorations == System.Windows.TextDecorations.Strikethrough
+            && editor.ReadingTextForSmoke.Contains("with the selected expression");
+        bound.Options.Values.First().DirectionAspect = "future-aspect";
+        checks["unknownDirectionBindingProtectsStyle"] = !VideoPromptProgram.TryRead(bound.Snapshot(), out _);
         program.ExpressionId = "future-unknown";
         checks["unknownActingPresetProtectsStoredStyle"] = !VideoPromptProgram.TryRead(program.Snapshot(), out _);
     }

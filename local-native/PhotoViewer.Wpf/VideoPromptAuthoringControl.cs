@@ -251,7 +251,8 @@ public sealed class VideoPromptAuthoringControl : UserControl
         {
             if (token.Kind == 't') { _reading.Inlines.Add(new Run(token.Text)); continue; }
             VideoPromptOption option = _program.OptionFor(token);
-            bool on = token.Kind == '[' ? _program.IsOn(option, _sourcePrompt) : option.Mode != "off";
+            bool replaced = _program.IsDirectionReplaced(option);
+            bool on = !replaced && (token.Kind == '[' ? _program.IsOn(option, _sourcePrompt) : option.Mode != "off");
             bool automatic = token.Kind == '{' && option.Mode == "auto" && _program.ImageChoices && _imageAutomationEnabled;
             string shown = automatic ? string.Join(" / ", token.Choices)
                 : token.Choices.Count > 0 ? token.Choices.ElementAtOrDefault(option.ChoiceIndex) ?? "選び直す" : token.Text;
@@ -262,11 +263,14 @@ public sealed class VideoPromptAuthoringControl : UserControl
             {
                 Foreground = ColorBrush(color), Background = ColorBrush(fill),
                 TextDecorations = on ? null : System.Windows.TextDecorations.Strikethrough,
-                ToolTip = (option.Label.Length > 0 ? option.Label + " · " : "") + (on ? "クリックして候補や使い方を選ぶ" : "今回は使いません。クリックですぐ戻せます"),
+                ToolTip = replaced ? "上の演技設定で置き換えます。クリックすると元の指示へ戻せます。"
+                    : (option.Label.Length > 0 ? option.Label + " · " : "") + (on ? "クリックして候補や使い方を選ぶ" : "今回は使いません。クリックですぐ戻せます"),
             };
             AutomationProperties.SetName(link, shown + (on ? " 使用する" : " 使用しない"));
             link.Click += (_, _) => OpenOption(token, link);
             _reading.Inlines.Add(link);
+            if (replaced && (token.Kind == '[' ? _program.IsOn(option, _sourcePrompt) : option.Mode != "off") && option.DirectionReplacement.Length > 0)
+                _reading.Inlines.Add(new Run(" → " + option.DirectionReplacement) { Foreground = Ink });
         }
     }
 
@@ -296,6 +300,34 @@ public sealed class VideoPromptAuthoringControl : UserControl
 
     private void OpenOption(VideoPromptToken token, Hyperlink link)
     {
+        if (_program.IsDirectionReplaced(_program.OptionFor(token)))
+        {
+            var restoreMenu = new ContextMenu { Background = Paper, Foreground = Ink };
+            string aspectLabel = _program.OptionFor(token).DirectionAspect switch
+            { "opening" => "冒頭の動き", "arms" => "腕・手の動き", "expression" => "表情", _ => "ムード" };
+            var restore = new MenuItem { Header = aspectLabel + "を元の指示に戻す", Background = Paper, Foreground = Ink };
+            restore.Click += (_, _) =>
+            {
+                _program.RestoreOriginalDirection(_program.OptionFor(token).DirectionAspect);
+                Publish(null);
+                _loading = true;
+                try
+                {
+                    _openingMotion.SelectedValue = _program.OpeningMotionId;
+                    _armMotion.SelectedValue = _program.ArmMotionId;
+                    _expression.SelectedValue = _program.ExpressionId;
+                    _mood.SelectedValue = _program.MoodId;
+                }
+                finally { _loading = false; }
+                Render();
+            };
+            restoreMenu.Items.Add(restore);
+            restoreMenu.PlacementTarget = _reading;
+            restoreMenu.Placement = PlacementMode.MousePoint;
+            link.ContextMenu = restoreMenu;
+            restoreMenu.IsOpen = true;
+            return;
+        }
         var menu = new ContextMenu { Background = Paper, Foreground = Ink, BorderBrush = ColorBrush("#526887") };
         void Item(string label, bool selected, Action<VideoPromptOption> change)
         {

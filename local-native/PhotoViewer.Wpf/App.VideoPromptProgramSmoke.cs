@@ -277,7 +277,7 @@ public partial class App
                         if (!window.SelectVideoPromptTemplateForSmoke(id)) return false;
                         var built = window.VideoPromptProgramSnapshotForSmoke.Deserialize<VideoPromptProgram>()!;
                         return built.TryGetUnchangedH3("anime", out string original) && original == window.VideoPromptForSmoke
-                            && built.Options.Values.Single().ChoiceLabels.Contains("POV風の揺れ・視線移動")
+                            && built.Options.Values.Single(option => option.Category == "camera").ChoiceLabels.Contains("POV風の揺れ・視線移動")
                             && window.VideoPromptProgramEnqueueErrorForSmoke is null;
                     }) && rewriteCalls == callsBeforeCameraChoices;
                     window.SelectVideoPromptTemplateForSmoke("cinematic-camera");
@@ -299,7 +299,7 @@ public partial class App
                     reload = HiddenWindow();
                     checks["annotatedStyleRoundTripsWithReadableLabels"] = reload.SelectedVideoStyleNameForSmoke == "Annotated camera style"
                         && reload.VideoPromptProgramEnqueueErrorForSmoke is null
-                        && reload.VideoPromptProgramSnapshotForSmoke.Deserialize<VideoPromptProgram>()!.Options.Values.Single().ChoiceLabels[0] == "元のカメラ指示";
+                        && reload.VideoPromptProgramSnapshotForSmoke.Deserialize<VideoPromptProgram>()!.Options.Values.Single(option => option.Category == "camera").ChoiceLabels[0] == "元のカメラ指示";
                     reload.Close();
                     string stylePath = Path.GetFullPath(window.AiStylePathForSmoke);
                     if (!stylePath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))

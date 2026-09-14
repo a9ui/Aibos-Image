@@ -86,6 +86,10 @@ public sealed class VideoPromptProgram
                 || !Bounded(option.Keyword, 200) || option.ChoiceIndex is < 0 or > 15)
                 return false;
             else if (!Bounded(option.Label, 120) || !Bounded(option.Group, 120)
+                || !Bounded(option.DirectionAspect, 16)
+                || !Bounded(option.DirectionReplacement, 1000)
+                || (option.DirectionAspect.Length == 0 && option.DirectionReplacement.Length > 0)
+                || option.DirectionAspect is not ("" or "opening" or "arms" or "expression" or "mood")
                 || option.Category is not ("" or "camera" or "action" or "expression" or "viewpoint" or "ending" or "sound" or "detail")
                 || option.ChoiceLabels is null || option.ChoiceLabels.Count > 16
                 || option.ChoiceLabels.Any(label => !Bounded(label, 120)))
@@ -149,8 +153,30 @@ public sealed class VideoPromptProgram
         return true;
     }
 
+    public bool IsDirectionReplaced(VideoPromptOption option)
+        => option.DirectionAspect switch
+        {
+            "opening" => OpeningMotionId != "original",
+            "arms" => ArmMotionId != "original",
+            "expression" => ExpressionId != "original",
+            "mood" => MoodId != "original",
+            _ => false,
+        };
+
+    public void RestoreOriginalDirection(string aspect)
+    {
+        switch (aspect)
+        {
+            case "opening": OpeningMotionId = "original"; break;
+            case "arms": ArmMotionId = "original"; break;
+            case "expression": ExpressionId = "original"; break;
+            case "mood": MoodId = "original"; break;
+        }
+    }
+
     public bool IsOn(VideoPromptOption option, string? sourcePrompt)
     {
+        if (IsDirectionReplaced(option) && option.DirectionReplacement.Length == 0) return false;
         if (option.Mode != "auto" || !SourceRules)
             return option.Mode == "on" || (option.Mode == "auto" && option.DefaultOn);
         // Unknown metadata is not evidence that a word or a prompt is absent.
@@ -174,20 +200,20 @@ public sealed class VideoPromptProgram
         {
             if (token.Kind == 't') { resolved.Append(token.Text); continue; }
             VideoPromptOption option = OptionFor(token);
-            if (token.Kind == '[' ? !IsOn(option, sourcePrompt) : option.Mode == "off") continue;
+            if ((IsDirectionReplaced(option) && option.DirectionReplacement.Length == 0) || (token.Kind == '[' ? !IsOn(option, sourcePrompt) : option.Mode == "off")) continue;
             if (token.Choices.Count > 0 && option.ChoiceIndex >= token.Choices.Count)
             { error = "候補が編集されています。色付きの部分から選び直してください。"; return false; }
             // With enhancement off, image choices use the selected/default
             // alternative. No AI instructions or optional planning are emitted.
-            resolved.Append(token.Choices.Count > 0 ? token.Choices[option.ChoiceIndex] : token.Text);
+            resolved.Append(IsDirectionReplaced(option) ? option.DirectionReplacement
+                : token.Choices.Count > 0 ? token.Choices[option.ChoiceIndex] : token.Text);
         }
         string body = resolved.ToString().Trim();
         if (body.Length == 0) { error = "本文か使用する候補を入力してください。"; return false; }
         string baseline = AnnotatedH3 ? "" : BaseTemplateFor(kind).Trim();
         if (baseline.Length > 0)
         {
-            int sound = baseline.IndexOf(MiniMaxH3I2vaPromptConformance.SoundscapePrefix, StringComparison.Ordinal);
-            body = sound >= 0 ? baseline.Insert(sound, "\n\n" + body) : baseline + "\n\n" + body;
+            if (!VideoPromptSections.TryInsertVisual(baseline, body, out body, out error)) return false;
         }
         if (!body.Contains(MiniMaxH3I2vaPromptConformance.IntegratedMarker, StringComparison.Ordinal)
             && !body.Contains(MiniMaxH3I2vaPromptConformance.SoundscapeMarker, StringComparison.Ordinal)
@@ -196,7 +222,7 @@ public sealed class VideoPromptProgram
             body = MiniMaxH3I2vaPromptConformance.Opening + MiniMaxH3I2vaPromptConformance.IntegratedPrefix + body
                 + MiniMaxH3I2vaPromptConformance.SoundscapePrefix + "N/A"
                 + MiniMaxH3I2vaPromptConformance.MusicPrefix + "N/A";
-        body = VideoSubjectDirection.Apply(body, this);
+        if (!VideoSubjectDirection.TryApply(body, this, out body, out error)) return false;
         if (body.Length > 8000) { error = "生成用の本文を8,000文字以内にしてください。"; return false; }
         // Conformance remains available for AI candidates. Direct enqueue does
         // not force rewriting or alter the user's existing H3 sections.
@@ -225,6 +251,12 @@ public sealed class VideoPromptProgram
         foreach (VideoPromptToken token in tokens)
         {
             VideoPromptOption option = OptionFor(token);
+            if (token.Kind != 't' && IsDirectionReplaced(option))
+            {
+                if (token.Kind == '[' ? IsOn(option, sourcePrompt) : option.Mode != "off")
+                    text.Append(option.DirectionReplacement);
+                continue;
+            }
             if (token.Kind == 't') text.Append(token.Text);
             else if (token.Kind == '[')
             {
@@ -294,6 +326,10 @@ public sealed class VideoPromptOption
 {
     public string Label { get; set; } = "";
     public string Category { get; set; } = "";
+    // An explicitly reviewed style clause owned by a shared acting selector.
+    // Only the resolved copy omits it when that selector overrides the style.
+    public string DirectionAspect { get; set; } = "";
+    public string DirectionReplacement { get; set; } = "";
     public string Group { get; set; } = "";
     public List<string> ChoiceLabels { get; set; } = [];
     public string Mode { get; set; } = "on";

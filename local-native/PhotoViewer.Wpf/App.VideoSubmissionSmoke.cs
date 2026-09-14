@@ -18,6 +18,8 @@ public partial class App
         int rewrites = 0, enqueues = 0, unexpectedPosts = 0;
         bool staleDuringHealth = false, enhancementCapability = true;
         JsonElement lastRequested = default;
+        TaskCompletionSource? publicationGate = null;
+        var publicationEntered = new TaskCompletionSource();
         TaskCompletionSource? healthGate = null;
         var healthEntered = new TaskCompletionSource();
         string publishedPrompt = "";
@@ -45,6 +47,8 @@ public partial class App
                 using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
                 lastRequested = body.RootElement.GetProperty("video").GetProperty("requested").Clone();
                 publishedPrompt = body.RootElement.GetProperty("video").GetProperty("requested").GetProperty("prompt").GetString()!;
+                publicationEntered.TrySetResult();
+                if (publicationGate is not null) await publicationGate.Task.WaitAsync(token);
                 return BuildVideoToolsV2FlowAcceptedResponse(request, "synthetic-video-submission-" + enqueues);
             }
             if (request.Method == HttpMethod.Get && route == "/api/enhance/jobs")
@@ -133,6 +137,12 @@ public partial class App
             && actingPrompt.Contains("mildly annoyed") && actingPrompt.Contains("lighthearted")
             && actingPrompt.Contains("<d>[Japanese]こんにちは。</d>") && rewrites == 0;
         checks["actingSelectionEnqueuesWithoutAi"] = await window.SubmitVideoGenerationForSmokeAsync() && enqueues == 8 && publishedPrompt == actingPrompt;
+        window.SelectActingForSmoke("step-back", "bright", "relaxed", "lower");
+        checks["actingChangeRebuildsFromDraftWithoutDuplicateDirections"] =
+            window.VideoPromptForSmoke.Split("Opening movement, immediately", StringSplitOptions.None).Length == 2
+            && !window.VideoPromptForSmoke.Contains("behind her lower back");
+        window.SelectActingForSmoke("original", "original", "original", "original");
+        checks["actingResetInRealSubmissionPathRestoresExactSource"] = window.VideoPromptForSmoke == speechPrompt;
         window.OpenVideoGenerationBoardForSmoke("original");
         window.Height = 1020;
         window.UpdateLayout();
@@ -162,5 +172,27 @@ public partial class App
         window.OpenVideoGenerationBoardForSmoke("original");
         checks["canceledRegistrationCanBeExplicitlyRetried"] =
             await window.SubmitVideoGenerationForSmokeAsync() && enqueues == 9;
+        // Once durable publication begins, an editor close or change belongs to
+        // the next draft. It cannot invalidate the accepted request or receipt.
+        foreach (bool enhance in new[] { false, true })
+        {
+            window.OpenVideoGenerationBoardForSmoke("original");
+            window.SetVideoEnhanceAtExecutionForSmoke(enhance);
+            publicationGate = new TaskCompletionSource();
+            publicationEntered = new TaskCompletionSource();
+            Task<bool> publishing = window.SubmitVideoGenerationForSmokeAsync();
+            await publicationEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            string acceptedSnapshot = lastRequested.GetRawText();
+            int acceptedCount = enqueues;
+            window.SetVideoPromptProgramForSmoke(draft);
+            window.CloseVideoSubmissionForSmoke();
+            window.CancelVideoSubmissionForSmoke();
+            publicationGate.SetResult();
+            bool accepted = await publishing;
+            window.OpenVideoGenerationBoardForSmoke("original");
+            checks[$"{(enhance ? "enhanced" : "direct")}PublishedRequestSurvivesEditCloseAndReopen"] =
+                accepted && enqueues == acceptedCount && lastRequested.GetRawText() == acceptedSnapshot && unexpectedPosts == 0;
+            publicationGate = null;
+        }
     }
 }

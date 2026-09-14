@@ -635,8 +635,19 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   style never rewrites its text or user state. Resetting all four to `original`
   removes the added acting directions. Arm choices control only arms and hands;
   the opening choice controls body travel. Required main-action hand movement,
-  existing contacts, held objects and weight-bearing supports take priority over
-  decorative gestures. Facial selections take priority over mood for expression.
+  contacts, held objects and weight-bearing supports required by that action take
+  priority over decorative gestures. Unneeded initial contact may be released
+  when explicitly requested by the selected arm direction; no release, hand-off
+  or dropped object is invented. Facial selections take priority over mood for expression.
+  Reviewed option clauses may bind `DirectionAspect` to `opening`, `arms`,
+  `expression` or `mood`. A changed shared selector replaces only its bound
+  clause, using optional `DirectionReplacement` for surrounding sentence
+  continuity. The original option, mode and text remain recoverable; the editor
+  strikes the replaced clause and shows its replacement. No arbitrary user text
+  is classified automatically. Built-in bindings are explicit reviewed phrases.
+  Acting directions enter the visual section outside dialogue and quotations.
+  Ambiguous section boundaries fail with an editing diagnostic, without forcing
+  AI enhancement; `original` preserves the untouched body.
   These are scoped prompt directions, not a guarantee of model compliance.
 - Physical continuity is optional prompt guidance, not a physics simulation or
   a quality guarantee. It preserves support and attachment constraints, adds no
