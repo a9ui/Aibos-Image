@@ -4373,6 +4373,9 @@
               <StackPanel Margin="0,8,0,0">
                 <DockPanel Margin="0,0,0,7">
                   <Button DockPanel.Dock="Right" Content="フォルダを選ぶ" Style="{StaticResource GhostButton}" Padding="8,4" Click="ChooseVideoLoraFolder_Click"/>
+                  <Button x:Name="VideoLoraOpenFolderButton" DockPanel.Dock="Right" Content="フォルダを開く"
+                          Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,6,0" IsEnabled="False"
+                          ToolTip="LoRAの保存フォルダをエクスプローラーで開く" Click="OpenVideoLoraFolder_Click"/>
                   <Button DockPanel.Dock="Right" Content="一覧を更新" Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,6,0" Click="RefreshVideoLoras_Click"/>
                   <TextBlock x:Name="VideoLoraFolderText" Text="保存フォルダを選んでください" Foreground="#C7D8EB" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                 </DockPanel>

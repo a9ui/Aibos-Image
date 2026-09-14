@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
@@ -44,13 +46,41 @@ public partial class MainWindow
 
     private async void RefreshVideoLoras_Click(object sender, RoutedEventArgs e) => await RefreshVideoLorasAsync();
 
+    private void OpenVideoLoraFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string directory = _videoLoraDirectory;
+            if (!new VideoLoraSelection(1, directory, "probe.safetensors", "", 0, 1).ValidNames()
+                || !Directory.Exists(directory))
+            {
+                VideoLoraStatus.Text = "保存フォルダが見つかりません。「フォルダを選ぶ」で指定してください。";
+                return;
+            }
+            VideoLoraSelection.RequireNormalPath(directory);
+            var startInfo = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            startInfo.ArgumentList.Add(directory);
+            VideoLoraStatus.Text = _explorerLauncher(startInfo)
+                ? "LoRAの保存フォルダを開きました。ファイルを追加したら「一覧を更新」を押してください。"
+                : "保存フォルダを開けませんでした。アクセスできるか確認してください。";
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidDataException or IOException
+            or UnauthorizedAccessException or InvalidOperationException or ArgumentException
+            or NotSupportedException or System.Security.SecurityException)
+        {
+            VideoLoraStatus.Text = "保存フォルダを開けませんでした。場所とアクセス権を確認してください。";
+        }
+    }
+
     private async Task RefreshVideoLorasAsync()
     {
         if (VideoLoraRows is null) return;
         long scan = ++_videoLoraScanRevision;
         string directory = _videoLoraDirectory;
+        VideoLoraOpenFolderButton.IsEnabled = !string.IsNullOrWhiteSpace(directory);
         _videoLoraChoices = []; RenderVideoLoraRows();
         VideoLoraFolderText.Text = directory.Length == 0 ? "保存フォルダを選んでください" : directory;
+        VideoLoraFolderText.ToolTip = directory.Length == 0 ? null : directory;
         VideoLoraStatus.Text = directory.Length == 0 ? "フォルダ内から追加できます。何も追加しなければLoRAを使いません。" : "フォルダを確認しています…";
         try
         {
