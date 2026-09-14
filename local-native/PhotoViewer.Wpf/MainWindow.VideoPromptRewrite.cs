@@ -474,6 +474,7 @@ public partial class MainWindow
 
     private void VideoH3PromptRewriteContextChanged(bool cancelPending = true)
     {
+        InvalidateAutomaticVideoSubmission();
         _videoH3RewriteContextRevision++;
         if (!_changingVideoPromptForH3History)
         {

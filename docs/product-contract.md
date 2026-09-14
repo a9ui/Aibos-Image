@@ -577,13 +577,24 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   action planning or rewriting; plain directions receive the pinned H3 envelope
   with N/A sound/music defaults. Existing H3 sections and literal content survive.
   On explicitly enhances the current image and instructions, validates freshness
-  and H3 conformance, applies the result, then enqueues without a manual review
-  step. Enhancement is transient and not yet queued; the progress text says so.
+  and H3 conformance, passes an immutable generation copy to enqueue without a
+  manual review step. Automatic enhancement never applies its result to the
+  editor, literal variant bases, saved style, or notes. The current session may
+  show the last submitted copy in a separate read-only preview. Enhancement is transient and not yet queued; the progress text says so.
   Failure, cancellation, or input drift never enqueue a fallback. Duplicate
-  submissions are blocked. The optional preview panel stays passive when opened.
-  Style management, Japanese notes, output settings, technical details, and the
-  generated prompt are collapsed until needed. The footer summarizes duration
-  and quality and links to output settings. The primary editor retains inline
+  submissions are blocked. Each automatic submission captures its draft, source
+  kind, model, duration, quality, steps, and enhancement mode. Input changes and
+  cancellation permanently invalidate the attempt, even when the edit is undone.
+  A footer cancellation action or closing the board before publication prevents
+  later results from enqueueing. After durable publication, the existing inbox
+  and request identity own delivery recovery. The optional preview stays passive.
+  The captured image and its transient source-kind selector appear first,
+  followed by the unified style selector and inline prompt. Duration and quality
+  are visible below the editor. Style save/delete controls open in a separate
+  management window. Japanese notes, AI options and technical settings, and the
+  read-only generation preview expand only when requested. There is no candidate
+  preparation/apply panel in the normal generation flow. The footer shows progress,
+  cancellation, the enhancement checkbox, and one enqueue action. The primary editor retains inline
   options and reversible editing; hiding detail panels does not reset values.
   Reading mode retains the complete H3 first-frame binding and original section
   keys, including soundscape and music. Only inline options change presentation;

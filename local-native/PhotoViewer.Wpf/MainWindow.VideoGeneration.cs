@@ -1531,6 +1531,7 @@ public partial class MainWindow
 
     private void CloseModalVideoGenerationBoard()
     {
+        if (!_videoGenerationRequestPending) _videoActiveSubmission = null;
         CancelVideoH3PromptRewrite();
         if (ModalVideoGenerationPopup is not null)
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
@@ -1622,6 +1623,7 @@ public partial class MainWindow
             MiniMaxH3VideoCanvasMaximumPixelArea,
             SupportedMiniMaxH3VideoMaximumPixelAreas);
         MarkVideoStyleAsCustom();
+        VideoH3PromptRewriteContextChanged();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
             $"MiniMax H3の動画サイズ上限を{_videoMaximumPixelArea.ToString("N0", CultureInfo.InvariantCulture)}pxに保存しました。STEP数は変えていません。");
@@ -1642,6 +1644,7 @@ public partial class MainWindow
             MiniMaxH3VideoMaximumSteps);
         _videoStepsInputValid = true;
         MarkVideoStyleAsCustom();
+        VideoH3PromptRewriteContextChanged();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
             $"MiniMax H3の{_videoSteps} STEPを保存しました。次に追加する動画ジョブから使われます。");
@@ -1674,6 +1677,7 @@ public partial class MainWindow
         _videoSteps = steps;
         _videoStepsInputValid = true;
         MarkVideoStyleAsCustom();
+        VideoH3PromptRewriteContextChanged();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
             $"MiniMax H3の{_videoSteps} STEPを保存しました。次に追加する動画ジョブから使われます。");
@@ -2681,14 +2685,20 @@ public partial class MainWindow
     private async void QueueVideoGeneration_Click(object sender, RoutedEventArgs e)
         => await SubmitVideoGenerationAsync();
 
-    private async Task<bool> QueueVideoGenerationAsync()
+    private async Task<bool> QueueVideoGenerationAsync(string? preparedPrompt = null, Func<string?>? validateSubmission = null)
     {
         if (_videoGenerationRequestPending || VideoPromptPreparationPending)
             return false;
 
-        ApplyDirectVideoSourceVariant();
+        if (preparedPrompt is null) ApplyDirectVideoSourceVariant();
 
-        if (ValidateVideoProgramForEnqueue() is not null)
+        if (validateSubmission?.Invoke() is string submissionError)
+        {
+            SetVideoGenerationSettingsStatus(submissionError);
+            return false;
+        }
+
+        if (preparedPrompt is null && ValidateVideoProgramForEnqueue() is not null)
         {
             // The persistent preparation guide owns this validation message.
             // Do not repeat a second, older instruction above the same footer.
@@ -2727,6 +2737,8 @@ public partial class MainWindow
 
         VideoGenerationRequestSettings settings =
             CurrentVideoGenerationRequestSettings();
+        string capturedEditorPrompt = settings.Prompt;
+        if (preparedPrompt is not null) settings = settings with { Prompt = preparedPrompt };
         string? capturedProgramContext = _videoPromptProgram.Enabled || _videoPromptProgram.UseSourceVariants ? VideoProgramContext() : null;
         _videoGenerationRequestPending = true;
         string? pendingDeliveryRequestId = null;
@@ -2794,7 +2806,8 @@ public partial class MainWindow
                 requireExactHealthValidation: h3Selected,
                 recoverySourceIdentity: source.SourceIdentity,
                 prePublishValidator: () =>
-                    ValidateCapturedVideoProgram(capturedProgramContext, settings.Prompt)
+                    validateSubmission?.Invoke()
+                    ?? ValidateCapturedVideoProgram(capturedProgramContext, capturedEditorPrompt, preparedPrompt is null)
                     ?? ValidateVideoSourceImmediatelyBeforePublish(
                         capturedSourceTile,
                         source,
@@ -2811,6 +2824,9 @@ public partial class MainWindow
                         RecordPendingVideoSourceDependency(
                             item.RequestId,
                             source);
+                        // After this durable boundary the immutable submission
+                        // belongs to delivery recovery, not the editable draft.
+                        if (preparedPrompt is not null) _videoActiveSubmission = null;
                         return publishLease;
                     }
                     catch
@@ -2821,6 +2837,7 @@ public partial class MainWindow
                 });
             if (response.SavedForDelivery)
             {
+                RecordVideoSubmissionPreview(settings.Prompt, preparedPrompt is not null);
                 RecordActiveVideoSourceDependency(source);
                 SetVideoGenerationSettingsStatus(
                     "動画化の予約を保存しました。Jobsへの登録を継続しています。");
@@ -2840,6 +2857,7 @@ public partial class MainWindow
             }
 
             TryGetStringProperty(job, "id", out string? jobId);
+            RecordVideoSubmissionPreview(settings.Prompt, preparedPrompt is not null);
             RecordActiveVideoSourceDependency(source);
             ApplyActiveEnhancementQueueJobToVisibleCatalog(job, capturedSourceTile);
             string suffix = string.IsNullOrWhiteSpace(jobId)
@@ -3311,7 +3329,7 @@ public partial class MainWindow
                     StringComparison.Ordinal)
                 || !string.Equals(
                     ModalVideoH3ResolutionLabel.Text,
-                    "動画サイズ（STEPとは独立）",
+                    "画質",
                     StringComparison.Ordinal)
                 || !ModalVideoH3ResolutionComboBox.Items
                     .OfType<ComboBoxItem>()

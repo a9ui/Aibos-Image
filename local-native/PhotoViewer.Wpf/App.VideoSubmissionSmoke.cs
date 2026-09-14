@@ -61,7 +61,7 @@ public partial class App
         window.SetVideoEnhanceBeforeEnqueueForSmoke(false);
         window.SyncVideoGenerationSettingsForSmoke();
         window.UpdateLayout();
-        checks["submissionAlwaysMeansEnqueue"] = window.VideoSubmissionActionForSmoke == "H3動画化をキューへ追加" && window.VideoGenerationQueueEnabledForSmoke;
+        checks["submissionAlwaysMeansEnqueue"] = window.VideoSubmissionActionForSmoke == "キューに追加" && window.VideoGenerationQueueEnabledForSmoke;
         checks["menuDetailsStartCollapsed"] = window.VideoMenuDetailsCollapsedForSmoke && !window.VideoPreparationExpandedForSmoke;
         checks["queueFooterStaysVisibleWhileScrolling"] = window.VideoSubmissionFooterFixedForSmoke();
         checks["annotatedReadingShowsCompleteH3Structure"] = window.VideoFullH3PromptPreservesSourceForSmoke;
@@ -75,10 +75,14 @@ public partial class App
             && literalEditor.ReadingTextForSmoke.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n') == speechPrompt;
         window.CaptureVideoVariantForSmoke((_, visual) => capture("video-menu-ready", visual));
         window.VerifyVideoMenuScrollingForSmoke(checks, capture);
+        checks["studioHasOneEditorAndVisibleDurationQuality"] = window.VideoStudioLayoutForSmoke;
+        window.OpenVideoSubmissionPreviewForSmoke();
         string direct = window.VideoPromptForSmoke;
+        checks["resolvedPreviewIsPassive"] = window.VideoResolvedPreviewForSmoke == direct && rewrites == 0 && enqueues == 0;
+        string draftBefore = window.VideoPromptProgramSnapshotForSmoke.GetRawText();
         checks["uncheckedSubmissionEnqueuesWithoutAi"] = await window.SubmitVideoGenerationForSmokeAsync()
             && rewrites == 0 && enqueues == 1 && publishedPrompt == direct && publishedPrompt.Contains("orbit the camera left");
-        window.OpenVideoPromptPreparationForSmoke();
+        window.OpenVideoSubmissionPreviewForSmoke();
         checks["preparationLinkIsPassive"] = rewrites == 0 && enqueues == 1;
         window.SetVideoEnhanceBeforeEnqueueForSmoke(true);
         rewriteGate = new TaskCompletionSource();
@@ -87,8 +91,11 @@ public partial class App
         checks["automaticEnhancementBlocksRepeatedSubmission"] = !window.VideoGenerationQueueEnabledForSmoke
             && !await window.SubmitVideoGenerationForSmokeAsync() && rewrites == 1 && enqueues == 1;
         rewriteGate.SetResult();
-        checks["checkedSubmissionEnhancesAppliesAndEnqueuesOnce"] = await automatic && rewrites == 1 && enqueues == 2
+        checks["checkedSubmissionEnhancesCopyAndEnqueuesOnce"] = await automatic && rewrites == 1 && enqueues == 2
             && publishedPrompt == CreateVideoH3Candidate("QUEUE_RESULT");
+        checks["automaticEnhancementKeepsEditorAndProgramUnchanged"] = window.VideoPromptForSmoke == direct
+            && window.VideoPromptProgramSnapshotForSmoke.GetRawText() == draftBefore
+            && window.LastSubmittedVideoPromptForSmoke == publishedPrompt;
         rewriteGate = null;
         failRewrite = true;
         checks["enhancementFailureDoesNotEnqueueFallback"] = !await window.SubmitVideoGenerationForSmokeAsync()
@@ -104,9 +111,68 @@ public partial class App
         staleDuringHealth = true;
         checks["automaticSubmissionRevalidatesBeforePublication"] = !await window.SubmitVideoGenerationForSmokeAsync() && enqueues == 2;
         checks["automaticEnhancementCanRetry"] = await window.SubmitVideoGenerationForSmokeAsync() && enqueues == 3;
+        rewriteGate = new TaskCompletionSource();
+        rewriteEntered = new TaskCompletionSource();
+        Task<bool> canceled = window.SubmitVideoGenerationForSmokeAsync();
+        await rewriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        bool cancelVisible = window.VideoSubmissionCancelVisibleForSmoke;
+        window.CancelVideoSubmissionForSmoke();
+        rewriteGate.TrySetResult();
+        checks["footerCancellationNeverEnqueues"] = cancelVisible && !await canceled && enqueues == 3;
+        rewriteGate = new TaskCompletionSource();
+        rewriteEntered = new TaskCompletionSource();
+        Task<bool> closed = window.SubmitVideoGenerationForSmokeAsync();
+        await rewriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        window.CloseVideoSubmissionForSmoke();
+        rewriteGate.TrySetResult();
+        checks["closingBeforePublicationNeverEnqueues"] = !await closed && enqueues == 3;
+        rewriteGate = new TaskCompletionSource();
+        rewriteEntered = new TaskCompletionSource();
+        Task<bool> restored = window.SubmitVideoGenerationForSmokeAsync();
+        await rewriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var changedBack = draft.Clone(); changedBack.Template += " ";
+        window.SetVideoPromptProgramForSmoke(changedBack);
+        window.SetVideoPromptProgramForSmoke(draft);
+        rewriteGate.TrySetResult();
+        checks["restoringAnEditDoesNotReviveAttempt"] = !await restored && enqueues == 3;
+        rewriteGate = new TaskCompletionSource();
+        rewriteEntered = new TaskCompletionSource();
+        Task<bool> qualityChanged = window.SubmitVideoGenerationForSmokeAsync();
+        await rewriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        window.RestoreChangedVideoQualityForSmoke();
+        rewriteGate.TrySetResult();
+        checks["restoringQualityDoesNotReviveAttempt"] = !await qualityChanged && enqueues == 3;
+        rewriteGate = new TaskCompletionSource();
+        rewriteEntered = new TaskCompletionSource();
+        Task<bool> uncheckedPending = window.SubmitVideoGenerationForSmokeAsync();
+        await rewriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        window.SetVideoEnhanceBeforeEnqueueForSmoke(false);
+        rewriteGate.TrySetResult();
+        checks["uncheckingDuringEnhancementDoesNotAutoEnqueue"] = !await uncheckedPending && enqueues == 3;
+        rewriteGate = null;
         window.SetVideoEnhanceBeforeEnqueueForSmoke(false);
         int rewritesBeforeOff = rewrites;
         checks["turningEnhancementOffRestoresDirectSubmission"] = await window.SubmitVideoGenerationForSmokeAsync()
             && enqueues == 4 && rewrites == rewritesBeforeOff && !publishedPrompt.Contains("QUEUE_RESULT") && unexpectedPosts == 0;
+        // Literal styles also keep their source and variant base; automatic
+        // enhancement must never use the legacy Apply-to-editor path.
+        var literalProgram = new VideoPromptProgram { UseSourceVariants = true, BaseH3Template = speechPrompt };
+        window.SetVideoPromptProgramForSmoke(literalProgram);
+        window.SyncVideoGenerationSettingsForSmoke();
+        string literalBefore = window.VideoPromptProgramSnapshotForSmoke.GetRawText();
+        window.SetVideoEnhanceBeforeEnqueueForSmoke(true);
+        checks["literalEnhancementUsesCopyWithoutRewritingBase"] = await window.SubmitVideoGenerationForSmokeAsync()
+            && enqueues == 5 && window.VideoPromptForSmoke == speechPrompt
+            && window.VideoPromptProgramSnapshotForSmoke.GetRawText() == literalBefore;
+        window.SetVideoEnhanceBeforeEnqueueForSmoke(false);
+        checks["literalOffDoesNotReusePriorEnhancement"] = await window.SubmitVideoGenerationForSmokeAsync()
+            && enqueues == 6 && publishedPrompt == speechPrompt;
+        window.OpenVideoGenerationBoardForSmoke("original");
+        window.Height = 1020;
+        window.UpdateLayout();
+        window.CaptureVideoVariantForSmoke((_, visual) => capture("video-studio", visual));
+        window.OpenVideoSubmissionPreviewForSmoke();
+        checks["separateStyleManagementIsPassiveAndRestoresControls"] = window.VerifyVideoStyleManagementForSmoke(v => capture("video-style-management", v))
+            && enqueues == 6 && unexpectedPosts == 0;
     }
 }

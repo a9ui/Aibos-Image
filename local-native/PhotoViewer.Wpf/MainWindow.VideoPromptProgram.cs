@@ -69,6 +69,7 @@ public partial class MainWindow
             }
         }
         finally { _syncingVideoAuthoringControls = false; }
+        RefreshVideoStudio();
     }
 
     private void VideoAuthoringChanged(VideoPromptAuthoringControl sender, VideoPromptProgram program, string? rawPrompt)
@@ -96,6 +97,7 @@ public partial class MainWindow
             SetVideoStyleStatus("変更は今回の動画に使います。残したい場合は名前を付けてスタイルを保存してください。");
         }
         finally { _syncingVideoAuthoringControls = false; }
+        RefreshVideoStudio();
     }
 
     private void InvalidateVideoProgramAuthoring()
@@ -288,6 +290,7 @@ public partial class MainWindow
             return false;
         }
         int frames = MiniMaxH3FrameCountForDuration(_videoDurationSeconds);
+        if (_videoAutomaticSubmissionPending && _videoActiveSubmission is null) return false;
         if (!_videoPromptProgram.TryCompile(EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), frames,
                 out string request, out string error))
         {
@@ -346,13 +349,13 @@ public partial class MainWindow
         return error.Length > 0 ? error : "本文の選択を読み直してください。";
     }
 
-    private string? ValidateCapturedVideoProgram(string? context, string prompt)
+    private string? ValidateCapturedVideoProgram(string? context, string prompt, bool requireResolved = true)
     {
         if (context is null && !_videoPromptProgram.Enabled && !_videoPromptProgram.UseSourceVariants) return null;
         if (context is null || (!_videoPromptProgram.Enabled && !_videoPromptProgram.UseSourceVariants) || context != VideoProgramContext()
             || !string.Equals(prompt, _videoPrompt.Trim(), StringComparison.Ordinal))
             return "動画化の準備中に指示言語の設定が変わりました。確認して追加し直してください。";
-        return ValidateVideoProgramForEnqueue();
+        return requireResolved ? ValidateVideoProgramForEnqueue() : null;
     }
 
     private void RestoreVideoPromptProgram(JsonElement? snapshot)

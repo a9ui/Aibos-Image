@@ -21,7 +21,10 @@ public sealed class VideoPromptAuthoringControl : UserControl
     private readonly ToggleButton _edit = new() { Content = "編集", Padding = new Thickness(16, 6, 16, 6), MinHeight = 32 };
     private readonly TextBox _input = Editor("指示の本文", 180);
     private readonly TextBox _notes = Editor("日本語訳・メモ", 70);
-    private readonly Expander _notesPanel = new() { Header = "日本語訳・メモ", Foreground = Muted, Margin = new Thickness(0, 8, 0, 4) };
+    private readonly Expander _notesPanel = new() { Header = "日本語訳・スタイル説明", Foreground = Muted, Margin = new Thickness(0, 8, 0, 4) };
+    private readonly TextBlock _sourceLabel = Label("画像の扱い", true);
+    private readonly WrapPanel _detailsFooter = new() { Margin = new Thickness(0, 6, 0, 0) };
+    private bool _menuLayout;
     private readonly TextBlock _reading = new() { TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 27, Foreground = Ink };
     private readonly TextBlock _hint = Label("青：手動選択　紫：画像AI　黄：条件判定", false);
     private readonly TextBlock _variantHint = Label("", false);
@@ -44,7 +47,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         Resources[typeof(TextBlock)] = new Style(typeof(TextBlock));
         var panel = new StackPanel { Background = ColorBrush("#171C25") };
         Content = panel;
-        panel.Children.Add(Label("画像の扱い", true));
+        panel.Children.Add(_sourceLabel);
         _source.ItemsSource = new[] { "自動で振り分ける", "アニメとして扱う", "実写として扱う" };
         AutomationProperties.SetName(_source, "今回の画像の扱い");
         panel.Children.Add(_source);
@@ -58,7 +61,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         var header = new DockPanel { Margin = new Thickness(0, 0, 0, 7) };
         DockPanel.SetDock(_edit, Dock.Right);
         header.Children.Add(_edit);
-        header.Children.Add(Label("動き・カメラ・表情", true));
+        header.Children.Add(Label("プロンプト", true));
         panel.Children.Add(header);
         SetEditStyle();
         AutomationProperties.SetName(_edit, "本文を編集");
@@ -85,9 +88,8 @@ public sealed class VideoPromptAuthoringControl : UserControl
         notesContent.Children.Add(Label("動画には使わない説明です。スタイルと一緒に保存できます。", false));
         _notesPanel.Content = notesContent;
         panel.Children.Add(_notesPanel);
-        var footer = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
-        AddButton(footer, "自動選択・スタイルの詳細", () => DetailsRequested?.Invoke());
-        panel.Children.Add(footer);
+        AddButton(_detailsFooter, "自動選択・スタイルの詳細", () => DetailsRequested?.Invoke());
+        panel.Children.Add(_detailsFooter);
 
         _input.TextChanged += (_, _) =>
         {
@@ -131,7 +133,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
             _source.SelectedIndex = sourceOverride switch { "anime" => 1, "photoreal" => 2, _ => 0 };
             SetText(_input, program.Enabled ? program.TemplateFor(effectiveKind) : rawPrompt);
             SetText(_notes, program.DescriptionFor(effectiveKind));
-            _variantHint.Visibility = program.UseSourceVariants ? Visibility.Visible : Visibility.Collapsed;
+            _variantHint.Visibility = !_menuLayout && program.UseSourceVariants ? Visibility.Visible : Visibility.Collapsed;
             _variantHint.Text = $"今回は{(effectiveKind == "photoreal" ? "実写" : "アニメ")}用の本文を使用";
             SetText(_baseInput, program.BaseTemplateFor(effectiveKind));
             _base.Visibility = program.Enabled && !program.AnnotatedH3 && !string.IsNullOrEmpty(_baseInput.Text) ? Visibility.Visible : Visibility.Collapsed;
@@ -374,7 +376,13 @@ public sealed class VideoPromptAuthoringControl : UserControl
         return notation && off && _program.Options.Values.Any(option => option.Mode == "on");
     }
 
-    public void SelectSourceForSmoke(string kind) => _source.SelectedIndex = kind == "photoreal" ? 2 : kind == "anime" ? 1 : 0;
+    public void UseVideoMenuLayout()
+    {
+        _menuLayout = true;
+        _sourceLabel.Visibility = _source.Visibility = _variantHint.Visibility = _detailsFooter.Visibility = Visibility.Collapsed;
+    }
+    public void SelectSource(string kind) => _source.SelectedIndex = kind == "photoreal" ? 2 : kind == "anime" ? 1 : 0;
+    public void SelectSourceForSmoke(string kind) => SelectSource(kind);
     public bool SelectOptionForSmoke(string category, int choiceIndex, Action<FrameworkElement>? capture = null)
     {
         _edit.IsChecked = false;
