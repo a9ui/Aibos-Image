@@ -309,7 +309,8 @@ public partial class MainWindow
         int MaximumPixelArea,
         int Steps,
         string Prompt,
-        VideoLoraSelection[]? Loras = null);
+        VideoLoraSelection[]? Loras = null,
+        VideoPromptEnhancement? PromptEnhancement = null);
 
     private VideoGenerationRequestSettings CurrentVideoGenerationRequestSettings()
         => new(
@@ -2679,7 +2680,7 @@ public partial class MainWindow
             && seedReady
             && _videoStepsInputValid
             && !VideoPromptPreparationPending
-            && (_videoEnhanceBeforeEnqueue || ValidateVideoProgramForEnqueue() is null)
+            && (_videoEnhanceAtExecution || ValidateVideoProgramForEnqueue() is null)
             && !_videoAutomaticSubmissionPending
             && !_videoGenerationRequestPending;
         RefreshVideoSubmissionPresentation(modelRegistered);
@@ -2688,7 +2689,7 @@ public partial class MainWindow
     private async void QueueVideoGeneration_Click(object sender, RoutedEventArgs e)
         => await SubmitVideoGenerationAsync();
 
-    private async Task<bool> QueueVideoGenerationAsync(string? preparedPrompt = null, Func<string?>? validateSubmission = null)
+    private async Task<bool> QueueVideoGenerationAsync(string? preparedPrompt = null, Func<string?>? validateSubmission = null, VideoPromptEnhancement? promptEnhancement = null)
     {
         if (_videoGenerationRequestPending || VideoPromptPreparationPending)
             return false;
@@ -2701,7 +2702,7 @@ public partial class MainWindow
             return false;
         }
 
-        if (preparedPrompt is null && ValidateVideoProgramForEnqueue() is not null)
+        if (preparedPrompt is null && promptEnhancement is null && ValidateVideoProgramForEnqueue() is not null)
         {
             // The persistent preparation guide owns this validation message.
             // Do not repeat a second, older instruction above the same footer.
@@ -2739,7 +2740,7 @@ public partial class MainWindow
         }
 
         VideoGenerationRequestSettings settings =
-            CurrentVideoGenerationRequestSettings();
+            CurrentVideoGenerationRequestSettings() with { PromptEnhancement = promptEnhancement };
         string capturedEditorPrompt = settings.Prompt;
         long capturedLoraRevision = _videoLoraRevision;
         if (preparedPrompt is not null) settings = settings with { Prompt = preparedPrompt };
@@ -2772,6 +2773,7 @@ public partial class MainWindow
             Func<JsonElement, string?>? healthValidator = h3Selected
                 ? CreateMiniMaxH3VideoHealthValidator(
                     requireLoras: settings.Loras is not null,
+                    requirePromptEnhancement: settings.PromptEnhancement is not null,
                     requireDisplayedManagedSource:
                         source.UsesDisplayedFileDirectly)
                 : seed.HasValue
@@ -2833,7 +2835,7 @@ public partial class MainWindow
                     (capturedLoraRevision != _videoLoraRevision ? "確認中にLoRAの選択が変わりました。キューには追加していません。" : null)
                     ??
                     validateSubmission?.Invoke()
-                    ?? ValidateCapturedVideoProgram(capturedProgramContext, capturedEditorPrompt, preparedPrompt is null)
+                    ?? ValidateCapturedVideoProgram(capturedProgramContext, capturedEditorPrompt, preparedPrompt is null && promptEnhancement is null)
                     ?? ValidateVideoSourceImmediatelyBeforePublish(
                         capturedSourceTile,
                         source,
@@ -2852,7 +2854,7 @@ public partial class MainWindow
                             source);
                         // After this durable boundary the immutable submission
                         // belongs to delivery recovery, not the editable draft.
-                        if (preparedPrompt is not null) _videoActiveSubmission = null;
+                        if (preparedPrompt is not null || promptEnhancement is not null) _videoActiveSubmission = null;
                         return publishLease;
                     }
                     catch
@@ -2863,7 +2865,7 @@ public partial class MainWindow
                 });
             if (response.SavedForDelivery)
             {
-                RecordVideoSubmissionPreview(settings.Prompt, preparedPrompt is not null);
+                RecordVideoSubmissionPreview(settings.Prompt, promptEnhancement is not null);
                 RecordActiveVideoSourceDependency(source);
                 SetVideoGenerationSettingsStatus(
                     "動画化の予約を保存しました。Jobsへの登録を継続しています。");
@@ -2883,7 +2885,7 @@ public partial class MainWindow
             }
 
             TryGetStringProperty(job, "id", out string? jobId);
-            RecordVideoSubmissionPreview(settings.Prompt, preparedPrompt is not null);
+            RecordVideoSubmissionPreview(settings.Prompt, promptEnhancement is not null);
             RecordActiveVideoSourceDependency(source);
             ApplyActiveEnhancementQueueJobToVisibleCatalog(job, capturedSourceTile);
             string suffix = string.IsNullOrWhiteSpace(jobId)
@@ -3038,10 +3040,12 @@ public partial class MainWindow
             ["adapterId"] = settings.BackendId,
             ["video"] = video,
         };
-        if (h3Selected && settings.Loras is { Length: > 0 })
+        if (h3Selected)
         {
             var requested = new Dictionary<string, object?> { ["profileId"] = settings.ProfileId, ["prompt"] = settings.Prompt,
-                ["steps"] = settings.Steps, ["maximumPixelArea"] = settings.MaximumPixelArea, ["loras"] = settings.Loras };
+                ["steps"] = settings.Steps, ["maximumPixelArea"] = settings.MaximumPixelArea };
+            if (settings.Loras is { Length: > 0 }) requested["loras"] = settings.Loras;
+            if (settings.PromptEnhancement is not null) requested["promptEnhancement"] = settings.PromptEnhancement;
             requestBody["video"] = new { requested };
         }
         if (!string.IsNullOrWhiteSpace(source.ProducerJobId))

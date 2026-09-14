@@ -65,7 +65,7 @@ public partial class MainWindow
                 }
                 ((VideoPromptAuthoringControl)host.Content).Load(_videoPromptProgram, _videoPrompt,
                     _videoProgramOverrideSourceKey == VideoProgramSourceKey() ? _videoProgramSourceOverride : "auto",
-                    EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceBeforeEnqueue);
+                    EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceAtExecution);
             }
         }
         finally { _syncingVideoAuthoringControls = false; }
@@ -93,7 +93,7 @@ public partial class MainWindow
             ApplyDirectVideoSourceVariant();
             foreach (ContentControl host in new[] { ModalVideoPromptAuthoringHost, AppVideoPromptAuthoringHost })
                 if (host.Content is VideoPromptAuthoringControl peer && !ReferenceEquals(peer, sender))
-                    peer.Load(_videoPromptProgram, _videoPrompt, _videoProgramSourceOverride, EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceBeforeEnqueue);
+                    peer.Load(_videoPromptProgram, _videoPrompt, _videoProgramSourceOverride, EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceAtExecution);
             SetVideoStyleStatus("変更は今回の動画に使います。残したい場合は名前を付けてスタイルを保存してください。");
         }
         finally { _syncingVideoAuthoringControls = false; }

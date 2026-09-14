@@ -58,7 +58,7 @@ public partial class App
             return JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected route" });
         });
         window.OpenVideoGenerationBoardForSmoke("original");
-        window.SetVideoEnhanceBeforeEnqueueForSmoke(false);
+        window.SetVideoEnhanceAtExecutionForSmoke(false);
         await window.SetVideoLorasForSmoke(directory, first, second);
         window.ConfigureVideoLoraRowForSmoke(1, true, 0.75, moveUp: true);
         window.ExpandVideoLorasForSmoke();

@@ -136,12 +136,22 @@
       "scope": "H3 canvas tiers"
     },
     {
+      "contractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001",
+      "path": "contracts/enhancement-video-prompt-enhancement-v1.json",
+      "scope": "Optional prompt enhancement after FIFO claim, immediately before generation"
+    },
+    {
       "contractId": "PV-ENHANCE-VIDEO-LORA-001",
       "path": "contracts/enhancement-video-lora-v1.json",
       "scope": "Optional ordered video LoRA selections"
     }
   ],
   "fixtures": [
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001-FIXTURE",
+      "forContractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001",
+      "path": "contracts/fixtures/enhancement-video-prompt-enhancement-v1.json"
+    },
     {
       "fixtureId": "PV-ENHANCE-HEALTH-001-WORKING-FIXTURE",
       "forContractId": "PV-ENHANCE-HEALTH-001",

@@ -182,22 +182,19 @@ public sealed class VideoPromptProgram
         string baseline = AnnotatedH3 ? "" : BaseTemplateFor(kind).Trim();
         if (baseline.Length > 0)
         {
-            var baselineResult = MiniMaxH3I2vaPromptConformance.Analyze(baseline);
-            if (!baselineResult.Conformant)
-            { error = "元のスタイル本文のH3形式を確認してください。"; return false; }
-            baseline = baselineResult.NormalizedPrompt;
-            body = baseline.Insert(baseline.IndexOf(MiniMaxH3I2vaPromptConformance.SoundscapePrefix, StringComparison.Ordinal), "\n\n" + body);
+            int sound = baseline.IndexOf(MiniMaxH3I2vaPromptConformance.SoundscapePrefix, StringComparison.Ordinal);
+            body = sound >= 0 ? baseline.Insert(sound, "\n\n" + body) : baseline + "\n\n" + body;
         }
-        if (!AnnotatedH3 && !body.Contains(MiniMaxH3I2vaPromptConformance.IntegratedMarker, StringComparison.Ordinal)
+        if (!body.Contains(MiniMaxH3I2vaPromptConformance.IntegratedMarker, StringComparison.Ordinal)
             && !body.Contains(MiniMaxH3I2vaPromptConformance.SoundscapeMarker, StringComparison.Ordinal)
             && !body.Contains(MiniMaxH3I2vaPromptConformance.MusicMarker, StringComparison.Ordinal)
             && !body.Contains("For the target video,", StringComparison.Ordinal))
             body = MiniMaxH3I2vaPromptConformance.Opening + MiniMaxH3I2vaPromptConformance.IntegratedPrefix + body
                 + MiniMaxH3I2vaPromptConformance.SoundscapePrefix + "N/A"
                 + MiniMaxH3I2vaPromptConformance.MusicPrefix + "N/A";
-        var result = MiniMaxH3I2vaPromptConformance.Analyze(body);
-        if (!result.Conformant)
-        { error = "H3の冒頭文と映像・音・音楽の形式を確認するか、「AIでプロンプトを強化」を選んでください。"; return false; }
+        if (body.Length > 8000) { error = "生成用の本文を8,000文字以内にしてください。"; return false; }
+        // Conformance remains available for AI candidates. Direct enqueue does
+        // not force rewriting or alter the user's existing H3 sections.
         prompt = body;
         error = "";
         return true;

@@ -48,7 +48,7 @@ public partial class MainWindow
                 };
                 VideoAutomationSettingsHost.Content = options;
             }
-            ((VideoPromptAutomationControl)VideoAutomationSettingsHost.Content).Load(_videoPromptProgram, _videoEnhanceBeforeEnqueue);
+            ((VideoPromptAutomationControl)VideoAutomationSettingsHost.Content).Load(_videoPromptProgram, _videoEnhanceAtExecution);
             CancelVideoSubmissionButton.Visibility = _videoAutomaticSubmissionPending && !_videoGenerationRequestPending
                 ? Visibility.Visible : Visibility.Collapsed;
             CancelVideoSubmissionButton.IsEnabled = _videoActiveSubmission is not null;
@@ -74,12 +74,12 @@ public partial class MainWindow
         if (_videoPromptProgram.Enabled)
             _videoPromptProgram.TryResolveH3(EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), out prompt, out error);
         VideoResolvedPromptPreview.Text = prompt;
-        VideoSubmissionPreviewHelp.Text = error.Length > 0 ? error : _videoEnhanceBeforeEnqueue
-            ? "強化前の本文です。AI強化は「キューに追加」を押したときに行います。編集元の本文は書き換えません。"
+        VideoSubmissionPreviewHelp.Text = error.Length > 0 ? error : _videoEnhanceAtExecution
+            ? "登録する本文です。AI強化はキューの順番が来て、動画生成を始める直前に行います。編集元の本文は書き換えません。"
             : "現在の選択を反映した本文です。この内容を動画生成へ渡します。";
         bool hasLast = _videoLastSubmittedPrompt.Length > 0;
         VideoLastSubmissionLabel.Visibility = VideoLastSubmissionPreview.Visibility = hasLast ? Visibility.Visible : Visibility.Collapsed;
-        VideoLastSubmissionLabel.Text = _videoLastSubmissionEnhanced ? "直前の登録内容（AI強化あり）" : "直前の登録内容（AI強化なし）";
+        VideoLastSubmissionLabel.Text = _videoLastSubmissionEnhanced ? "直前の登録内容（処理開始時にAI強化）" : "直前の登録内容（AI強化なし）";
         VideoLastSubmissionPreview.Text = _videoLastSubmittedPrompt;
     }
 

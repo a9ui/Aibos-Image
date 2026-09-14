@@ -6,7 +6,7 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
-    private bool _videoEnhanceBeforeEnqueue;
+    private bool _videoEnhanceAtExecution;
     private bool _videoAutomaticSubmissionPending;
     private bool VideoPromptPreparationPending => _videoH3RewritePending || _videoProgramMetadataPending;
 
@@ -17,18 +17,18 @@ public partial class MainWindow
     private void RefreshVideoSubmissionPresentation(bool modelRegistered)
     {
         string? programError = ValidateVideoProgramForEnqueue();
-        bool needsPreparation = modelRegistered && !_videoEnhanceBeforeEnqueue && programError is not null;
+        bool needsPreparation = modelRegistered && !_videoEnhanceAtExecution && programError is not null;
         bool needsReview = needsPreparation && HasCurrentVideoProgramCandidate();
         string label = _videoGenerationRequestPending ? "キューへ登録中…"
-            : _videoAutomaticSubmissionPending ? "AIでプロンプトを強化中…" : "キューに追加";
+            : _videoAutomaticSubmissionPending ? "キューへ登録中…" : "キューに追加";
         string help = _videoAutomaticSubmissionPending
-            ? "AIでプロンプトを強化しています。まだキューには追加されていません。"
+            ? "キューへ登録しています。AI強化は、このジョブの順番が来てから実行します。"
             : needsPreparation ? programError!
-            : _videoEnhanceBeforeEnqueue ? "画像と本文をAIで強化してから、キューに追加します。"
+            : _videoEnhanceAtExecution ? "先にキューへ追加します。順番が来ると、AIでプロンプトを強化してから動画を生成します。"
             : "現在の本文と選択内容で、キューに追加します。";
         QueueVideoGenerationButton.Content = label;
         QueueVideoGenerationButton.ToolTip = help;
-        VideoEnhanceBeforeEnqueueCheckBox.IsEnabled = !_videoGenerationRequestPending;
+        VideoEnhanceAtExecutionCheckBox.IsEnabled = !_videoGenerationRequestPending;
         AutomationProperties.SetName(QueueVideoGenerationButton, _videoGenerationRequestPending
             ? "Adding video generation job" : "Add video generation job");
         AutomationProperties.SetHelpText(QueueVideoGenerationButton, help);
@@ -107,9 +107,9 @@ public partial class MainWindow
         return true;
     }
 
-    private void VideoEnhanceBeforeEnqueue_Changed(object sender, RoutedEventArgs e)
+    private void VideoEnhanceAtExecution_Changed(object sender, RoutedEventArgs e)
     {
-        _videoEnhanceBeforeEnqueue = VideoEnhanceBeforeEnqueueCheckBox.IsChecked == true;
+        _videoEnhanceAtExecution = VideoEnhanceAtExecutionCheckBox.IsChecked == true;
         InvalidateVideoProgramAuthoring();
         RefreshVideoPromptAuthoringControls();
         UpdateVideoGenerationActionControls();
@@ -127,7 +127,7 @@ public partial class MainWindow
             Program = _videoPromptProgram, Settings = CurrentVideoGenerationRequestSettings(),
             Source = VideoProgramSourceKey(), Mode = _videoH3RewriteMode,
             Kind = EffectiveVideoProgramSourceKind(),
-            Enhance = _videoEnhanceBeforeEnqueue, ValidSteps = _videoStepsInputValid,
+            Enhance = _videoEnhanceAtExecution, ValidSteps = _videoStepsInputValid,
         });
 
     private void InvalidateAutomaticVideoSubmission()
@@ -153,7 +153,7 @@ public partial class MainWindow
     {
         if (_videoAutomaticSubmissionPending || _videoGenerationRequestPending || VideoPromptPreparationPending) return false;
         ApplyDirectVideoSourceVariant();
-        if (!_videoEnhanceBeforeEnqueue) return await QueueVideoGenerationAsync();
+        if (!_videoEnhanceAtExecution) return await QueueVideoGenerationAsync();
         long attempt = ++_videoSubmissionRevision;
         _videoActiveSubmission = attempt;
         _videoSubmissionStopReason = "";
@@ -164,31 +164,22 @@ public partial class MainWindow
             ? null : "内容の変更または取消しのため追加していません。新しい内容で追加してください。";
         try
         {
-            SetVideoGenerationSettingsStatus("AIでプロンプトを強化しています。まだキューには追加されていません。");
-            if (!await RewriteVideoPromptProgramAsync())
+            string instruction = _videoPrompt;
+            if (_videoPromptProgram.Enabled && !_videoPromptProgram.TryCompile(
+                EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), MiniMaxH3FrameCountForDuration(_videoDurationSeconds),
+                out instruction, out string error))
             {
-                if (_videoActiveSubmission == attempt)
-                    SetVideoGenerationSettingsStatus("AI強化に失敗しました。キューには追加していません。 " + ModalVideoH3PromptRewriteStatusText.Text);
-                else if (_videoSubmissionStopReason.Length > 0)
-                    SetVideoGenerationSettingsStatus(_videoSubmissionStopReason);
+                SetVideoGenerationSettingsStatus(error);
                 return false;
             }
-            // Metadata can become known during the explicit rewrite. The draft
-            // itself is captured separately so that this read is not an edit.
-            if (ValidateAttempt() is string changed)
+            if (!TryBuildVideoH3RewriteRequestPrompt(instruction, _videoH3RewriteMode, out instruction))
             {
-                SetVideoGenerationSettingsStatus(changed);
+                SetVideoGenerationSettingsStatus("AI強化用の指示が長すぎます。8,000文字以内にしてください。");
                 return false;
             }
-            if (!VideoProgramCandidateCanApply() || !IsVideoH3PromptCandidateFresh()
-                || !TryNormalizeAndValidateVideoH3Prompt(_videoH3PromptCandidate, out string candidate))
-            {
-                SetVideoGenerationSettingsStatus("強化結果を使用できません。キューには追加していません。本文を確認するか、強化を外して追加してください。");
-                return false;
-            }
-            // Only the generation copy is changed. Do not call Apply here:
-            // that operation edits the author's input and variant base fields.
-            return await QueueVideoGenerationAsync(candidate, ValidateAttempt);
+            // Freeze only the instruction. Inference belongs to the claimed job.
+            return await QueueVideoGenerationAsync(validateSubmission: ValidateAttempt,
+                promptEnhancement: new VideoPromptEnhancement(1, instruction));
         }
         finally
         {
@@ -210,7 +201,7 @@ public partial class MainWindow
     public string LastSubmittedVideoPromptForSmoke => _videoLastSubmittedPrompt;
     public bool VideoSubmissionCancelVisibleForSmoke => CancelVideoSubmissionButton.Visibility == Visibility.Visible;
 
-    public void SetVideoEnhanceBeforeEnqueueForSmoke(bool value) => VideoEnhanceBeforeEnqueueCheckBox.IsChecked = value;
+    public void SetVideoEnhanceAtExecutionForSmoke(bool value) => VideoEnhanceAtExecutionCheckBox.IsChecked = value;
     public Task<bool> SubmitVideoGenerationForSmokeAsync() => SubmitVideoGenerationAsync();
     public Task<bool> PrepareVideoPromptForSubmissionForSmokeAsync() => PrepareVideoPromptForSubmissionAsync();
     public void OpenVideoPromptPreparationForSmoke() => OpenVideoPromptPreparation();

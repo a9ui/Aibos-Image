@@ -576,24 +576,29 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   The candidate must pass the existing H3 checks and match the program, source,
   source metadata, model, and duration before Apply and enqueue. A change while
   preparing enqueue fails before durable publication. Jobs retain the resolved
-  prompt under the existing video protocol, not executable authoring syntax.
+  prompt, plus an optional immutable AI instruction for deferred enhancement;
+  raw authoring syntax is never sent to the video model.
 - The video board keeps its enqueue button in a fixed footer, with one purpose
   and action. An unchecked-by-default `AIでプロンプトを強化` checkbox sits directly
   above it. Off resolves manual and default alternatives locally, without AI
   action planning or rewriting; plain directions receive the pinned H3 envelope
   with N/A sound/music defaults. Existing H3 sections and literal content survive.
-  On explicitly enhances the current image and instructions, validates freshness
-  and H3 conformance, passes an immutable generation copy to enqueue without a
-  manual review step. Automatic enhancement never applies its result to the
-  editor, literal variant bases, saved style, or notes. The current session may
-  show the last submitted copy in a separate read-only preview. Enhancement is transient and not yet queued; the progress text says so.
-  Failure, cancellation, or input drift never enqueue a fallback. Duplicate
-  submissions are blocked. Each automatic submission captures its draft, source
-  kind, model, duration, quality, steps, and enhancement mode. Input changes and
-  cancellation permanently invalidate the attempt, even when the edit is undone.
-  A footer cancellation action or closing the board before publication prevents
-  later results from enqueueing. After durable publication, the existing inbox
-  and request identity own delivery recovery. The optional preview stays passive.
+  On saves an immutable `requested.promptEnhancement` instruction under
+  `PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001` and enqueues immediately without
+  waiting for AI. After the worker claims that Job in FIFO order, it enhances
+  the pinned image and captured instructions, validates H3 conformance and
+  stops the local rewrite runtime before starting video inference. The candidate
+  changes only the execution copy; it never rewrites the submitted snapshot,
+  editor, literal variant bases, saved style, or notes. The attempt receipt keeps
+  the generated prompt and source hash in Job diagnostics. Failure and cancellation
+  settle the Job without silently generating an unenhanced fallback. Retry uses
+  the same request and creates a fresh enhancement attempt. Off never requires
+  AI or H3 conformance to enqueue; invalid option syntax, stale source identity,
+  and resource bounds still fail before publication. Existing H3 text remains
+  literal. Duplicate submissions and changes before publication remain guarded.
+  After durable publication, the existing inbox and request identity own delivery
+  recovery independently of the editor lifetime. Preview remains passive and
+  identifies its displayed text as the pre-enhancement request.
   The captured image and its transient source-kind selector appear first,
   followed by the unified style selector and inline prompt. Duration and quality
   are visible below the editor. Style save/delete controls open in a separate
