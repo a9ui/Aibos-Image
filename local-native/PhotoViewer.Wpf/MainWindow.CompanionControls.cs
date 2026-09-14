@@ -35,7 +35,7 @@ public partial class MainWindow
                 && TryParseEnhancementQueueHealth(payload, out EnhancementQueueHealthView health))
             {
                 ApplyEnhancementQueueHealth(health);
-                CompanionControlStatusText.Text = "接続済み（キューの再開は別操作）";
+                CompanionControlStatusText.Text = "サーバー接続済み";
             }
             else if (response.InnerStatusAuthoritative
                 && EnhancementApiErrorCode(response) == "QUEUE_HEALTH_UNAVAILABLE")
