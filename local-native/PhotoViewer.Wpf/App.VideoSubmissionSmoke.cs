@@ -63,7 +63,15 @@ public partial class App
             && !await window.SubmitVideoGenerationForSmokeAsync() && rewrites == 0 && enqueues == 0;
         checks["menuDetailsStartCollapsed"] = window.VideoMenuDetailsCollapsedForSmoke && !window.VideoPreparationExpandedForSmoke;
         checks["queueFooterStaysVisibleWhileScrolling"] = window.VideoSubmissionFooterFixedForSmoke();
-        checks["readingModeSimplifiesH3WithoutChangingSource"] = window.VideoReadablePromptPreservesSourceForSmoke;
+        checks["annotatedReadingShowsCompleteH3Structure"] = window.VideoFullH3PromptPreservesSourceForSmoke;
+        string speechPrompt = MiniMaxH3I2vaPromptConformance.Opening + MiniMaxH3I2vaPromptConformance.IntegratedPrefix
+            + "The subject waves and says <d>[Japanese]こんにちは。</d>."
+            + MiniMaxH3I2vaPromptConformance.SoundscapePrefix + "Quiet room ambience."
+            + MiniMaxH3I2vaPromptConformance.MusicPrefix + "N/A";
+        var literalEditor = new VideoPromptAuthoringControl();
+        literalEditor.Load(new(), speechPrompt, "auto", "anime", null);
+        checks["literalReadingPreservesCompleteH3AndJapaneseDialogue"] = literalEditor.FullH3PreservesSourceForSmoke()
+            && literalEditor.ReadingTextForSmoke.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n') == speechPrompt;
         window.CaptureVideoVariantForSmoke((_, visual) => capture("video-menu-overview", visual));
         capture("video-submit-prepare", window.VideoSubmissionGuidePanelForSmoke);
         window.OpenVideoPromptPreparationForSmoke();

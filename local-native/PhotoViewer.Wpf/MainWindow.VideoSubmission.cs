@@ -115,7 +115,7 @@ public partial class MainWindow
     public FrameworkElement VideoSubmissionFooterForSmoke => VideoSubmissionFooter;
     public bool VideoPreparationExpandedForSmoke => VideoPromptPreparationExpander.IsExpanded;
     public bool VideoMenuDetailsCollapsedForSmoke => !VideoStyleManagementExpander.IsExpanded && !VideoOutputSettingsExpander.IsExpanded;
-    public bool VideoReadablePromptPreservesSourceForSmoke => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).ReadableH3PreservesSourceForSmoke();
+    public bool VideoFullH3PromptPreservesSourceForSmoke => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).FullH3PreservesSourceForSmoke();
     public bool VideoSubmissionFooterFixedForSmoke()
     {
         ModalVideoGenerationScrollViewer.ScrollToTop();

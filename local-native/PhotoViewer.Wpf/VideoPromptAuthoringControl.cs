@@ -162,7 +162,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         _reading.Inlines.Clear();
         if (!_program.Enabled)
         {
-            _reading.Inlines.Add(new Run(_input.Text.Length == 0 ? "スタイルを選ぶか、編集から本文を入力してください。" : ReadableH3Literal(_input.Text)));
+            _reading.Inlines.Add(new Run(_input.Text.Length == 0 ? "スタイルを選ぶか、編集から本文を入力してください。" : _input.Text));
             _hint.Text = "編集で文章を選び、［手動選択］や｛画像AI｝にできます。";
             return;
         }
@@ -178,7 +178,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         _hint.ToolTip = "緑：カメラ　青：動作　桃：表情　橙：結末　紫：画像AI";
         foreach (VideoPromptToken token in tokens)
         {
-            if (token.Kind == 't') { _reading.Inlines.Add(new Run(_program.AnnotatedH3 ? ReadableH3Literal(token.Text) : token.Text)); continue; }
+            if (token.Kind == 't') { _reading.Inlines.Add(new Run(token.Text)); continue; }
             VideoPromptOption option = _program.OptionFor(token);
             bool on = token.Kind == '[' ? _program.IsOn(option, _sourcePrompt) : option.Mode != "off";
             bool automatic = token.Kind == '{' && option.Mode == "auto" && _program.ImageChoices;
@@ -199,25 +199,18 @@ public sealed class VideoPromptAuthoringControl : UserControl
         }
     }
 
-    // Display-only: edit mode and the compiled prompt retain every character.
-    // Only the pinned structural prefix and section labels are abbreviated.
-    private static string ReadableH3Literal(string text)
-    {
-        const string prefix = "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description: [Shot 1] ";
-        string shown = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (shown.StartsWith(prefix, StringComparison.Ordinal)) shown = shown[prefix.Length..];
-        return shown.Replace("\n\noverall_soundscape: ", "\n\n音・声：", StringComparison.Ordinal)
-            .Replace("\n\nnon_diegetic_music: ", "\n\n音楽：", StringComparison.Ordinal);
-    }
-
-    public bool ReadableH3PreservesSourceForSmoke()
+    public bool FullH3PreservesSourceForSmoke()
     {
         string before = _input.Text;
         Render();
-        string reading = new TextRange(_reading.ContentStart, _reading.ContentEnd).Text;
-        return before == _input.Text && !reading.Contains("integrated_multimodal_description:", StringComparison.Ordinal)
-            && !reading.Contains("For the target video,", StringComparison.Ordinal) && reading.Contains("音・声：", StringComparison.Ordinal);
+        string reading = ReadingTextForSmoke.Replace("\r\n", "\n", StringComparison.Ordinal);
+        return before == _input.Text
+            && reading.StartsWith(MiniMaxH3I2vaPromptConformance.Opening + MiniMaxH3I2vaPromptConformance.IntegratedPrefix, StringComparison.Ordinal)
+            && reading.Contains(MiniMaxH3I2vaPromptConformance.SoundscapePrefix, StringComparison.Ordinal)
+            && reading.Contains(MiniMaxH3I2vaPromptConformance.MusicPrefix, StringComparison.Ordinal);
     }
+
+    public string ReadingTextForSmoke => new TextRange(_reading.ContentStart, _reading.ContentEnd).Text;
 
     private void OpenOption(VideoPromptToken token, Hyperlink link)
     {
