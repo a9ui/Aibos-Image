@@ -2672,18 +2672,21 @@ public partial class MainWindow
             && seedReady
             && _videoStepsInputValid
             && !VideoPromptPreparationPending
-            && ValidateVideoProgramForEnqueue() is null
+            && (_videoEnhanceBeforeEnqueue || ValidateVideoProgramForEnqueue() is null)
+            && !_videoAutomaticSubmissionPending
             && !_videoGenerationRequestPending;
         RefreshVideoSubmissionPresentation(modelRegistered);
     }
 
     private async void QueueVideoGeneration_Click(object sender, RoutedEventArgs e)
-        => await QueueVideoGenerationAsync();
+        => await SubmitVideoGenerationAsync();
 
     private async Task<bool> QueueVideoGenerationAsync()
     {
         if (_videoGenerationRequestPending || VideoPromptPreparationPending)
             return false;
+
+        ApplyDirectVideoSourceVariant();
 
         if (ValidateVideoProgramForEnqueue() is not null)
         {

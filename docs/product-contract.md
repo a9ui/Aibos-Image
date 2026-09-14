@@ -542,8 +542,8 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   the exact originals for comparison, while the templates add only escaped
   literal text and inline options. When all resolved text is identical to the
   matching original and automation is off, the original can be used directly.
-  Any changed wording or selection requires the explicit H3 candidate and Apply
-  flow; the archived base is not appended to that request. Reverting to the
+  Changed manual selections resolve locally into a validated H3 prompt without
+  requiring AI rewriting. The archived base is not appended to that prompt. Reverting to the
   original choices restores the exact original body. Applying a reviewed H3
   candidate is not overwritten by a subsequent passive control refresh.
 - Built-ins include the shared basic camera choices in their existing camera
@@ -572,10 +572,15 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   preparing enqueue fails before durable publication. Jobs retain the resolved
   prompt under the existing video protocol, not executable authoring syntax.
 - The video board keeps its enqueue button in a fixed footer, with one purpose
-  and label. It never starts prompt rewriting. Unresolved or pending authoring
-  disables enqueue and shows a separate link to the preparation panel. Opening
-  that panel is passive; its explicit rewrite action prepares a candidate and
-  opens review. Apply enables enqueue and returns focus to the footer.
+  and action. An unchecked-by-default `AIでプロンプトを強化` checkbox sits directly
+  above it. Off resolves manual and default alternatives locally, without AI
+  action planning or rewriting; plain directions receive the pinned H3 envelope
+  with N/A sound/music defaults. Existing H3 sections and literal content survive.
+  On explicitly enhances the current image and instructions, validates freshness
+  and H3 conformance, applies the result, then enqueues without a manual review
+  step. Enhancement is transient and not yet queued; the progress text says so.
+  Failure, cancellation, or input drift never enqueue a fallback. Duplicate
+  submissions are blocked. The optional preview panel stays passive when opened.
   Style management, Japanese notes, output settings, technical details, and the
   generated prompt are collapsed until needed. The footer summarizes duration
   and quality and links to output settings. The primary editor retains inline

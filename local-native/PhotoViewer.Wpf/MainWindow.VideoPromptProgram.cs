@@ -65,7 +65,7 @@ public partial class MainWindow
                 }
                 ((VideoPromptAuthoringControl)host.Content).Load(_videoPromptProgram, _videoPrompt,
                     _videoProgramOverrideSourceKey == VideoProgramSourceKey() ? _videoProgramSourceOverride : "auto",
-                    EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt());
+                    EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceBeforeEnqueue);
             }
         }
         finally { _syncingVideoAuthoringControls = false; }
@@ -92,10 +92,8 @@ public partial class MainWindow
             ApplyDirectVideoSourceVariant();
             foreach (ContentControl host in new[] { ModalVideoPromptAuthoringHost, AppVideoPromptAuthoringHost })
                 if (host.Content is VideoPromptAuthoringControl peer && !ReferenceEquals(peer, sender))
-                    peer.Load(_videoPromptProgram, _videoPrompt, _videoProgramSourceOverride, EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt());
-            SetVideoStyleStatus(_videoPromptProgram.AnnotatedH3 && !_videoPromptProgram.TryGetUnchangedH3(EffectiveVideoProgramSourceKind(), out _)
-                ? "選択を変更しました。H3候補を作成して反映すると、外した部分や文のつながりが生成用に整います。残す場合はスタイルを保存してください。"
-                : "変更は今回の動画に使います。残したい場合は名前を付けてスタイルを保存してください。");
+                    peer.Load(_videoPromptProgram, _videoPrompt, _videoProgramSourceOverride, EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceBeforeEnqueue);
+            SetVideoStyleStatus("変更は今回の動画に使います。残したい場合は名前を付けてスタイルを保存してください。");
         }
         finally { _syncingVideoAuthoringControls = false; }
     }
@@ -116,7 +114,7 @@ public partial class MainWindow
         {
             if (_changingVideoPromptForH3History
                 || (_videoProgramAppliedContext == VideoProgramContext() && _videoProgramAppliedPrompt == _videoPrompt)
-                || !_videoPromptProgram.TryGetUnchangedH3(EffectiveVideoProgramSourceKind(), out prompt)) return;
+                || !_videoPromptProgram.TryResolveH3(EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), out prompt, out _)) return;
         }
         else
         {
@@ -342,11 +340,10 @@ public partial class MainWindow
     private string? ValidateVideoProgramForEnqueue()
     {
         if (!_videoPromptProgram.Enabled) return null;
-        if (_videoPromptProgram.TryGetUnchangedH3(EffectiveVideoProgramSourceKind(), out string original)
-            && _videoPrompt == original) return null;
-        return _videoProgramAppliedContext == VideoProgramContext()
-            && _videoProgramAppliedPrompt == _videoPrompt
-            ? null : "指示言語の設定に対応するH3候補を作成し、確認して反映してください。動画ジョブは追加していません。";
+        if (_videoProgramAppliedContext == VideoProgramContext() && _videoProgramAppliedPrompt == _videoPrompt) return null;
+        if (_videoPromptProgram.TryResolveH3(EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), out string direct, out string error)
+            && _videoPrompt == direct) return null;
+        return error.Length > 0 ? error : "本文の選択を読み直してください。";
     }
 
     private string? ValidateCapturedVideoProgram(string? context, string prompt)

@@ -6,6 +6,8 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
+    private bool _videoEnhanceBeforeEnqueue;
+    private bool _videoAutomaticSubmissionPending;
     private bool VideoPromptPreparationPending => _videoH3RewritePending || _videoProgramMetadataPending;
 
     private bool HasCurrentVideoProgramCandidate()
@@ -14,18 +16,21 @@ public partial class MainWindow
 
     private void RefreshVideoSubmissionPresentation(bool modelRegistered)
     {
-        bool needsPreparation = modelRegistered && ValidateVideoProgramForEnqueue() is not null;
+        string? programError = ValidateVideoProgramForEnqueue();
+        bool needsPreparation = modelRegistered && !_videoEnhanceBeforeEnqueue && programError is not null;
         bool needsReview = needsPreparation && HasCurrentVideoProgramCandidate();
-        string label = _videoGenerationRequestPending ? "キューへ登録中…" : "H3動画化をキューへ追加";
+        string label = _videoGenerationRequestPending ? "キューへ登録中…"
+            : _videoAutomaticSubmissionPending ? "AIでプロンプトを強化中…" : "H3動画化をキューへ追加";
         string help = VideoPromptPreparationPending
             ? VideoH3Localized("UiVideoSubmitPreparingHelp", "画像と選択内容から生成用プロンプトを準備しています。")
             : needsReview
                 ? VideoH3Localized("UiVideoSubmitReviewHelp", "生成用プロンプトができました。内容を確認して「この内容を反映」を押すと、キューへ追加できます。")
                 : needsPreparation
-                    ? VideoH3Localized("UiVideoSubmitPrepareHelp", "本文の変更が未反映です。「準備・確認へ」から生成用プロンプトを整えてください。")
+                    ? programError!
                     : VideoH3Localized("UiVideoSubmitReadyHelp", "現在の生成用プロンプトで動画をキューへ追加します。");
         QueueVideoGenerationButton.Content = label;
         QueueVideoGenerationButton.ToolTip = help;
+        VideoEnhanceBeforeEnqueueCheckBox.IsEnabled = !_videoAutomaticSubmissionPending && !_videoGenerationRequestPending && !VideoPromptPreparationPending;
         AutomationProperties.SetName(QueueVideoGenerationButton, _videoGenerationRequestPending
             ? "Adding video generation job" : "Add video generation job");
         AutomationProperties.SetHelpText(QueueVideoGenerationButton, help);
@@ -39,7 +44,7 @@ public partial class MainWindow
         {
             ModalVideoH3PromptAssistantTitle.Text = VideoH3Localized("UiVideoProgramPreparationTitle", "生成用プロンプト");
             ModalVideoH3PromptAssistantHelp.Text = _videoPromptProgram.Enabled
-                ? VideoH3Localized("UiVideoProgramPreparationHelp", "本文で選んだ内容をローカルAIで動画用に整えます。内容を確認して反映した後、キューへ追加してください。")
+                ? VideoH3Localized("UiVideoProgramPreparationHelp", "必要な場合だけ、強化内容を先に確認・調整できます。通常は下のチェックとキュー追加ボタンで操作します。")
                 : VideoH3Localized("UiVideoH3PromptAssistantHelp", "入力欄のプロンプトをMiniMax H3向けに整えます。");
         }
         if (VideoPromptPreparationStateText is not null)
@@ -49,7 +54,7 @@ public partial class MainWindow
             VideoSubmissionSummaryButton.Content = $"{_videoDurationSeconds}秒 · {(_videoMaximumPixelArea >= 414720 ? "高画質" : _videoMaximumPixelArea >= 307200 ? "標準" : "軽量")} · 音声あり  ▾";
     }
 
-    // Preparation belongs to its dedicated panel. The footer only enqueues.
+    // The preview panel remains available for reviewing enhancement separately.
     private async Task<bool> PrepareVideoPromptForSubmissionAsync()
     {
         if (_videoGenerationRequestPending || VideoPromptPreparationPending) return false;
@@ -103,7 +108,51 @@ public partial class MainWindow
         return true;
     }
 
-    public Task<bool> SubmitVideoGenerationForSmokeAsync() => QueueVideoGenerationAsync();
+    private void VideoEnhanceBeforeEnqueue_Changed(object sender, RoutedEventArgs e)
+    {
+        _videoEnhanceBeforeEnqueue = VideoEnhanceBeforeEnqueueCheckBox.IsChecked == true;
+        InvalidateVideoProgramAuthoring();
+        RefreshVideoPromptAuthoringControls();
+        UpdateVideoGenerationActionControls();
+    }
+
+    private async Task<bool> SubmitVideoGenerationAsync()
+    {
+        if (_videoAutomaticSubmissionPending || _videoGenerationRequestPending || VideoPromptPreparationPending) return false;
+        if (!_videoEnhanceBeforeEnqueue) return await QueueVideoGenerationAsync();
+        _videoAutomaticSubmissionPending = true;
+        UpdateVideoGenerationActionControls();
+        try
+        {
+            SetVideoGenerationSettingsStatus("画像と本文からプロンプトを強化しています。完了後にキューへ登録します。");
+            if (!await RewriteVideoPromptProgramAsync())
+            {
+                SetVideoGenerationSettingsStatus(ModalVideoH3PromptRewriteStatusText.Text);
+                return false;
+            }
+            if (!ApplyVideoH3PromptCandidate())
+            {
+                // An identical valid result needs no edit, but still must match
+                // the captured program/source and pass the existing H3 checks.
+                if (!VideoProgramCandidateCanApply() || !IsVideoH3PromptCandidateFresh()
+                    || !TryNormalizeAndValidateVideoH3Prompt(_videoH3PromptCandidate, out string same) || same != _videoPrompt)
+                {
+                    SetVideoGenerationSettingsStatus("強化中に画像または本文が変わりました。確認して追加し直してください。");
+                    return false;
+                }
+                RecordAppliedVideoProgram();
+            }
+            return await QueueVideoGenerationAsync();
+        }
+        finally
+        {
+            _videoAutomaticSubmissionPending = false;
+            UpdateVideoGenerationActionControls();
+        }
+    }
+
+    public void SetVideoEnhanceBeforeEnqueueForSmoke(bool value) => VideoEnhanceBeforeEnqueueCheckBox.IsChecked = value;
+    public Task<bool> SubmitVideoGenerationForSmokeAsync() => SubmitVideoGenerationAsync();
     public Task<bool> PrepareVideoPromptForSubmissionForSmokeAsync() => PrepareVideoPromptForSubmissionAsync();
     public void OpenVideoPromptPreparationForSmoke() => OpenVideoPromptPreparation();
     public bool ApplyVideoCandidateAndShowSubmissionForSmoke() => ApplyVideoCandidateAndShowSubmission();

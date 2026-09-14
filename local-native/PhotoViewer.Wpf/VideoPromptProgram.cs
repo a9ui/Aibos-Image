@@ -13,8 +13,8 @@ public sealed class VideoPromptProgram
     public bool Enabled { get; set; }
     public bool UseSourceVariants { get; set; }
     // The template is a lossless annotation of the complete base H3 body.
-    // An unchanged resolution can use that body directly. Changed choices
-    // still go through the explicit H3 candidate flow for grammar and context.
+    // Manual selections can be resolved locally; image-driven enhancement is
+    // a separate explicit choice and never a prerequisite for enqueue.
     public bool AnnotatedH3 { get; set; }
     public string Template { get; set; } = "";
     public string PhotorealTemplate { get; set; } = "";
@@ -159,6 +159,48 @@ public sealed class VideoPromptProgram
             "absent" => option.Keyword.Length > 0 && !sourcePrompt.Contains(option.Keyword, StringComparison.OrdinalIgnoreCase),
             _ => false,
         };
+    }
+
+    public bool TryResolveH3(string kind, string? sourcePrompt, out string prompt, out string error)
+    {
+        prompt = "";
+        if (!Validate(out error) || !VideoPromptLanguage.TryParse(TemplateFor(kind), out var tokens, out error)) return false;
+        var resolved = new StringBuilder();
+        foreach (VideoPromptToken token in tokens)
+        {
+            if (token.Kind == 't') { resolved.Append(token.Text); continue; }
+            VideoPromptOption option = OptionFor(token);
+            if (token.Kind == '[' ? !IsOn(option, sourcePrompt) : option.Mode == "off") continue;
+            if (token.Choices.Count > 0 && option.ChoiceIndex >= token.Choices.Count)
+            { error = "候補が編集されています。色付きの部分から選び直してください。"; return false; }
+            // With enhancement off, image choices use the selected/default
+            // alternative. No AI instructions or optional planning are emitted.
+            resolved.Append(token.Choices.Count > 0 ? token.Choices[option.ChoiceIndex] : token.Text);
+        }
+        string body = resolved.ToString().Trim();
+        if (body.Length == 0) { error = "本文か使用する候補を入力してください。"; return false; }
+        string baseline = AnnotatedH3 ? "" : BaseTemplateFor(kind).Trim();
+        if (baseline.Length > 0)
+        {
+            var baselineResult = MiniMaxH3I2vaPromptConformance.Analyze(baseline);
+            if (!baselineResult.Conformant)
+            { error = "元のスタイル本文のH3形式を確認してください。"; return false; }
+            baseline = baselineResult.NormalizedPrompt;
+            body = baseline.Insert(baseline.IndexOf(MiniMaxH3I2vaPromptConformance.SoundscapePrefix, StringComparison.Ordinal), "\n\n" + body);
+        }
+        if (!AnnotatedH3 && !body.Contains(MiniMaxH3I2vaPromptConformance.IntegratedMarker, StringComparison.Ordinal)
+            && !body.Contains(MiniMaxH3I2vaPromptConformance.SoundscapeMarker, StringComparison.Ordinal)
+            && !body.Contains(MiniMaxH3I2vaPromptConformance.MusicMarker, StringComparison.Ordinal)
+            && !body.Contains("For the target video,", StringComparison.Ordinal))
+            body = MiniMaxH3I2vaPromptConformance.Opening + MiniMaxH3I2vaPromptConformance.IntegratedPrefix + body
+                + MiniMaxH3I2vaPromptConformance.SoundscapePrefix + "N/A"
+                + MiniMaxH3I2vaPromptConformance.MusicPrefix + "N/A";
+        var result = MiniMaxH3I2vaPromptConformance.Analyze(body);
+        if (!result.Conformant)
+        { error = "H3の冒頭文と映像・音・音楽の形式を確認するか、「AIでプロンプトを強化」を選んでください。"; return false; }
+        prompt = body;
+        error = "";
+        return true;
     }
 
     public bool TryCompile(string sourceKind, string? sourcePrompt, int frameCount,

@@ -86,6 +86,11 @@ public partial class App
             camera.BaseH3Template = "BASE [Shot 1]"; camera.PhotorealBaseH3Template = "PHOTO [Shot 1]";
             checks["h3BaseNotParsedAsOptions"] = camera.TryCompile("photoreal", "", 124, out cameraPrompt, out _)
                 && cameraPrompt.StartsWith("PHOTO [Shot 1]") && !cameraPrompt.Contains("BASE");
+            camera.BaseH3Template = CreateVideoH3Candidate("The subject waves.").Replace("\n", "\r\n");
+            checks["manualDirectionsResolveWithWindowsBaselineNewlines"] = camera.TryResolveH3("anime", null, out cameraPrompt, out _)
+                && MiniMaxH3I2vaPromptConformance.Analyze(cameraPrompt).Conformant
+                && cameraPrompt.Contains("The subject waves.") && cameraPrompt.Contains("smile subtle first-person head motion")
+                && camera.BaseH3Template.Contains("\r\n");
             checks["futureAndDuplicateBlocked"] = !VideoPromptProgram.TryRead(JsonSerializer.SerializeToElement(new { Version = 2 }), out _)
                 && !VideoPromptProgram.TryRead(JsonDocument.Parse("{\"Version\":1,\"Version\":2}").RootElement, out _);
             program.ExtensionData = new() { ["FutureNote"] = JsonSerializer.SerializeToElement(new { Keep = true }) };
@@ -98,7 +103,10 @@ public partial class App
                 && originalAnnotated == annotated.BaseH3Template;
             string cameraKey = annotated.Options.Single().Key;
             annotated.Options[cameraKey].ChoiceIndex = 5;
-            checks["changedCameraRequiresCandidateAndNoDuplicateBase"] = !annotated.TryGetUnchangedH3("anime", out _)
+            checks["changedCameraResolvesLocallyWithoutDuplicateBase"] = !annotated.TryGetUnchangedH3("anime", out _)
+                && annotated.TryResolveH3("anime", null, out string directCamera, out _)
+                && directCamera.Contains("orbit the camera right") && !directCamera.Contains("follow gently")
+                && !directCamera.Contains("Authoring policy:")
                 && annotated.TryCompile("anime", null, 124, out string resolvedCamera, out _)
                 && resolvedCamera.Contains("orbit the camera right") && !resolvedCamera.Contains("follow gently")
                 && resolvedCamera.IndexOf("integrated_multimodal_description:") == resolvedCamera.LastIndexOf("integrated_multimodal_description:");
@@ -149,8 +157,9 @@ public partial class App
                     window.SetMiniMaxH3CapabilityForSmoke(true, true, null);
                     window.SetVideoPromptProgramForSmoke(program, "photoreal");
                     checks["temporaryOverride"] = window.VideoPromptProgramKindForSmoke == "photoreal";
-                    checks["uncompiledEnqueueBlocked"] = window.VideoPromptProgramEnqueueErrorForSmoke is not null
-                        && !await window.QueueVideoGenerationForSmokeAsync() && otherPosts == 0;
+                    window.SyncVideoGenerationSettingsForSmoke();
+                    checks["manualProgramDoesNotRequireAiRewrite"] = window.VideoPromptProgramEnqueueErrorForSmoke is null
+                        && window.VideoPromptForSmoke.Contains("wave gently") && otherPosts == 0;
                     checks["programRewriteApplied"] = await window.RewriteVideoPromptProgramForSmokeAsync()
                         && window.VideoH3PromptCandidateApplyEnabledForSmoke
                         && window.ApplyVideoH3PromptCandidateForSmoke()
@@ -159,9 +168,9 @@ public partial class App
                     checks["explicitMetadataDistinguishesNoPrompt"] = window.VideoPromptProgramSourcePromptForSmoke == "";
                     changeDuringRewrite = true;
                     checks["changedProgramRejectsPendingCandidate"] = !await window.RewriteVideoPromptProgramForSmokeAsync()
-                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke && window.VideoPromptProgramEnqueueErrorForSmoke is not null;
+                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke;
                     window.ResetVideoProgramOverrideForSmoke();
-                    checks["overrideNotRemembered"] = window.VideoPromptProgramKindForSmoke == "anime" && window.VideoPromptProgramEnqueueErrorForSmoke is not null;
+                    checks["overrideNotRemembered"] = window.VideoPromptProgramKindForSmoke == "anime" && window.VideoPromptProgramEnqueueErrorForSmoke is null;
                     window.SetVideoPromptProgramForSmoke(program);
                     checks["styleSaved"] = window.SaveVideoStyleForSmoke("Synthetic authoring style");
                     for (int i = 0; i < 40; i++) window.SaveVideoStyleForSmoke($"Synthetic style {i:00}");
@@ -276,9 +285,8 @@ public partial class App
                     window.SyncVideoGenerationSettingsForSmoke();
                     checks["defaultExplicitRewriteSurvivesRefresh"] &= window.VideoPromptForSmoke.Contains("PROGRAM_RESULT")
                         && window.VideoPromptProgramEnqueueErrorForSmoke is null;
-                    checks["nativeCameraMenuAndChangedEnqueueGuard"] = window.SelectInlineVideoOptionForSmoke("camera", 5, v => Capture("native-camera-choices", v))
-                        && window.VideoPromptProgramEnqueueErrorForSmoke is not null
-                        && !await window.QueueVideoGenerationForSmokeAsync() && otherPosts == 0;
+                    checks["nativeCameraChoiceCanEnqueueWithoutRewrite"] = window.SelectInlineVideoOptionForSmoke("camera", 5, v => Capture("native-camera-choices", v))
+                        && window.VideoPromptProgramEnqueueErrorForSmoke is null && otherPosts == 0;
                     checks["selectedCameraReachesCandidateWithoutOriginalCamera"] = await window.RewriteVideoPromptProgramForSmokeAsync()
                         && sentPrompt.Contains("orbit the camera right") && !sentPrompt.Contains("Let the camera move smoothly")
                         && window.ApplyVideoH3PromptCandidateForSmoke() && window.VideoPromptProgramEnqueueErrorForSmoke is null;

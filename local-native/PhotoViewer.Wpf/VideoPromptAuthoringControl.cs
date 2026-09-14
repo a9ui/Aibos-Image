@@ -34,6 +34,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
     private string? _sourcePrompt;
     private bool _loading;
     private bool _photo;
+    private bool _imageAutomationEnabled;
     public event Action<VideoPromptAuthoringControl, VideoPromptProgram, string?>? Changed;
     public event Action<string>? SourceChanged;
     public event Action? DetailsRequested;
@@ -118,7 +119,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         RefreshMode();
     }
 
-    public void Load(VideoPromptProgram program, string rawPrompt, string sourceOverride, string effectiveKind, string? sourcePrompt)
+    public void Load(VideoPromptProgram program, string rawPrompt, string sourceOverride, string effectiveKind, string? sourcePrompt, bool imageAutomationEnabled = false)
     {
         _loading = true;
         try
@@ -126,6 +127,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
             _program = program.Clone();
             _photo = effectiveKind == "photoreal" && (program.UseSourceVariants || !string.IsNullOrEmpty(program.PhotorealTemplate));
             _sourcePrompt = sourcePrompt;
+            _imageAutomationEnabled = imageAutomationEnabled;
             _source.SelectedIndex = sourceOverride switch { "anime" => 1, "photoreal" => 2, _ => 0 };
             SetText(_input, program.Enabled ? program.TemplateFor(effectiveKind) : rawPrompt);
             SetText(_notes, program.DescriptionFor(effectiveKind));
@@ -181,7 +183,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
             if (token.Kind == 't') { _reading.Inlines.Add(new Run(token.Text)); continue; }
             VideoPromptOption option = _program.OptionFor(token);
             bool on = token.Kind == '[' ? _program.IsOn(option, _sourcePrompt) : option.Mode != "off";
-            bool automatic = token.Kind == '{' && option.Mode == "auto" && _program.ImageChoices;
+            bool automatic = token.Kind == '{' && option.Mode == "auto" && _program.ImageChoices && _imageAutomationEnabled;
             string shown = automatic ? string.Join(" / ", token.Choices)
                 : token.Choices.Count > 0 ? token.Choices.ElementAtOrDefault(option.ChoiceIndex) ?? "選び直す" : token.Text;
             bool camera = option.Category is "camera" or "viewpoint" || (option.Category == "" && Regex.IsMatch(token.Text, @"カメラ|camera|POV|angle|focus|視点", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));

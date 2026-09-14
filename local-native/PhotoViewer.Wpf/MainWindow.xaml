@@ -4012,6 +4012,11 @@
                       AutomationProperties.Name="生成用プロンプトの準備と確認を開く"/>
               </StackPanel>
             </Border>
+            <CheckBox x:Name="VideoEnhanceBeforeEnqueueCheckBox" Content="AIでプロンプトを強化"
+                      Foreground="{StaticResource TextPrimary}" Margin="0,10,0,0"
+                      Checked="VideoEnhanceBeforeEnqueue_Changed" Unchecked="VideoEnhanceBeforeEnqueue_Changed"
+                      ToolTip="選ぶと、キュー追加時に画像と本文をAIで確認して強化します。外すと、手動選択・既定の候補を使ってそのまま登録します。"
+                      AutomationProperties.Name="AIでプロンプトを強化してからキューへ追加"/>
             <Button x:Name="QueueVideoGenerationButton"
                     Style="{StaticResource PrimaryButton}" Content="動画化を実行"
                     Height="34" Margin="0,12,0,0" HorizontalAlignment="Stretch"
