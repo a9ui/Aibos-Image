@@ -220,6 +220,7 @@ public partial class MainWindow
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         (bool Known, string? Prompt) result = (false, null);
         _videoProgramMetadataPending = true;
+        RefreshVideoH3PromptRewriteControls(updateStatus: false);
         try
         {
             result = await Task.Run(() =>
@@ -229,7 +230,11 @@ public partial class MainWindow
             }, timeout.Token);
         }
         catch (OperationCanceledException) { }
-        finally { _videoProgramMetadataPending = false; }
+        finally
+        {
+            _videoProgramMetadataPending = false;
+            RefreshVideoH3PromptRewriteControls(updateStatus: false);
+        }
         if (sourceKey != VideoProgramSourceKey() || stamp != VideoProgramOriginalStamp()
             || programJson != JsonSerializer.Serialize(_videoPromptProgram))
             return false;

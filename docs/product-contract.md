@@ -571,6 +571,13 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   source metadata, model, and duration before Apply and enqueue. A change while
   preparing enqueue fails before durable publication. Jobs retain the resolved
   prompt under the existing video protocol, not executable authoring syntax.
+- The video board's submission button shows the next required action. An
+  unresolved instruction program offers explicit candidate preparation; an
+  existing current candidate opens its review controls without another rewrite.
+  Applying the candidate returns focus to the queue button. Preparation and
+  review never publish a video; a separate explicit queue click remains required.
+  Pending metadata reads or rewrites block duplicate preparation and enqueue.
+  Preparation failures expose their reason and leave the current prompt intact.
 - Physical continuity is optional prompt guidance, not a physics simulation or
   a quality guarantee. It preserves support and attachment constraints, adds no
   unrequested release, and does not infer velocity from an ambiguous still.

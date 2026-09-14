@@ -304,6 +304,8 @@ public partial class App
                         && protectedStyle.SequenceEqual(File.ReadAllBytes(stylePath));
                     checks["sourceAndJobsUnchanged"] = source.SequenceEqual(File.ReadAllBytes(sourcePath)) && jobs.SequenceEqual(File.ReadAllBytes(Path.Combine(root, "enhance/jobs.json")));
                     checks["noWorkerOrJobMutation"] = starts == 0 && otherPosts == 0 && rewriteCalls == 4;
+                    await VerifyVideoSubmissionFlowAsync(window, sourceHash, checks, Capture);
+                    checks["submissionDoesNotChangeSourceOrStartWorkers"] = starts == 0 && source.SequenceEqual(File.ReadAllBytes(sourcePath));
                 }
                 catch (Exception ex) { failure = ex.ToString(); }
                 finally

@@ -4277,11 +4277,11 @@
                           Click="RewriteVideoPromptForH3_Click"
                           AutomationProperties.Name="{DynamicResource UiVideoH3RewriteButtonAutomation}"
                           AutomationProperties.HelpText="{DynamicResource UiVideoH3RewriteButtonHelp}"/>
-                  <TextBlock Text="{DynamicResource UiMotionDirectorAiProposalTitle}"
+                  <TextBlock x:Name="ModalVideoH3PromptAssistantTitle" Text="{DynamicResource UiMotionDirectorAiProposalTitle}"
                              Foreground="{StaticResource TextPrimary}" FontSize="11.5"
                              FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </DockPanel>
-                <TextBlock Text="{DynamicResource UiVideoH3PromptAssistantHelp}"
+                <TextBlock x:Name="ModalVideoH3PromptAssistantHelp" Text="{DynamicResource UiVideoH3PromptAssistantHelp}"
                            Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                            TextWrapping="Wrap" Margin="0,0,0,8"/>
                 <TextBlock x:Name="ModalVideoH3PromptRewriteStatusText"
@@ -4316,6 +4316,7 @@
                 <TextBlock Text="{DynamicResource UiVideoH3ImageAnalysisOn}"
                            Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                            TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <StackPanel x:Name="ModalVideoH3PromptReviewPanel">
                 <TextBlock Text="{DynamicResource UiVideoH3CandidateLabel}"
                            Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                            Margin="0,0,0,4"/>
@@ -4350,6 +4351,7 @@
                           AutomationProperties.Name="{DynamicResource UiVideoH3UndoButtonAutomation}"
                           AutomationProperties.HelpText="{DynamicResource UiVideoH3UndoButtonHelp}"/>
                 </Grid>
+                </StackPanel>
               </StackPanel>
             </Border>
             <StackPanel x:Name="ModalVideoWanTuningPanel" Visibility="Collapsed">
@@ -4435,8 +4437,14 @@
                        Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,8,0,0"
                        AutomationProperties.LiveSetting="Polite"/>
+            <Border x:Name="VideoSubmissionGuideBorder" Visibility="Collapsed" Padding="10,8"
+                    Margin="0,10,0,0" CornerRadius="4" Background="{StaticResource BgPrimary}"
+                    BorderBrush="{StaticResource AccentFill}" BorderThickness="1">
+              <TextBlock x:Name="VideoSubmissionGuideText" Foreground="{StaticResource TextPrimary}"
+                         FontSize="12" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+            </Border>
             <Button x:Name="QueueVideoGenerationButton"
-                    Style="{StaticResource GhostButton}" Content="動画化を実行"
+                    Style="{StaticResource PrimaryButton}" Content="動画化を実行"
                     Height="34" Margin="0,12,0,0" HorizontalAlignment="Stretch"
                     Click="QueueVideoGeneration_Click"
                     AutomationProperties.Name="Add video generation job"

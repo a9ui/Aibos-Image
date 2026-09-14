@@ -400,7 +400,7 @@ public partial class MainWindow
     private void ApplyVideoH3PromptCandidate_Click(
         object sender,
         RoutedEventArgs e)
-        => ApplyVideoH3PromptCandidate();
+        => ApplyVideoCandidateAndShowSubmission();
 
     private bool ApplyVideoH3PromptCandidate()
     {
@@ -566,6 +566,7 @@ public partial class MainWindow
                 out sourceError);
         }
         ModalVideoH3RewritePromptButton.IsEnabled = h3Selected
+            && !_videoGenerationRequestPending && !_videoProgramMetadataPending
             && (_videoH3RewritePending || sourceReady);
         ModalVideoH3RewritePromptButton.Content = _videoH3RewritePending
             ? VideoH3Localized(
@@ -613,6 +614,7 @@ public partial class MainWindow
         ModalVideoH3ApplyPromptButton.IsEnabled =
             CanApplyVideoH3PromptCandidate(candidateFresh);
         ModalVideoH3UndoPromptButton.IsEnabled = CanUndoAppliedVideoH3Prompt();
+        UpdateVideoGenerationActionControls();
 
         if (!updateStatus || !h3Selected)
             return;

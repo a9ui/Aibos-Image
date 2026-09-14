@@ -2667,25 +2667,17 @@ public partial class MainWindow
             && modelRegistered
             && seedReady
             && _videoStepsInputValid
+            && !VideoPromptPreparationPending
             && !_videoGenerationRequestPending;
-        QueueVideoGenerationButton.Content = _videoGenerationRequestPending
-            ? "追加中..."
-            : modelRegistered
-                ? "H3動画化をキューへ追加"
-                : "動画モデルを確認";
-        AutomationProperties.SetName(
-            QueueVideoGenerationButton,
-            _videoGenerationRequestPending
-                ? "Adding video generation job"
-                : "Add video generation job");
+        RefreshVideoSubmissionPresentation(modelRegistered);
     }
 
     private async void QueueVideoGeneration_Click(object sender, RoutedEventArgs e)
-        => await QueueVideoGenerationAsync();
+        => await SubmitVideoGenerationAsync();
 
     private async Task<bool> QueueVideoGenerationAsync()
     {
-        if (_videoGenerationRequestPending)
+        if (_videoGenerationRequestPending || VideoPromptPreparationPending)
             return false;
 
         if (ValidateVideoProgramForEnqueue() is string programError)
