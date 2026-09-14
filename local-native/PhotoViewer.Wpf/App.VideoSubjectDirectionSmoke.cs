@@ -70,6 +70,24 @@ public partial class App
             VideoSubjectDirection.TryApply(musicOnly, selected, out inserted, out _)
             && inserted.IndexOf(selectedDirection, StringComparison.Ordinal) < inserted.IndexOf("non_diegetic_music:", StringComparison.Ordinal)
             && inserted.Replace(selectedDirection + "\n\n", "", StringComparison.Ordinal) == musicOnly;
+        string nestedQuotation = MiniMaxH3I2vaPromptConformance.IntegratedMarker + " [Shot 1]\nA sign displays:\n"
+            + "「説明は『「例」と書き、\noverall_soundscape: という文字を表示する』です」\nnon_diegetic_music: N/A";
+        checks["nestedQuotesCannotBecomeAudioStructure"] =
+            VideoSubjectDirection.TryApply(nestedQuotation, selected, out inserted, out _)
+            && inserted.Replace(selectedDirection + "\n\n", "", StringComparison.Ordinal) == nestedQuotation
+            && inserted.IndexOf(selectedDirection, StringComparison.Ordinal) > inserted.IndexOf("です」", StringComparison.Ordinal)
+            && inserted.IndexOf(selectedDirection, StringComparison.Ordinal) < inserted.IndexOf("non_diegetic_music:", StringComparison.Ordinal);
+        bool lineEndings = true;
+        foreach (string newline in new[] { "\n", "\r\n" })
+        {
+            string escapedLine = "integrated_multimodal_description: [Shot 1]" + newline
+                + "A sign displays the character \\" + newline + "overall_soundscape: Quiet room."
+                + newline + "non_diegetic_music: N/A";
+            lineEndings &= VideoSubjectDirection.TryApply(escapedLine, selected, out inserted, out _)
+                && inserted.Replace(selectedDirection + "\n\n", "", StringComparison.Ordinal) == escapedLine
+                && inserted.IndexOf(selectedDirection, StringComparison.Ordinal) < inserted.IndexOf("overall_soundscape:", StringComparison.Ordinal);
+        }
+        checks["backslashCannotConsumeLfOrCrlfSectionBoundary"] = lineEndings;
         string malformed = structural.Replace("</d>", "", StringComparison.Ordinal);
         checks["ambiguousBoundaryFailsOnlySelectedDirections"] =
             !VideoSubjectDirection.TryApply(malformed, selected, out _, out string insertionError) && insertionError.Length > 0
