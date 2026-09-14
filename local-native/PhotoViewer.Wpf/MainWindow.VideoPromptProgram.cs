@@ -375,8 +375,8 @@ public partial class MainWindow
         RefreshVideoPromptAuthoringControls();
     }
 
-    public void SelectActingForSmoke(string opening, string expression, string mood)
-        => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).SelectActingForSmoke(opening, expression, mood);
+    public void SelectActingForSmoke(string opening, string expression, string mood, string arms = "original")
+        => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).SelectActingForSmoke(opening, expression, mood, arms);
 
     public bool ExerciseVideoAuthoringForSmoke(Action<string, FrameworkElement> capture)
     {

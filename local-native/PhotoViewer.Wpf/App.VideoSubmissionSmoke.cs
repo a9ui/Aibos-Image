@@ -126,9 +126,10 @@ public partial class App
             && !lastRequested.TryGetProperty("promptEnhancement", out _) && publishedPrompt.Contains("<d>[Japanese]こんにちは。</d>");
         window.SetVideoPromptProgramForSmoke(new VideoPromptProgram { UseSourceVariants = true, BaseH3Template = speechPrompt, PhotorealBaseH3Template = speechPrompt });
         window.SyncVideoGenerationSettingsForSmoke();
-        window.SelectActingForSmoke("approach", "annoyed", "lighthearted");
+        window.SelectActingForSmoke("approach", "annoyed", "lighthearted", "behind-back");
         string actingPrompt = window.VideoPromptForSmoke;
         checks["actingSelectorsWorkForLegacyStylesWithoutAi"] = actingPrompt.Contains("first one to two seconds")
+            && actingPrompt.Contains("behind her lower back") && actingPrompt.Contains("hand movements required by the main action take priority")
             && actingPrompt.Contains("mildly annoyed") && actingPrompt.Contains("lighthearted")
             && actingPrompt.Contains("<d>[Japanese]こんにちは。</d>") && rewrites == 0;
         checks["actingSelectionEnqueuesWithoutAi"] = await window.SubmitVideoGenerationForSmokeAsync() && enqueues == 8 && publishedPrompt == actingPrompt;

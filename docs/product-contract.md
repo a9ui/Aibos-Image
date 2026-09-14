@@ -622,7 +622,8 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - Every video style, including legacy literal styles and both source variants,
   exposes optional shared acting selectors above its editor. `OpeningMotionId`
   selects movement immediately after the reference frame within the first one
-  to two seconds; `ExpressionId` controls facial direction throughout the clip;
+  to two seconds; `ArmMotionId` selects an initial arm pose or subtle hand gesture;
+  `ExpressionId` controls facial direction throughout the clip;
   `MoodId` controls the overall manner of performing the existing action.
   These optional version-1 program fields default to `original`, which adds
   nothing and retains the original body. Catalog choices are defined in
@@ -630,9 +631,13 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   choices append scoped directions to the generation copy, including deferred
   AI instructions, while keeping camera, main action, dialogue and sound fields.
   Literal styles convert losslessly only when a user chooses an acting preset.
-  The three selectors are independent and saved with the style; loading an old
-  style never rewrites its text or user state. Resetting all three to `original`
-  removes the added acting directions.
+  The four selectors are independent and saved with the style; loading an old
+  style never rewrites its text or user state. Resetting all four to `original`
+  removes the added acting directions. Arm choices control only arms and hands;
+  the opening choice controls body travel. Required main-action hand movement,
+  existing contacts, held objects and weight-bearing supports take priority over
+  decorative gestures. Facial selections take priority over mood for expression.
+  These are scoped prompt directions, not a guarantee of model compliance.
 - Physical continuity is optional prompt guidance, not a physics simulation or
   a quality guarantee. It preserves support and attachment constraints, adds no
   unrequested release, and does not infer velocity from an ambiguous still.

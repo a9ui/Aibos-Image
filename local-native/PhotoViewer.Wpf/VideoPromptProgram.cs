@@ -28,6 +28,7 @@ public sealed class VideoPromptProgram
     public bool ActionPlot { get; set; }
     public bool PhysicalContinuity { get; set; }
     public string OpeningMotionId { get; set; } = "original";
+    public string ArmMotionId { get; set; } = "original";
     public string ExpressionId { get; set; } = "original";
     public string MoodId { get; set; } = "original";
     public string OriginalDefault { get; set; } = "anime";

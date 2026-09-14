@@ -31,6 +31,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
     private readonly Border _reader;
     private readonly WrapPanel _tools = new() { Margin = new Thickness(0, 0, 0, 6) };
     private readonly ComboBox _openingMotion = new() { MinHeight = 32, MaxDropDownHeight = 340 };
+    private readonly ComboBox _armMotion = new() { MinHeight = 32, MaxDropDownHeight = 340 };
     private readonly ComboBox _expression = new() { MinHeight = 32, MaxDropDownHeight = 340 };
     private readonly ComboBox _mood = new() { MinHeight = 32, MaxDropDownHeight = 340 };
     private readonly ComboBox _source = new() { MinHeight = 30, Margin = new Thickness(0, 0, 0, 10) };
@@ -66,9 +67,11 @@ public sealed class VideoPromptAuthoringControl : UserControl
         header.Children.Add(_edit);
         header.Children.Add(Label("プロンプト", true));
         panel.Children.Add(header);
-        var acting = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
+        var acting = new UniformGrid { Columns = 2, Margin = new Thickness(0, 0, 0, 10) };
         AddActingChoice(acting, _openingMotion, "冒頭の動き", "開始直後の1〜2秒", "#6EE7D0", VideoSubjectDirection.Opening,
             value => _program.OpeningMotionId = value);
+        AddActingChoice(acting, _armMotion, "腕・手の動き", "姿勢・しぐさ", "#93C5FD", VideoSubjectDirection.Arms,
+            value => _program.ArmMotionId = value);
         AddActingChoice(acting, _expression, "表情", "動画全体の表情", "#F0ABFC", VideoSubjectDirection.Expressions,
             value => _program.ExpressionId = value);
         AddActingChoice(acting, _mood, "ムード", "演じ方・全体の雰囲気", "#FDE68A", VideoSubjectDirection.Moods,
@@ -139,6 +142,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         {
             _program = program.Clone();
             _openingMotion.SelectedValue = program.OpeningMotionId;
+            _armMotion.SelectedValue = program.ArmMotionId;
             _expression.SelectedValue = program.ExpressionId;
             _mood.SelectedValue = program.MoodId;
             _photo = effectiveKind == "photoreal" && (program.UseSourceVariants || !string.IsNullOrEmpty(program.PhotorealTemplate));
@@ -156,17 +160,18 @@ public sealed class VideoPromptAuthoringControl : UserControl
         Render();
     }
 
-    private void AddActingChoice(WrapPanel panel, ComboBox selector, string title, string help, string color,
+    private void AddActingChoice(Panel panel, ComboBox selector, string title, string help, string color,
         VideoSubjectDirection.Choice[] choices, Action<string> select)
     {
-        var group = new StackPanel { Width = 235, Margin = new Thickness(0, 0, 12, 6) };
-        group.Children.Add(new TextBlock { Text = title + " · " + help, Foreground = ColorBrush(color), Margin = new Thickness(0, 0, 0, 5), FontSize = 12 });
+        var group = new StackPanel { Margin = new Thickness(0, 0, 12, 6) };
+        group.Children.Add(new TextBlock { Text = title + " · " + help, TextWrapping = TextWrapping.Wrap, Foreground = ColorBrush(color), Margin = new Thickness(0, 0, 0, 5), FontSize = 12 });
         selector.ItemsSource = choices;
         selector.DisplayMemberPath = nameof(VideoSubjectDirection.Choice.Label);
         selector.SelectedValuePath = nameof(VideoSubjectDirection.Choice.Id);
         selector.SetResourceReference(StyleProperty, "PhotorealSettingsComboBox");
         AutomationProperties.SetName(selector, title);
-        selector.ToolTip = help + "。元の指示を使う場合は追加しません。";
+        selector.ToolTip = help + "。元の指示を使う場合は追加しません。"
+            + (selector == _armMotion ? " 移動は冒頭の動きで指定します。本文の主動作・物を持つ手・身体を支える手を優先します。" : "");
         selector.SelectionChanged += (_, _) =>
         {
             if (_loading || selector.SelectedValue is not string value) return;
@@ -201,8 +206,8 @@ public sealed class VideoPromptAuthoringControl : UserControl
         panel.Children.Add(group);
     }
 
-    public void SelectActingForSmoke(string opening, string expression, string mood)
-    { _openingMotion.SelectedValue = opening; _expression.SelectedValue = expression; _mood.SelectedValue = mood; }
+    public void SelectActingForSmoke(string opening, string expression, string mood, string arms = "original")
+    { _openingMotion.SelectedValue = opening; _armMotion.SelectedValue = arms; _expression.SelectedValue = expression; _mood.SelectedValue = mood; }
 
     private static void SetText(TextBox box, string text)
     {
