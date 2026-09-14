@@ -18735,6 +18735,16 @@ public partial class App : Application
                     && win.ActivateModalImagePrimaryClickForSmoke()
                     && win.ModalShowingVideoForSmoke
                     && win.ModalVideoPlayingForSmoke;
+                bool footerButtonPaused = videoClickResumed
+                    && win.ClickModalVideoPlaybackButtonForSmoke()
+                    && !win.ModalVideoPlayingForSmoke
+                    && await win.WaitForModalVideoPauseSettledForSmokeAsync();
+                win.SuspendPausedModalVideoPresentationForSmoke();
+                bool footerButtonResumedAfterMinimize = footerButtonPaused
+                    && win.ClickModalVideoPlaybackButtonForSmoke()
+                    && win.ModalVideoPlayingForSmoke
+                    && win.ModalVideoTimelineRunningForSmoke
+                    && await win.WaitForModalVideoPlaybackProgressForSmokeAsync();
                 bool olderVideoSelectionStarted =
                     win.SelectModalVideoVersionForSmoke(1);
                 bool olderVideoMediaOpened = olderVideoSelectionStarted
@@ -19607,6 +19617,8 @@ public partial class App : Application
                     && videoClickPaused
                     && videoPauseSettled
                     && videoClickResumed
+                    && footerButtonPaused
+                    && footerButtonResumedAfterMinimize
                     && olderVideoMediaOpened
                     && olderVideoPlaybackProgress
                     && olderVideoSelected
@@ -19723,6 +19735,8 @@ public partial class App : Application
                     VideoClickPaused = videoClickPaused,
                     VideoPauseSettled = videoPauseSettled,
                     VideoClickResumed = videoClickResumed,
+                    FooterButtonPaused = footerButtonPaused,
+                    FooterButtonResumedAfterMinimize = footerButtonResumedAfterMinimize,
                     OlderVideoMediaOpened = olderVideoMediaOpened,
                     OlderVideoPlaybackProgress =
                         olderVideoPlaybackProgress,
@@ -39615,6 +39629,8 @@ public partial class App : Application
         public bool VideoClickPaused { get; init; }
         public bool VideoPauseSettled { get; init; }
         public bool VideoClickResumed { get; init; }
+        public bool FooterButtonPaused { get; init; }
+        public bool FooterButtonResumedAfterMinimize { get; init; }
         public bool OlderVideoMediaOpened { get; init; }
         public bool OlderVideoPlaybackProgress { get; init; }
         public bool OlderVideoSelected { get; init; }
