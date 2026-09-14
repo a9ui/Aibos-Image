@@ -542,8 +542,8 @@ public partial class MainWindow
             .Select(static property => property.Name)
             .ToArray();
         string[] allowedNames =
-            ["profileId", "prompt", "steps", "maximumPixelArea"];
-        if (names.Length is < 1 or > 4
+            ["profileId", "prompt", "steps", "maximumPixelArea", "loras"];
+        if (names.Length is < 1 or > 5
             || names.Distinct(StringComparer.Ordinal).Count() != names.Length
             || !names.Contains("prompt", StringComparer.Ordinal)
             || names.Any(name => !allowedNames.Contains(
@@ -554,6 +554,7 @@ public partial class MainWindow
         }
 
         string? profileId = MiniMaxH3VideoDefaultProfileId;
+        if (requested.TryGetProperty("loras", out JsonElement loras) && !VideoLoraSelection.TryReadList(loras, out _)) return false;
         if (names.Contains("profileId", StringComparer.Ordinal)
             && !TryGetStringProperty(requested, "profileId", out profileId))
             return false;
@@ -612,7 +613,8 @@ public partial class MainWindow
             || !TryGetExactStringProperty(
                 video,
                 "workflowRevision",
-                MiniMaxH3VideoWorkflowRevision)
+                video.TryGetProperty("requested", out JsonElement workflowRequest) && workflowRequest.ValueKind == JsonValueKind.Object
+                    && workflowRequest.TryGetProperty("loras", out _) ? VideoLoraSelection.Workflow : MiniMaxH3VideoWorkflowRevision)
             || !TryGetExactStringProperty(
                 video,
                 "presetId",
@@ -947,7 +949,8 @@ public partial class MainWindow
             nominalDurationSeconds,
             maximumPixelArea,
             steps,
-            prompt!);
+            prompt!,
+            requested.TryGetProperty("loras", out JsonElement loraArray) && VideoLoraSelection.TryReadList(loraArray, out var selectedLoras) ? selectedLoras : null);
         return true;
     }
 
@@ -7871,7 +7874,8 @@ public partial class MainWindow
             MiniMaxH3VideoPlaybackFps,
             snapshot.MaximumPixelArea,
             snapshot.Steps,
-            snapshot.Prompt);
+            snapshot.Prompt,
+            snapshot.Loras);
 
     private async Task<string?>
         ValidateMiniMaxH3VideoRerunSourceBeforePublishAsync(
@@ -7953,6 +7957,7 @@ public partial class MainWindow
                     seed: null),
                 includeQueuePlacementInBody: false,
                 healthValidator: CreateMiniMaxH3VideoHealthValidator(
+                    requireLoras: settings.Loras is not null,
                     requireDisplayedManagedSource:
                         source.UsesDisplayedFileDirectly),
                 requireExactHealthValidation: true,
@@ -12619,7 +12624,8 @@ public sealed record MiniMaxH3VideoWorkspaceSnapshot(
     int NominalDurationSeconds,
     int MaximumPixelArea,
     int Steps,
-    string Prompt);
+    string Prompt,
+    VideoLoraSelection[]? Loras = null);
 
 internal sealed record EnhancementVideoMutationProbe(
     string EnvelopeSha256,

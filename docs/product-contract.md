@@ -463,6 +463,12 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - Video rows are typed media and are never decoded or mutated as still-image
   versions. Wan-compatible version 1 rows remain readable under
   `PV-ENHANCE-VIDEO-001`.
+- Optional video LoRA selection follows `PV-ENHANCE-VIDEO-LORA-001`. The video menu
+  lists one explicitly selected local folder and permits an ordered set with
+  per-entry strength and enabled state. Folder reads remain passive. Explicit
+  enqueue captures content hashes; every selected adapter must apply completely
+  or generation fails. Reuse core model storage and clean only owned staging
+  after confirmed runtime exit. Existing requests without LoRAs are unchanged.
 - MiniMax H3 requests use the additive version 2 contract. Profile, step, and
   canvas selections are separate versioned capabilities; clients require exact
   readiness before durable publication.

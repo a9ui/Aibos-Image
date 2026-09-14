@@ -25026,6 +25026,7 @@ public partial class MainWindow : Window
             state.VideoQualityId,
             state.VideoSteps);
         RestoreVideoSeedSettings(state.VideoSeedMode, state.VideoSeedValue);
+        _videoLoraDirectory = state.VideoLoraDirectory ?? "";
         RestoreAiStyles(state);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
@@ -25321,6 +25322,7 @@ public partial class MainWindow : Window
                 VideoMaximumPixelArea = _videoMaximumPixelArea,
                 VideoSteps = _videoSteps,
                 VideoPrompt = _videoPrompt,
+                VideoLoraDirectory = _videoLoraDirectory,
                 VideoModelId = _videoModelId,
                 VideoQualityId = _videoQualityId,
                 VideoSeedMode = _videoSeedFixed
@@ -32864,6 +32866,7 @@ public sealed class ViewerState
     public int? VideoMaximumPixelArea { get; set; }
     public int? VideoSteps { get; set; }
     public string? VideoPrompt { get; set; }
+    public string? VideoLoraDirectory { get; set; }
     public string? VideoModelId { get; set; }
     public string? VideoQualityId { get; set; }
     public string? VideoSeedMode { get; set; }

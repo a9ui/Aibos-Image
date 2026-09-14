@@ -308,7 +308,8 @@ public partial class MainWindow
         int PlaybackFps,
         int MaximumPixelArea,
         int Steps,
-        string Prompt);
+        string Prompt,
+        VideoLoraSelection[]? Loras = null);
 
     private VideoGenerationRequestSettings CurrentVideoGenerationRequestSettings()
         => new(
@@ -325,7 +326,8 @@ public partial class MainWindow
             _videoPlaybackFps,
             _videoMaximumPixelArea,
             _videoSteps,
-            _videoPrompt.Trim());
+            _videoPrompt.Trim(),
+            CurrentVideoLoras());
 
     private bool TryResolveVideoSeed(out int? seed, out string error)
     {
@@ -1462,6 +1464,7 @@ public partial class MainWindow
         if (ModalPhotorealSettingsPopup is not null)
             ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
         ModalVideoGenerationPopup.Visibility = Visibility.Visible;
+        _ = RefreshVideoLorasAsync();
         if (displayedPhotorealRetry is { } retry)
         {
             _ = RefreshDisplayedPhotorealVideoSourceAsync(
@@ -2738,6 +2741,7 @@ public partial class MainWindow
         VideoGenerationRequestSettings settings =
             CurrentVideoGenerationRequestSettings();
         string capturedEditorPrompt = settings.Prompt;
+        long capturedLoraRevision = _videoLoraRevision;
         if (preparedPrompt is not null) settings = settings with { Prompt = preparedPrompt };
         string? capturedProgramContext = _videoPromptProgram.Enabled || _videoPromptProgram.UseSourceVariants ? VideoProgramContext() : null;
         _videoGenerationRequestPending = true;
@@ -2746,8 +2750,28 @@ public partial class MainWindow
         SetVideoGenerationSettingsStatus("ローカル動画生成の準備を確認しています...");
         try
         {
+            if (settings.Loras is { } loras)
+            {
+                try
+                {
+                    SetVideoGenerationSettingsStatus("選択したLoRAの内容を確認しています…");
+                    using var loraTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                    var captured = new List<VideoLoraSelection>();
+                    foreach (var lora in loras) captured.Add(await lora.CaptureAsync(loraTimeout.Token));
+                    if (capturedLoraRevision != _videoLoraRevision) throw new InvalidDataException("確認中にLoRAの選択が変わりました。もう一度追加してください。");
+                    if (captured.Sum(x => x.Bytes) > VideoLoraSelection.MaximumBytes || captured.Select(x => x.Sha256).Distinct().Count() != captured.Count)
+                        throw new InvalidDataException("LoRAの合計を4GiB以下にし、同じ内容のファイルを重複して選ばないでください。");
+                    settings = settings with { Loras = captured.ToArray() };
+                }
+                catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or OperationCanceledException)
+                {
+                    SetVideoGenerationSettingsStatus("LoRAを確認できません。キューには追加していません。 " + error.Message);
+                    return false;
+                }
+            }
             Func<JsonElement, string?>? healthValidator = h3Selected
                 ? CreateMiniMaxH3VideoHealthValidator(
+                    requireLoras: settings.Loras is not null,
                     requireDisplayedManagedSource:
                         source.UsesDisplayedFileDirectly)
                 : seed.HasValue
@@ -2806,6 +2830,8 @@ public partial class MainWindow
                 requireExactHealthValidation: h3Selected,
                 recoverySourceIdentity: source.SourceIdentity,
                 prePublishValidator: () =>
+                    (capturedLoraRevision != _videoLoraRevision ? "確認中にLoRAの選択が変わりました。キューには追加していません。" : null)
+                    ??
                     validateSubmission?.Invoke()
                     ?? ValidateCapturedVideoProgram(capturedProgramContext, capturedEditorPrompt, preparedPrompt is null)
                     ?? ValidateVideoSourceImmediatelyBeforePublish(
@@ -2985,12 +3011,12 @@ public partial class MainWindow
         object video = h3Selected
             ? new
             {
-                requested = new
+                requested = new Dictionary<string, object?>
                 {
-                    profileId = settings.ProfileId,
-                    prompt = settings.Prompt,
-                    steps = settings.Steps,
-                    maximumPixelArea = settings.MaximumPixelArea,
+                    ["profileId"] = settings.ProfileId,
+                    ["prompt"] = settings.Prompt,
+                    ["steps"] = settings.Steps,
+                    ["maximumPixelArea"] = settings.MaximumPixelArea,
                 },
             }
             : new
@@ -3012,6 +3038,12 @@ public partial class MainWindow
             ["adapterId"] = settings.BackendId,
             ["video"] = video,
         };
+        if (h3Selected && settings.Loras is { Length: > 0 })
+        {
+            var requested = new Dictionary<string, object?> { ["profileId"] = settings.ProfileId, ["prompt"] = settings.Prompt,
+                ["steps"] = settings.Steps, ["maximumPixelArea"] = settings.MaximumPixelArea, ["loras"] = settings.Loras };
+            requestBody["video"] = new { requested };
+        }
         if (!string.IsNullOrWhiteSpace(source.ProducerJobId))
             requestBody["sourceProducerJobId"] = source.ProducerJobId;
         if (source.UsesDisplayedFileDirectly)

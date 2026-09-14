@@ -134,6 +134,11 @@
       "contractId": "PV-ENHANCE-VIDEO-H3-CANVAS-TIERS-001",
       "path": "contracts/enhancement-video-h3-canvas-tiers-v1.json",
       "scope": "H3 canvas tiers"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-LORA-001",
+      "path": "contracts/enhancement-video-lora-v1.json",
+      "scope": "Optional ordered video LoRA selections"
     }
   ],
   "fixtures": [
@@ -178,6 +183,11 @@
       "forContractId": "PV-ENHANCE-VIDEO-TRIM-001",
       "path": "contracts/fixtures/enhancement-video-trim-v1-reader-v1.json",
       "sha256": "65d74368293fff2a65d730ad1fa1d2cd3f32a200179ab0eaa6db738991582ec8"
+    },
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-LORA-001-FIXTURES",
+      "forContractId": "PV-ENHANCE-VIDEO-LORA-001",
+      "path": "contracts/fixtures/enhancement-video-lora-v1.json"
     }
   ],
   "verificationBundles": [
