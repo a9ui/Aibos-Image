@@ -21,6 +21,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
     private readonly ToggleButton _edit = new() { Content = "編集", Padding = new Thickness(16, 6, 16, 6), MinHeight = 32 };
     private readonly TextBox _input = Editor("指示の本文", 180);
     private readonly TextBox _notes = Editor("日本語訳・メモ", 70);
+    private readonly Expander _notesPanel = new() { Header = "日本語訳・メモ", Foreground = Muted, Margin = new Thickness(0, 8, 0, 4) };
     private readonly TextBlock _reading = new() { TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 27, Foreground = Ink };
     private readonly TextBlock _hint = Label("青：手動選択　紫：画像AI　黄：条件判定", false);
     private readonly TextBlock _variantHint = Label("", false);
@@ -42,7 +43,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         Resources[typeof(TextBlock)] = new Style(typeof(TextBlock));
         var panel = new StackPanel { Background = ColorBrush("#171C25") };
         Content = panel;
-        panel.Children.Add(Label("今回の描写", true));
+        panel.Children.Add(Label("画像の扱い", true));
         _source.ItemsSource = new[] { "自動で振り分ける", "アニメとして扱う", "実写として扱う" };
         AutomationProperties.SetName(_source, "今回の画像の扱い");
         panel.Children.Add(_source);
@@ -56,7 +57,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         var header = new DockPanel { Margin = new Thickness(0, 0, 0, 7) };
         DockPanel.SetDock(_edit, Dock.Right);
         header.Children.Add(_edit);
-        header.Children.Add(Label("指示の本文", true));
+        header.Children.Add(Label("動き・カメラ・表情", true));
         panel.Children.Add(header);
         SetEditStyle();
         AutomationProperties.SetName(_edit, "本文を編集");
@@ -78,11 +79,13 @@ public sealed class VideoPromptAuthoringControl : UserControl
         panel.Children.Add(_hint);
         _base.Content = _baseInput;
         panel.Children.Add(_base);
-        panel.Children.Add(Label("日本語訳・メモ", true));
-        panel.Children.Add(_notes);
-        panel.Children.Add(Label("生成には送られません。スタイルと一緒に保存できます。", false));
+        var notesContent = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+        notesContent.Children.Add(_notes);
+        notesContent.Children.Add(Label("動画には使わない説明です。スタイルと一緒に保存できます。", false));
+        _notesPanel.Content = notesContent;
+        panel.Children.Add(_notesPanel);
         var footer = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
-        AddButton(footer, "条件・画像AI・スタイルの詳細", () => DetailsRequested?.Invoke());
+        AddButton(footer, "自動選択・スタイルの詳細", () => DetailsRequested?.Invoke());
         panel.Children.Add(footer);
 
         _input.TextChanged += (_, _) =>
@@ -127,7 +130,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
             SetText(_input, program.Enabled ? program.TemplateFor(effectiveKind) : rawPrompt);
             SetText(_notes, program.DescriptionFor(effectiveKind));
             _variantHint.Visibility = program.UseSourceVariants ? Visibility.Visible : Visibility.Collapsed;
-            _variantHint.Text = $"アニメ・実写 共通スタイル · 今回は{(effectiveKind == "photoreal" ? "実写" : "アニメ")}用の本文を使用";
+            _variantHint.Text = $"今回は{(effectiveKind == "photoreal" ? "実写" : "アニメ")}用の本文を使用";
             SetText(_baseInput, program.BaseTemplateFor(effectiveKind));
             _base.Visibility = program.Enabled && !program.AnnotatedH3 && !string.IsNullOrEmpty(_baseInput.Text) ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -159,7 +162,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
         _reading.Inlines.Clear();
         if (!_program.Enabled)
         {
-            _reading.Inlines.Add(new Run(_input.Text.Length == 0 ? "スタイルを選ぶか、編集から本文を入力してください。" : _input.Text));
+            _reading.Inlines.Add(new Run(_input.Text.Length == 0 ? "スタイルを選ぶか、編集から本文を入力してください。" : ReadableH3Literal(_input.Text)));
             _hint.Text = "編集で文章を選び、［手動選択］や｛画像AI｝にできます。";
             return;
         }
@@ -171,10 +174,11 @@ public sealed class VideoPromptAuthoringControl : UserControl
         }
         _hint.Text = _edit.IsChecked == true
             ? "候補は / で区切ります。編集を閉じると本文から選べます。"
-            : "緑：カメラ　青：動作　桃：表情　橙：結末　紫：画像AI　取り消し線：使わない";
+            : "色付きの語句から選択 · 取り消し線は今回は使わない";
+        _hint.ToolTip = "緑：カメラ　青：動作　桃：表情　橙：結末　紫：画像AI";
         foreach (VideoPromptToken token in tokens)
         {
-            if (token.Kind == 't') { _reading.Inlines.Add(new Run(token.Text)); continue; }
+            if (token.Kind == 't') { _reading.Inlines.Add(new Run(_program.AnnotatedH3 ? ReadableH3Literal(token.Text) : token.Text)); continue; }
             VideoPromptOption option = _program.OptionFor(token);
             bool on = token.Kind == '[' ? _program.IsOn(option, _sourcePrompt) : option.Mode != "off";
             bool automatic = token.Kind == '{' && option.Mode == "auto" && _program.ImageChoices;
@@ -193,6 +197,26 @@ public sealed class VideoPromptAuthoringControl : UserControl
             link.Click += (_, _) => OpenOption(token, link);
             _reading.Inlines.Add(link);
         }
+    }
+
+    // Display-only: edit mode and the compiled prompt retain every character.
+    // Only the pinned structural prefix and section labels are abbreviated.
+    private static string ReadableH3Literal(string text)
+    {
+        const string prefix = "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description: [Shot 1] ";
+        string shown = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (shown.StartsWith(prefix, StringComparison.Ordinal)) shown = shown[prefix.Length..];
+        return shown.Replace("\n\noverall_soundscape: ", "\n\n音・声：", StringComparison.Ordinal)
+            .Replace("\n\nnon_diegetic_music: ", "\n\n音楽：", StringComparison.Ordinal);
+    }
+
+    public bool ReadableH3PreservesSourceForSmoke()
+    {
+        string before = _input.Text;
+        Render();
+        string reading = new TextRange(_reading.ContentStart, _reading.ContentEnd).Text;
+        return before == _input.Text && !reading.Contains("integrated_multimodal_description:", StringComparison.Ordinal)
+            && !reading.Contains("For the target video,", StringComparison.Ordinal) && reading.Contains("音・声：", StringComparison.Ordinal);
     }
 
     private void OpenOption(VideoPromptToken token, Hyperlink link)

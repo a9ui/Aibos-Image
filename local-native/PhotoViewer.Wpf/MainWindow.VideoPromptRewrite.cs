@@ -72,7 +72,7 @@ public partial class MainWindow
             return;
         }
 
-        await RewriteVideoPromptProgramAsync();
+        await PrepareVideoPromptForSubmissionAsync();
     }
 
     private void VideoH3RewriteMode_SelectionChanged(
@@ -605,6 +605,9 @@ public partial class MainWindow
         ModalVideoH3PromptCandidateTextBox.IsEnabled = h3Selected
             && !_videoH3RewritePending
             && !string.IsNullOrEmpty(_videoH3PromptCandidate);
+        ModalVideoH3PromptReviewPanel.Visibility = string.IsNullOrEmpty(_videoH3PromptCandidate) ? Visibility.Collapsed : Visibility.Visible;
+        ModalVideoH3ConformanceText.Visibility = string.IsNullOrEmpty(_videoH3PromptCandidate) ? Visibility.Collapsed : Visibility.Visible;
+        ModalVideoH3RewriteModePanel.Visibility = _videoPromptProgram.Enabled ? Visibility.Collapsed : Visibility.Visible;
         MiniMaxH3ConformanceResult conformance =
             MiniMaxH3I2vaPromptConformance.Analyze(
                 _videoH3PromptCandidate);

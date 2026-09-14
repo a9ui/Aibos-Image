@@ -53,26 +53,37 @@ public partial class App
             return JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected route" });
         });
         window.SetUiLanguageForSmoke(UiLanguageResources.Japanese);
+        window.SelectVideoPromptTemplateForSmoke("cinematic-camera");
         window.OpenVideoGenerationBoardForSmoke("original");
         window.SetVideoPromptProgramForSmoke(draft);
         window.SyncVideoGenerationSettingsForSmoke();
         window.UpdateLayout();
-        checks["submissionShowsRequiredPreparation"] = window.VideoSubmissionActionForSmoke == "生成用プロンプトを準備"
-            && window.VideoPreparationTitleForSmoke == "生成用プロンプトの準備・確認" && rewrites == 0 && enqueues == 0;
+        checks["submissionAlwaysMeansEnqueue"] = window.VideoSubmissionActionForSmoke == "H3動画化をキューへ追加"
+            && !window.VideoGenerationQueueEnabledForSmoke
+            && !await window.SubmitVideoGenerationForSmokeAsync() && rewrites == 0 && enqueues == 0;
+        checks["menuDetailsStartCollapsed"] = window.VideoMenuDetailsCollapsedForSmoke && !window.VideoPreparationExpandedForSmoke;
+        checks["queueFooterStaysVisibleWhileScrolling"] = window.VideoSubmissionFooterFixedForSmoke();
+        checks["readingModeSimplifiesH3WithoutChangingSource"] = window.VideoReadablePromptPreservesSourceForSmoke;
+        window.CaptureVideoVariantForSmoke((_, visual) => capture("video-menu-overview", visual));
         capture("video-submit-prepare", window.VideoSubmissionGuidePanelForSmoke);
+        window.OpenVideoPromptPreparationForSmoke();
+        checks["preparationLinkIsPassive"] = window.VideoPreparationExpandedForSmoke && rewrites == 0 && enqueues == 0;
         string before = window.VideoPromptForSmoke;
         rewriteGate = new TaskCompletionSource();
-        Task<bool> preparing = window.SubmitVideoGenerationForSmokeAsync();
+        Task<bool> preparing = window.PrepareVideoPromptForSubmissionForSmokeAsync();
         await rewriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         checks["submissionPendingBlocksRepeatedClicks"] = !window.VideoGenerationQueueEnabledForSmoke
+            && window.VideoSubmissionActionForSmoke == "H3動画化をキューへ追加"
+            && !await window.PrepareVideoPromptForSubmissionForSmokeAsync()
             && !await window.SubmitVideoGenerationForSmokeAsync()
             && !await window.QueueVideoGenerationForSmokeAsync() && rewrites == 1 && enqueues == 0;
         rewriteGate.SetResult();
-        checks["submissionPreparesWithoutApplyingOrEnqueueing"] = !await preparing
+        checks["submissionPreparesWithoutApplyingOrEnqueueing"] = await preparing
             && window.VideoPromptForSmoke == before && enqueues == 0
-            && window.VideoSubmissionActionForSmoke == "生成用プロンプトを確認";
+            && window.VideoSubmissionActionForSmoke == "H3動画化をキューへ追加" && !window.VideoGenerationQueueEnabledForSmoke;
         rewriteGate = null;
-        checks["submissionReviewsExistingCandidateWithoutRewrite"] = !await window.SubmitVideoGenerationForSmokeAsync()
+        window.OpenVideoPromptPreparationForSmoke();
+        checks["submissionReviewsExistingCandidateWithoutRewrite"] = !window.VideoGenerationQueueEnabledForSmoke
             && rewrites == 1 && enqueues == 0 && window.VideoH3PromptCandidateApplyEnabledForSmoke;
         window.UpdateLayout();
         capture("video-submit-review", window.VideoReviewPanelForSmoke);
@@ -83,17 +94,20 @@ public partial class App
         window.SetVideoH3PromptCandidateForSmoke(CreateVideoH3Candidate("QUEUE_RESULT"));
         checks["submissionApplyEnablesQueueWithoutSubmitting"] = window.ApplyVideoCandidateAndShowSubmissionForSmoke()
             && window.VideoSubmissionActionForSmoke == "H3動画化をキューへ追加"
-            && window.VideoGenerationQueueEnabledForSmoke && enqueues == 0;
+            && !window.VideoPreparationExpandedForSmoke && window.VideoGenerationQueueEnabledForSmoke && enqueues == 0;
+        checks["readyQueueFooterStaysVisibleWhileScrolling"] = window.VideoSubmissionFooterFixedForSmoke();
+        window.CaptureVideoVariantForSmoke((_, visual) => capture("video-menu-ready", visual));
         staleDuringHealth = true;
         checks["submissionRejectsChangesBeforePublication"] = !await window.SubmitVideoGenerationForSmokeAsync()
-            && enqueues == 0 && window.VideoSubmissionActionForSmoke == "生成用プロンプトを準備";
+            && enqueues == 0 && window.VideoSubmissionActionForSmoke == "H3動画化をキューへ追加" && !window.VideoGenerationQueueEnabledForSmoke;
         failRewrite = true;
         before = window.VideoPromptForSmoke;
-        checks["submissionPreparationFailureIsRetryable"] = !await window.SubmitVideoGenerationForSmokeAsync()
+        checks["submissionPreparationFailureIsRetryable"] = !await window.PrepareVideoPromptForSubmissionForSmokeAsync()
             && window.VideoPromptForSmoke == before && enqueues == 0
-            && window.VideoGenerationQueueEnabledForSmoke && !string.IsNullOrWhiteSpace(window.VideoGenerationStatusForSmoke);
+            && !window.VideoGenerationQueueEnabledForSmoke && window.VideoH3PromptRewriteButtonEnabledForSmoke
+            && !string.IsNullOrWhiteSpace(window.VideoGenerationStatusForSmoke);
         failRewrite = false;
-        checks["submissionRetryReturnsToReview"] = !await window.SubmitVideoGenerationForSmokeAsync()
+        checks["submissionRetryReturnsToReview"] = await window.PrepareVideoPromptForSubmissionForSmokeAsync()
             && window.ApplyVideoCandidateAndShowSubmissionForSmoke() && enqueues == 0;
         checks["submissionExplicitQueuePublishesResolvedPromptOnce"] = await window.SubmitVideoGenerationForSmokeAsync()
             && enqueues == 1 && publishedPrompt == CreateVideoH3Candidate("QUEUE_RESULT")

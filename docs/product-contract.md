@@ -571,11 +571,18 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   source metadata, model, and duration before Apply and enqueue. A change while
   preparing enqueue fails before durable publication. Jobs retain the resolved
   prompt under the existing video protocol, not executable authoring syntax.
-- The video board's submission button shows the next required action. An
-  unresolved instruction program offers explicit candidate preparation; an
-  existing current candidate opens its review controls without another rewrite.
-  Applying the candidate returns focus to the queue button. Preparation and
-  review never publish a video; a separate explicit queue click remains required.
+- The video board keeps its enqueue button in a fixed footer, with one purpose
+  and label. It never starts prompt rewriting. Unresolved or pending authoring
+  disables enqueue and shows a separate link to the preparation panel. Opening
+  that panel is passive; its explicit rewrite action prepares a candidate and
+  opens review. Apply enables enqueue and returns focus to the footer.
+  Style management, Japanese notes, output settings, technical details, and the
+  generated prompt are collapsed until needed. The footer summarizes duration
+  and quality and links to output settings. The primary editor retains inline
+  options and reversible editing; hiding detail panels does not reset values.
+  Reading mode omits the standard H3 opening and abbreviates sound/music section
+  labels for readability. Edit mode and generation retain the complete source;
+  this presentation change never rewrites a style or its compiled prompt.
   Pending metadata reads or rewrites block duplicate preparation and enqueue.
   Preparation failures expose their reason and leave the current prompt intact.
 - Physical continuity is optional prompt guidance, not a physics simulation or

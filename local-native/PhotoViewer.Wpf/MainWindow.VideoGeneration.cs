@@ -1851,7 +1851,11 @@ public partial class MainWindow
     private void SetVideoGenerationSettingsStatus(string message)
     {
         if (VideoGenerationStatusText is not null)
+        {
             VideoGenerationStatusText.Text = message;
+            VideoGenerationStatusText.ToolTip = message;
+            VideoGenerationStatusText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
+        }
         if (AppVideoSettingsStatusText is not null)
             AppVideoSettingsStatusText.Text = message;
     }
@@ -2668,21 +2672,25 @@ public partial class MainWindow
             && seedReady
             && _videoStepsInputValid
             && !VideoPromptPreparationPending
+            && ValidateVideoProgramForEnqueue() is null
             && !_videoGenerationRequestPending;
         RefreshVideoSubmissionPresentation(modelRegistered);
     }
 
     private async void QueueVideoGeneration_Click(object sender, RoutedEventArgs e)
-        => await SubmitVideoGenerationAsync();
+        => await QueueVideoGenerationAsync();
 
     private async Task<bool> QueueVideoGenerationAsync()
     {
         if (_videoGenerationRequestPending || VideoPromptPreparationPending)
             return false;
 
-        if (ValidateVideoProgramForEnqueue() is string programError)
+        if (ValidateVideoProgramForEnqueue() is not null)
         {
-            SetVideoGenerationSettingsStatus(programError);
+            // The persistent preparation guide owns this validation message.
+            // Do not repeat a second, older instruction above the same footer.
+            SetVideoGenerationSettingsStatus("");
+            UpdateVideoGenerationActionControls();
             return false;
         }
 

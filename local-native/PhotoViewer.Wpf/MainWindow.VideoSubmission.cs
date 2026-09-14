@@ -16,24 +16,18 @@ public partial class MainWindow
     {
         bool needsPreparation = modelRegistered && ValidateVideoProgramForEnqueue() is not null;
         bool needsReview = needsPreparation && HasCurrentVideoProgramCandidate();
-        string label = _videoGenerationRequestPending ? "追加中..."
-            : VideoPromptPreparationPending ? VideoH3Localized("UiVideoSubmitPreparing", "生成用プロンプトを準備中…")
-            : !modelRegistered ? "動画モデルを確認"
-            : needsReview ? VideoH3Localized("UiVideoSubmitReview", "生成用プロンプトを確認")
-            : needsPreparation ? VideoH3Localized("UiVideoSubmitPrepare", "生成用プロンプトを準備")
-            : "H3動画化をキューへ追加";
+        string label = _videoGenerationRequestPending ? "キューへ登録中…" : "H3動画化をキューへ追加";
         string help = VideoPromptPreparationPending
             ? VideoH3Localized("UiVideoSubmitPreparingHelp", "画像と選択内容から生成用プロンプトを準備しています。")
             : needsReview
                 ? VideoH3Localized("UiVideoSubmitReviewHelp", "生成用プロンプトができました。内容を確認して「この内容を反映」を押すと、キューへ追加できます。")
                 : needsPreparation
-                    ? VideoH3Localized("UiVideoSubmitPrepareHelp", "本文の選択を動画に使うため、生成用プロンプトの準備が必要です。下のボタンで準備し、内容を確認して反映してください。")
+                    ? VideoH3Localized("UiVideoSubmitPrepareHelp", "本文の変更が未反映です。「準備・確認へ」から生成用プロンプトを整えてください。")
                     : VideoH3Localized("UiVideoSubmitReadyHelp", "現在の生成用プロンプトで動画をキューへ追加します。");
         QueueVideoGenerationButton.Content = label;
         QueueVideoGenerationButton.ToolTip = help;
         AutomationProperties.SetName(QueueVideoGenerationButton, _videoGenerationRequestPending
-            ? "Adding video generation job" : needsPreparation || VideoPromptPreparationPending
-                ? label : "Add video generation job");
+            ? "Adding video generation job" : "Add video generation job");
         AutomationProperties.SetHelpText(QueueVideoGenerationButton, help);
         if (VideoSubmissionGuideText is not null)
         {
@@ -43,59 +37,97 @@ public partial class MainWindow
         }
         if (ModalVideoH3PromptAssistantTitle is not null)
         {
-            ModalVideoH3PromptAssistantTitle.Text = _videoPromptProgram.Enabled
-                ? VideoH3Localized("UiVideoProgramPreparationTitle", "生成用プロンプトの準備・確認")
-                : VideoH3Localized("UiMotionDirectorAiProposalTitle", "AI提案（任意）");
+            ModalVideoH3PromptAssistantTitle.Text = VideoH3Localized("UiVideoProgramPreparationTitle", "生成用プロンプト");
             ModalVideoH3PromptAssistantHelp.Text = _videoPromptProgram.Enabled
                 ? VideoH3Localized("UiVideoProgramPreparationHelp", "本文で選んだ内容をローカルAIで動画用に整えます。内容を確認して反映した後、キューへ追加してください。")
                 : VideoH3Localized("UiVideoH3PromptAssistantHelp", "入力欄のプロンプトをMiniMax H3向けに整えます。");
         }
+        if (VideoPromptPreparationStateText is not null)
+            VideoPromptPreparationStateText.Text = VideoPromptPreparationPending ? "準備中"
+                : needsReview ? "確認・反映が必要" : needsPreparation ? "本文の変更が未反映" : "使用できます";
+        if (VideoSubmissionSummaryButton is not null)
+            VideoSubmissionSummaryButton.Content = $"{_videoDurationSeconds}秒 · {(_videoMaximumPixelArea >= 414720 ? "高画質" : _videoMaximumPixelArea >= 307200 ? "標準" : "軽量")} · 音声あり  ▾";
     }
 
-    // The visible action guides preparation and review. Durable publication
-    // remains a separate click, through the unchanged enqueue validation.
-    private async Task<bool> SubmitVideoGenerationAsync()
+    // Preparation belongs to its dedicated panel. The footer only enqueues.
+    private async Task<bool> PrepareVideoPromptForSubmissionAsync()
     {
         if (_videoGenerationRequestPending || VideoPromptPreparationPending) return false;
-        if (IsMiniMaxH3VideoModel(_videoModelId) && ValidateVideoProgramForEnqueue() is not null)
+        VideoPromptPreparationExpander.IsExpanded = true;
+        if (!await RewriteVideoPromptProgramAsync())
         {
-            if (!HasCurrentVideoProgramCandidate())
-            {
-                ModalVideoH3RewritePromptButton.BringIntoView();
-                if (!await RewriteVideoPromptProgramAsync())
-                {
-                    SetVideoGenerationSettingsStatus(ModalVideoH3PromptRewriteStatusText.Text);
-                    ModalVideoH3PromptRewriteStatusText.BringIntoView();
-                    UpdateVideoGenerationActionControls();
-                    return false;
-                }
-            }
-            SetVideoGenerationSettingsStatus(VideoH3Localized("UiVideoSubmitReviewHelp",
-                "生成用プロンプトができました。内容を確認して「この内容を反映」を押すと、キューへ追加できます。"));
-            ModalVideoH3PromptReviewPanel.BringIntoView();
-            Keyboard.Focus(ModalVideoH3PromptCandidateTextBox);
+            SetVideoGenerationSettingsStatus(ModalVideoH3PromptRewriteStatusText.Text);
+            ModalVideoH3PromptRewriteStatusText.BringIntoView();
             UpdateVideoGenerationActionControls();
             return false;
         }
-        return await QueueVideoGenerationAsync();
+        SetVideoGenerationSettingsStatus("");
+        OpenVideoPromptPreparation();
+        UpdateVideoGenerationActionControls();
+        return true;
+    }
+
+    private void OpenVideoPromptPreparation_Click(object sender, RoutedEventArgs e) => OpenVideoPromptPreparation();
+
+    private void OpenVideoPromptPreparation()
+    {
+        SetVideoGenerationSettingsStatus("");
+        VideoPromptPreparationExpander.IsExpanded = true;
+        if (HasCurrentVideoProgramCandidate())
+        {
+            ModalVideoH3PromptReviewPanel.BringIntoView();
+            Keyboard.Focus(ModalVideoH3PromptCandidateTextBox);
+        }
+        else
+        {
+            ModalVideoH3RewritePromptButton.BringIntoView();
+            Keyboard.Focus(ModalVideoH3RewritePromptButton);
+        }
+    }
+
+    private void OpenVideoOutputSettings_Click(object sender, RoutedEventArgs e)
+    {
+        VideoOutputSettingsExpander.IsExpanded = true;
+        ModalVideoH3DurationComboBox.BringIntoView();
+        Keyboard.Focus(ModalVideoH3DurationComboBox);
     }
 
     private bool ApplyVideoCandidateAndShowSubmission()
     {
         if (!ApplyVideoH3PromptCandidate()) return false;
         UpdateVideoGenerationActionControls();
-        SetVideoGenerationSettingsStatus(VideoH3Localized("UiVideoSubmitAppliedHelp",
-            "生成用プロンプトを反映しました。下の「H3動画化をキューへ追加」で登録できます。"));
+        SetVideoGenerationSettingsStatus("");
+        VideoPromptPreparationExpander.IsExpanded = false;
         QueueVideoGenerationButton.BringIntoView();
         Keyboard.Focus(QueueVideoGenerationButton);
         return true;
     }
 
-    public Task<bool> SubmitVideoGenerationForSmokeAsync() => SubmitVideoGenerationAsync();
+    public Task<bool> SubmitVideoGenerationForSmokeAsync() => QueueVideoGenerationAsync();
+    public Task<bool> PrepareVideoPromptForSubmissionForSmokeAsync() => PrepareVideoPromptForSubmissionAsync();
+    public void OpenVideoPromptPreparationForSmoke() => OpenVideoPromptPreparation();
     public bool ApplyVideoCandidateAndShowSubmissionForSmoke() => ApplyVideoCandidateAndShowSubmission();
     public string VideoSubmissionActionForSmoke => QueueVideoGenerationButton.Content?.ToString() ?? "";
     public string VideoSubmissionGuideForSmoke => VideoSubmissionGuideText.Text;
     public string VideoPreparationTitleForSmoke => ModalVideoH3PromptAssistantTitle.Text;
     public FrameworkElement VideoReviewPanelForSmoke => ModalVideoH3PromptReviewPanel;
     public FrameworkElement VideoSubmissionGuidePanelForSmoke => VideoSubmissionGuideBorder;
+    public FrameworkElement VideoSubmissionFooterForSmoke => VideoSubmissionFooter;
+    public bool VideoPreparationExpandedForSmoke => VideoPromptPreparationExpander.IsExpanded;
+    public bool VideoMenuDetailsCollapsedForSmoke => !VideoStyleManagementExpander.IsExpanded && !VideoOutputSettingsExpander.IsExpanded;
+    public bool VideoReadablePromptPreservesSourceForSmoke => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).ReadableH3PreservesSourceForSmoke();
+    public bool VideoSubmissionFooterFixedForSmoke()
+    {
+        ModalVideoGenerationScrollViewer.ScrollToTop();
+        UpdateLayout();
+        double top = QueueVideoGenerationButton.TranslatePoint(new Point(), ModalVideoGenerationBoardBorder).Y;
+        ModalVideoGenerationScrollViewer.ScrollToBottom();
+        UpdateLayout();
+        double bottom = QueueVideoGenerationButton.TranslatePoint(new Point(), ModalVideoGenerationBoardBorder).Y;
+        bool fixedVisible = Math.Abs(top - bottom) < 1 && top >= 0
+            && bottom + QueueVideoGenerationButton.ActualHeight <= ModalVideoGenerationBoardBorder.ActualHeight;
+        ModalVideoGenerationScrollViewer.ScrollToTop();
+        UpdateLayout();
+        return fixedVisible;
+    }
 }
