@@ -1479,7 +1479,7 @@ public partial class MainWindow
             new Action(() =>
             {
                 if (ModalVideoGenerationPopup.Visibility == Visibility.Visible)
-                    Keyboard.Focus(ModalVideoPromptTextBox);
+                    FocusModalVideoGenerationBoard();
             }),
             DispatcherPriority.Input);
     }

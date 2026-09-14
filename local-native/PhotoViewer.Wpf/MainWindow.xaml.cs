@@ -25936,7 +25936,7 @@ public partial class MainWindow : Window
             else if (ModalVideoGenerationPopup?.Visibility == Visibility.Visible
                 && !ModalVideoGenerationPopup.IsKeyboardFocusWithin)
             {
-                Keyboard.Focus(ModalVideoPromptTextBox);
+                FocusModalVideoGenerationBoard();
             }
 
             // The settings board is the topmost keyboard surface. Keep normal

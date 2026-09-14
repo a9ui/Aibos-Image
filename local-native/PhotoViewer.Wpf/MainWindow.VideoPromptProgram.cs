@@ -23,6 +23,16 @@ public partial class MainWindow
     private string? _videoProgramMetadataPrompt;
     private bool _syncingVideoAuthoringControls;
 
+    private void FocusModalVideoGenerationBoard()
+    {
+        if (ModalVideoGenerationPopup?.Visibility != Visibility.Visible
+            || ModalVideoGenerationPopup.IsKeyboardFocusWithin) return;
+        if (ModalVideoPromptAuthoringHost.Content is VideoPromptAuthoringControl editor)
+            editor.FocusPrompt();
+        else
+            System.Windows.Input.Keyboard.Focus(ModalVideoH3DurationComboBox);
+    }
+
     private void RefreshVideoPromptAuthoringControls()
     {
         if (_syncingVideoAuthoringControls || ModalVideoPromptAuthoringHost is null || AppVideoPromptAuthoringHost is null) return;

@@ -46,6 +46,10 @@ public sealed class VideoPromptAuthoringControl : UserControl
     public event Action<string>? SourceChanged;
     public event Action? DetailsRequested;
 
+    public void FocusPrompt()
+        => System.Windows.Input.Keyboard.Focus(_edit.IsChecked == true
+            ? (IInputElement)_input : _edit);
+
     public VideoPromptAuthoringControl()
     {
         Resources[typeof(TextBlock)] = new Style(typeof(TextBlock));
