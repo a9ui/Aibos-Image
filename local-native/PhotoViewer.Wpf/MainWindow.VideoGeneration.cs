@@ -3788,7 +3788,7 @@ public partial class MainWindow
                 issues.Add("surface");
             if (!VideoStyleSurfaceForSmoke)
                 issues.Add("style");
-            if (ModalVideoGenerationBoardBorder.MaxHeight > 680
+            if (ModalVideoGenerationBoardBorder.Width <= 0 || ModalVideoGenerationBoardBorder.Width > 860
                 || ModalVideoGenerationScrollViewer.VerticalScrollBarVisibility
                     != ScrollBarVisibility.Auto)
                 issues.Add("layout");

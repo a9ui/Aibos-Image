@@ -584,6 +584,12 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   keys, including soundscape and music. Only inline options change presentation;
   literal prompt text is never hidden or relabeled. Japanese descriptions remain
   separate, and Japanese dialogue within the prompt is preserved verbatim.
+  The board expands up to 860 DIPs wide and fills the available window height
+  below the toolbar, retaining a small bottom margin rather than a fixed height cap.
+  Reading mode uses the menu's single scroll surface. Editable text fields keep
+  their own scrolling and hand wheel input to the menu at either end. Closed
+  selectors do not change values on wheel input, and the fixed footer remains
+  visible while scrolling. These layout operations do not prepare or enqueue.
   Pending metadata reads or rewrites block duplicate preparation and enqueue.
   Preparation failures expose their reason and leave the current prompt intact.
 - Physical continuity is optional prompt guidance, not a physics simulation or

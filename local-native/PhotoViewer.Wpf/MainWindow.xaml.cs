@@ -18474,7 +18474,8 @@ public partial class MainWindow : Window
         double settingsBoardTop = compact ? 88 : 52;
         ModalUpscaleSettingsBoardBorder.Margin = new Thickness(0, settingsBoardTop, 150, 12);
         ModalPhotorealSettingsBoardBorder.Margin = new Thickness(0, settingsBoardTop, 150, 12);
-        ModalVideoGenerationBoardBorder.Margin = new Thickness(0, settingsBoardTop, 150, 12);
+        ModalVideoGenerationBoardBorder.Margin = new Thickness(16, settingsBoardTop, 16, 12);
+        UpdateVideoGenerationBoardLayout(width, height);
         ModalTitle.MaxWidth = compact ? 240 : 360;
         ModalEnhancementStatusText.MaxWidth = compact ? 88 : 240;
     }
@@ -26367,6 +26368,9 @@ public partial class MainWindow : Window
     {
         if (DeleteConfirmationDialog.Visibility == Visibility.Visible
             || AppSettingsDialog.Visibility == Visibility.Visible
+            || (ModalVideoGenerationPopup.Visibility == Visibility.Visible
+                && e.OriginalSource is DependencyObject videoSource
+                && IsDescendantOrSelf(videoSource, ModalVideoGenerationBoardBorder))
             || !IsViewerShortcutSurfaceActive())
         {
             base.OnPreviewMouseWheel(e);

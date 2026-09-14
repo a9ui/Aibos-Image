@@ -25,7 +25,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
     private readonly TextBlock _reading = new() { TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 27, Foreground = Ink };
     private readonly TextBlock _hint = Label("青：手動選択　紫：画像AI　黄：条件判定", false);
     private readonly TextBlock _variantHint = Label("", false);
-    private readonly ScrollViewer _reader;
+    private readonly Border _reader;
     private readonly WrapPanel _tools = new() { Margin = new Thickness(0, 0, 0, 6) };
     private readonly ComboBox _source = new() { MinHeight = 30, Margin = new Thickness(0, 0, 0, 10) };
     private readonly Expander _base = new() { Header = "元のスタイル本文", Foreground = Muted, Margin = new Thickness(0, 6, 0, 6) };
@@ -69,12 +69,12 @@ public sealed class VideoPromptAuthoringControl : UserControl
         panel.Children.Add(_tools);
         var field = new Grid();
         field.Children.Add(_input);
-        _reader = new ScrollViewer
+        _reader = new Border
         {
-            Content = _reading, MinHeight = 180, MaxHeight = 360, Padding = new Thickness(12),
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Background = Paper,
+            Child = _reading, MinHeight = 180, Padding = new Thickness(12), Background = Paper,
+            BorderBrush = ColorBrush("#3F5474"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7),
         };
-        field.Children.Add(new Border { BorderBrush = ColorBrush("#3F5474"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7), Child = _reader });
+        field.Children.Add(_reader);
         panel.Children.Add(field);
         panel.Children.Add(_hint);
         _base.Content = _baseInput;
@@ -152,7 +152,7 @@ public sealed class VideoPromptAuthoringControl : UserControl
     {
         bool editing = _edit.IsChecked == true;
         _input.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
-        ((UIElement)_reader.Parent).Visibility = editing ? Visibility.Collapsed : Visibility.Visible;
+        _reader.Visibility = editing ? Visibility.Collapsed : Visibility.Visible;
         _tools.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
         Render();
     }
@@ -211,6 +211,17 @@ public sealed class VideoPromptAuthoringControl : UserControl
     }
 
     public string ReadingTextForSmoke => new TextRange(_reading.ContentStart, _reading.ContentEnd).Text;
+    public FrameworkElement ReadingSurfaceForSmoke { get { _edit.IsChecked = false; return _reading; } }
+    public ScrollViewer EditingScrollForSmoke
+    {
+        get
+        {
+            _edit.IsChecked = true;
+            _input.ApplyTemplate();
+            _input.UpdateLayout();
+            return (ScrollViewer)_input.Template.FindName("PART_ContentHost", _input);
+        }
+    }
 
     private void OpenOption(VideoPromptToken token, Hyperlink link)
     {

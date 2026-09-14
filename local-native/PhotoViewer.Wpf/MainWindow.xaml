@@ -3963,12 +3963,20 @@
       <Grid x:Name="ModalVideoGenerationPopup" Grid.RowSpan="3" Grid.ColumnSpan="2"
             Visibility="Collapsed" Panel.ZIndex="90" Background="Transparent"
             WindowChrome.IsHitTestVisibleInChrome="True"
+            SizeChanged="VideoGenerationPopup_SizeChanged"
             MouseLeftButtonDown="ModalVideoGenerationBackdrop_MouseLeftButtonDown"
             AutomationProperties.Name="Video generation board overlay">
-        <Border x:Name="ModalVideoGenerationBoardBorder" Width="600" MaxHeight="680" Padding="16" CornerRadius="7"
-                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
+        <Border x:Name="ModalVideoGenerationBoardBorder" Width="860" Padding="16" CornerRadius="7"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="16,52,16,12"
                 Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                PreviewMouseWheel="VideoGenerationBoard_PreviewMouseWheel"
                 KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
+          <Border.Resources>
+            <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource {x:Type ScrollBar}}">
+              <Setter Property="Width" Value="22"/>
+              <Setter Property="MinWidth" Value="22"/>
+            </Style>
+          </Border.Resources>
           <DockPanel LastChildFill="True">
             <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,0,12">
               <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}"
@@ -4012,6 +4020,7 @@
                     AutomationProperties.HelpText="Explicitly adds one video job to the same durable GPU queue used by image enhancements."/>
           </StackPanel>
           <ScrollViewer x:Name="ModalVideoGenerationScrollViewer"
+                        CanContentScroll="False" PanningMode="VerticalOnly"
                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="0,0,6,0">
 

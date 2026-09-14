@@ -73,6 +73,7 @@ public partial class App
         checks["literalReadingPreservesCompleteH3AndJapaneseDialogue"] = literalEditor.FullH3PreservesSourceForSmoke()
             && literalEditor.ReadingTextForSmoke.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n') == speechPrompt;
         window.CaptureVideoVariantForSmoke((_, visual) => capture("video-menu-overview", visual));
+        window.VerifyVideoMenuScrollingForSmoke(checks, capture);
         capture("video-submit-prepare", window.VideoSubmissionGuidePanelForSmoke);
         window.OpenVideoPromptPreparationForSmoke();
         checks["preparationLinkIsPassive"] = window.VideoPreparationExpandedForSmoke && rewrites == 0 && enqueues == 0;
