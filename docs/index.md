@@ -18,6 +18,7 @@ It is not a second product contract.
 | Durable state or Enhancement protocol | The matching entry in [`contracts/index.json`](../contracts/index.json), then only its named contract or fixture |
 | Code or responsibility ownership | [`architecture/project-map.md`](architecture/project-map.md) |
 | Cross-feature state | [`architecture/state-ownership.md`](architecture/state-ownership.md) |
+| Storage placement, retention, or directory maintenance | [`architecture/storage-layout.md`](architecture/storage-layout.md) |
 | Startup, passive reads, enqueue, Jobs, or output flow | [`architecture/critical-flows.md`](architecture/critical-flows.md) |
 | Video Tools design context | [`video-studio-design.md`](video-studio-design.md), after the applicable contract |
 

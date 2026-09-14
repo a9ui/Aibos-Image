@@ -82,6 +82,25 @@ WPF `state.json` is not part of the public durable protocol wholesale.
 The exact locator document, validation, leases, and cases are defined by
 `PV-ROOT-001`.
 
+### Storage placement and maintenance
+
+- Resolve executable locations from the explicit launcher/deployment selection,
+  and durable locations from their existing locator or store owner. Changing a
+  checkout or rebuilding an executable does not authorize moving durable data.
+- A directory name such as `.cache`, an ignore rule, or an old checkout date is
+  not evidence that its contents are disposable. A checkout containing the
+  shared root remains a durable-data container until an explicit, verified
+  migration changes that relationship.
+- Maintenance must identify active readers, writers, accepted requests, runtime
+  references, and recovery requirements before removing a generated artifact.
+  Age, an idle queue, and an unmounted runtime image alone are insufficient.
+- User media, local settings and Styles, shared state, accepted enqueue
+  envelopes, Jobs, outputs, and recovery records stay outside automatic cleanup.
+  Maintenance does not silently reset state, choose a new empty root, or resume
+  a paused queue.
+- Report logical bytes separately from storage actually recovered. Hard links,
+  mounted images, and same-volume renames must not be counted as freed storage.
+
 ### Safe reads and writes
 
 - Writers read the latest on-disk state while holding the required lease.
