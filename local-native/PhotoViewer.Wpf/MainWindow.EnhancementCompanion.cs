@@ -1669,10 +1669,13 @@ public partial class MainWindow
         }
         if (_usingDefaultModalEnhancementSender)
         {
+            // Authenticate the API first. Publish before recovering the queue,
+            // whose interrupted-runtime preparation can take several minutes.
             EnhancementApiResponse readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
                     recoverySourceIdentity,
-                    token);
+                    token,
+                    recoverQueueBeforeHealth: false);
             if (!readiness.Ok)
                 return readiness;
         }
@@ -1752,7 +1755,7 @@ public partial class MainWindow
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
                 recoverySourceIdentity,
-                item.RequestId, scheduleRecovery: false, actionEpoch: actionEpoch);
+                item.RequestId, actionEpoch: actionEpoch);
             return SavedForDeliveryResponse(item);
         }
 
@@ -1862,7 +1865,8 @@ public partial class MainWindow
         {
             EnhancementApiResponse readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
-                    token: token);
+                    token: token,
+                    recoverQueueBeforeHealth: false);
             if (!readiness.Ok)
             {
                 EnhancementApiResponse rejected = new(
@@ -2069,7 +2073,7 @@ public partial class MainWindow
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
                 sourceIdentity: null,
-                publishedItems[0].Item.RequestId, scheduleRecovery: false, actionEpoch: actionEpoch);
+                publishedItems[0].Item.RequestId, actionEpoch: actionEpoch);
         }
 
         int nudgeCount = 0;
