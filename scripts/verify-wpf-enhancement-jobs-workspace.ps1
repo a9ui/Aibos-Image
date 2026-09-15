@@ -241,7 +241,13 @@ try {
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.activeRows.Contains(
             "no progress bar"))
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.activeRows.Contains(
-            "running rows alone render a determinate value"))
+            "running rows normally render a determinate value"))
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.operation -eq "video")
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.adapterId -eq "minimax-h3-local-v1")
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.requiresVideoMutationSafe -eq $true)
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.status -eq "running")
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.progressBelow -eq 5)
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.cancelRequested -eq $false)
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.durableFieldMeaning.Contains(
             "completed adapter execution stages"))
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.terminalRows.Contains(
