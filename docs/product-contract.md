@@ -414,7 +414,14 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - The durable `progress` field is the companion-owned percentage of completed
   adapter execution stages. A queued row retains lifecycle value `0` but shows
   only its waiting order and no progress bar. A running row alone shows a
-  determinate value from `1` through `99`; `99` means final publication or
+  determinate value from `1` through `99`. A compatible MiniMax H3 generation
+  row below `5` instead shows preparation text and an indeterminate bar: source
+  preparation, optional AI prompt enhancement, and engine startup do not yet
+  provide measurable progress. Cancel requests take precedence over that
+  presentation. Once health or inventory reports `5` or greater, the same row
+  returns to measured progress and hides the preparation detail. This changes
+  presentation only; the durable progress value stays untouched.
+  `99` means final publication or
   verification is in progress, not an ETA or a remaining-time estimate.
   Succeeded and deleted rows retain lifecycle value `100` but show their
   terminal label without a decorative full bar. WPF clamps presentation to

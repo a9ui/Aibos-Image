@@ -12127,10 +12127,15 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             AdapterId,
             "comfyui-flux2-i2i-v2",
             StringComparison.Ordinal);
-    // Durable jobs carry a bounded 0..100 lifecycle value. Only running rows
-    // expose that value as determinate progress; queued and terminal rows use
-    // their status as the clearer authority and do not render a decorative bar.
-    public bool IsProgressIndeterminate => false;
+    // H3 keeps progress below 5 until source/prompt preparation and engine
+    // startup finish. That value cannot measure preparation progress.
+    private bool IsH3Preparation => Status == "running"
+        && !CancelRequested
+        && IsVideoOperation
+        && VideoMutationSafe
+        && AdapterId == "minimax-h3-local-v1"
+        && Progress < 5;
+    public bool IsProgressIndeterminate => IsH3Preparation;
     public bool ShowProgressBar => Status == "running";
     public int DisplayProgress => Status switch
     {
@@ -12147,6 +12152,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             "queued" when QueuePosition > 0 && QueueCount > 0 =>
                 $"待機中 · {QueuePosition} / {QueueCount}",
             "queued" => "待機中",
+            "running" when IsH3Preparation => "動画生成の準備中",
             "running" when DisplayProgress >= 99 => "最終処理中 99%",
             "running" => $"処理中 {DisplayProgress}%",
             "succeeded" => "完了",
@@ -12181,6 +12187,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : IsVideoOperation
             ? !VideoMutationSafe
                 ? "この動画履歴は不完全または非互換のため、変更操作から保護しています。"
+                : IsH3Preparation
+                    ? "画像の確認と生成エンジンの準備を行っています。AIプロンプト強化を選んだ場合は、この段階で実行します。"
                 : ""
             : Operation == "i2i"
                 ? !I2iMutationSafe
@@ -12386,9 +12394,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             || queueMutationScopeChanged)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
-            if (statusChanged)
+            if (statusChanged || progressChanged || cancelRequestedChanged)
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsProgressIndeterminate)));
+            }
+            if (statusChanged)
+            {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowProgressBar)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
             }
@@ -12430,6 +12441,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         }
         if (statusChanged
             || cancelRequestedChanged
+            || progressChanged
             || outputChanged
             || errorChanged)
         {
@@ -12468,8 +12480,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsProgressIndeterminate)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowDetailText)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
         }
         if (updatedChanged)

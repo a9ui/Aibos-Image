@@ -472,6 +472,7 @@ try {
     $required = @(
         'passiveOpen',
         'activeProgressIsTruthful',
+        'h3PreparationPresentation',
         'historyWindowReaderContract',
         'healthVisible',
         'healthProvenance',

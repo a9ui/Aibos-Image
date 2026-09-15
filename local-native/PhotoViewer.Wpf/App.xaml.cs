@@ -21891,6 +21891,8 @@ public partial class App : Application
                         StringComparison.Ordinal)
                     && !initial.HeaderSummary.Contains(" total ", StringComparison.Ordinal)
                     && initial.Status == "キュー順で表示中 · 履歴は最新 500件";
+                bool h3PreparationPresentation = VerifyH3PreparationPresentation(
+                    window, Path.GetDirectoryName(resultFullPath)!);
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
@@ -22316,7 +22318,7 @@ public partial class App : Application
                     mismatchedKreaQueueHead.HealthState == "確認が必要"
                     && mismatchedKreaQueueHead.HealthDetail
                         == "待機中の処理を開始する実行役が動いていません。"
-                    && mismatchedKreaQueueHead.QueuePauseLabel == "再開"
+                    && mismatchedKreaQueueHead.QueuePauseLabel == "復旧して再開"
                     && mismatchedKreaQueueHead.QueuePauseEnabled;
                 kreaQueueHeadBlocked = false;
                 healthMode = "malformed-krea-queue-head-blocked";
@@ -22373,7 +22375,7 @@ public partial class App : Application
                     && missingH3SealHealth.HealthDetail
                         == "MiniMax H3の保護済み実行環境が接続されていません。再開して復旧してください。"
                     && missingH3SealHealth.QueuePaused == false
-                    && missingH3SealHealth.QueuePauseLabel == "再開"
+                    && missingH3SealHealth.QueuePauseLabel == "復旧して再開"
                     && missingH3SealHealth.QueuePauseEnabled
                     && await window.SetEnhancementQueuePausedForSmokeAsync(false)
                     && queueControlBodies.LastOrDefault()
@@ -24386,6 +24388,7 @@ public partial class App : Application
                     && combinedJobsFiltersContract
                     && jobsFilterPillToggleContract
                     && activeProgressIsTruthful
+                    && h3PreparationPresentation
                     && mixedRetryCapabilityPartition
                     && initial.Polling
                     && passiveOpen
@@ -24631,6 +24634,7 @@ public partial class App : Application
                     failedBulkConfirmationContract,
                     canceledBulkConfirmationContract,
                     activeProgressIsTruthful,
+                    h3PreparationPresentation,
                     mixedRetryCapabilityPartition,
                     legacyHealth,
                     futureHealth,
