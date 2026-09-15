@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-LORA-001",
+  "protocol": "aibos.enhancement-video-lora/v1",
+  "extends": {
+    "contractId": "PV-ENHANCE-VIDEO-002",
+    "compatibility": "Requests without requested.loras keep their existing workflow, output identity and behavior."
+  },
+  "healthCapability": {
+    "field": "capabilities.videoLoraV1",
+    "shape": {
+      "contractId": "PV-ENHANCE-VIDEO-LORA-001",
+      "protocol": "aibos.enhancement-video-lora/v1",
+      "maximumCount": 8,
+      "maximumBytes": 4294967296,
+      "minimumStrength": -2,
+      "maximumStrength": 2,
+      "workflowRevision": "minimax-h3-comfy-lora-v1"
+    },
+    "requireExactBeforeDurablePublish": true,
+    "meaning": "Advertise only when the pinned code extension is installed. A passive check never mounts, wakes or starts a runtime."
+  },
+  "request": {
+    "field": "video.requested.loras",
+    "optional": true,
+    "minimumCount": 1,
+    "maximumCount": 8,
+    "maximumCombinedBytes": 4294967296,
+    "entryKeys": [
+      "schemaVersion",
+      "directory",
+      "fileName",
+      "sha256",
+      "bytes",
+      "strength"
+    ],
+    "entrySchemaVersion": 1,
+    "directory": "Canonical local Windows drive directory; no links, junctions, UNC paths or traversal.",
+    "fileName": "Single safetensors filename, at most 240 code units.",
+    "sha256": "64 lowercase hexadecimal characters; immutable content identity.",
+    "bytes": "Integer from 10 through 4294967296 inclusive.",
+    "strength": "Finite nonzero number from -2 through 2 inclusive. UI strength zero and unchecked rows are omitted.",
+    "duplicates": "Duplicate content hashes are rejected. Order is preserved.",
+    "unknownFields": "Reject within the versioned LoRA entry and requested settings, without rewriting existing state."
+  },
+  "execution": {
+    "workflowRevision": "minimax-h3-comfy-lora-v1",
+    "loading": "Apply all enabled model-only adapters in listed order. Validate tensor keys and dimensions against the exact loaded H3 model; reject unsupported or partly applied adapters. Never silently generate without selected adapters.",
+    "formats": "Native mapped linear up/down or PEFT A/B safetensors pairs with optional scalar alpha.",
+    "staging": "Bounded per-job temporary copies; original LoRA files are not moved or rewritten. Check free space, verify hashes again before loading, hold read locks while in use, and clean only after exact child exit.",
+    "storage": "Share existing core model files. Code extensions have independent immutable pins and a 4 MiB maximum; no duplicate model environment.",
+    "recovery": "Preserve selected order, strength and hashes in job snapshots. Missing or changed files fail explicitly. Never substitute a similarly named LoRA.",
+    "limits": "Count and byte bounds are resource safeguards, not a guarantee that all combinations fit GPU memory."
+  }
+}

@@ -500,6 +500,13 @@ public partial class App : Application
             return;
         }
 
+        int videoPromptProgramSmokeIdx = Array.IndexOf(e.Args, "--video-prompt-program-smoke");
+        if (videoPromptProgramSmokeIdx >= 0 && videoPromptProgramSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoPromptProgramSmoke(e.Args[videoPromptProgramSmokeIdx + 1]);
+            return;
+        }
+
         int videoToolsSmokeIdx = Array.IndexOf(
             e.Args,
             "--video-tools-smoke");
@@ -18728,6 +18735,16 @@ public partial class App : Application
                     && win.ActivateModalImagePrimaryClickForSmoke()
                     && win.ModalShowingVideoForSmoke
                     && win.ModalVideoPlayingForSmoke;
+                bool footerButtonPaused = videoClickResumed
+                    && win.ClickModalVideoPlaybackButtonForSmoke()
+                    && !win.ModalVideoPlayingForSmoke
+                    && await win.WaitForModalVideoPauseSettledForSmokeAsync();
+                win.SuspendPausedModalVideoPresentationForSmoke();
+                bool footerButtonResumedAfterMinimize = footerButtonPaused
+                    && win.ClickModalVideoPlaybackButtonForSmoke()
+                    && win.ModalVideoPlayingForSmoke
+                    && win.ModalVideoTimelineRunningForSmoke
+                    && await win.WaitForModalVideoPlaybackProgressForSmokeAsync();
                 bool olderVideoSelectionStarted =
                     win.SelectModalVideoVersionForSmoke(1);
                 bool olderVideoMediaOpened = olderVideoSelectionStarted
@@ -19600,6 +19617,8 @@ public partial class App : Application
                     && videoClickPaused
                     && videoPauseSettled
                     && videoClickResumed
+                    && footerButtonPaused
+                    && footerButtonResumedAfterMinimize
                     && olderVideoMediaOpened
                     && olderVideoPlaybackProgress
                     && olderVideoSelected
@@ -19716,6 +19735,8 @@ public partial class App : Application
                     VideoClickPaused = videoClickPaused,
                     VideoPauseSettled = videoPauseSettled,
                     VideoClickResumed = videoClickResumed,
+                    FooterButtonPaused = footerButtonPaused,
+                    FooterButtonResumedAfterMinimize = footerButtonResumedAfterMinimize,
                     OlderVideoMediaOpened = olderVideoMediaOpened,
                     OlderVideoPlaybackProgress =
                         olderVideoPlaybackProgress,
@@ -21870,6 +21891,8 @@ public partial class App : Application
                         StringComparison.Ordinal)
                     && !initial.HeaderSummary.Contains(" total ", StringComparison.Ordinal)
                     && initial.Status == "キュー順で表示中 · 履歴は最新 500件";
+                bool h3PreparationPresentation = VerifyH3PreparationPresentation(
+                    window, Path.GetDirectoryName(resultFullPath)!);
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
@@ -22295,7 +22318,7 @@ public partial class App : Application
                     mismatchedKreaQueueHead.HealthState == "確認が必要"
                     && mismatchedKreaQueueHead.HealthDetail
                         == "待機中の処理を開始する実行役が動いていません。"
-                    && mismatchedKreaQueueHead.QueuePauseLabel == "再開"
+                    && mismatchedKreaQueueHead.QueuePauseLabel == "復旧して再開"
                     && mismatchedKreaQueueHead.QueuePauseEnabled;
                 kreaQueueHeadBlocked = false;
                 healthMode = "malformed-krea-queue-head-blocked";
@@ -22352,7 +22375,7 @@ public partial class App : Application
                     && missingH3SealHealth.HealthDetail
                         == "MiniMax H3の保護済み実行環境が接続されていません。再開して復旧してください。"
                     && missingH3SealHealth.QueuePaused == false
-                    && missingH3SealHealth.QueuePauseLabel == "再開"
+                    && missingH3SealHealth.QueuePauseLabel == "復旧して再開"
                     && missingH3SealHealth.QueuePauseEnabled
                     && await window.SetEnhancementQueuePausedForSmokeAsync(false)
                     && queueControlBodies.LastOrDefault()
@@ -24365,6 +24388,7 @@ public partial class App : Application
                     && combinedJobsFiltersContract
                     && jobsFilterPillToggleContract
                     && activeProgressIsTruthful
+                    && h3PreparationPresentation
                     && mixedRetryCapabilityPartition
                     && initial.Polling
                     && passiveOpen
@@ -24610,6 +24634,7 @@ public partial class App : Application
                     failedBulkConfirmationContract,
                     canceledBulkConfirmationContract,
                     activeProgressIsTruthful,
+                    h3PreparationPresentation,
                     mixedRetryCapabilityPartition,
                     legacyHealth,
                     futureHealth,
@@ -39608,6 +39633,8 @@ public partial class App : Application
         public bool VideoClickPaused { get; init; }
         public bool VideoPauseSettled { get; init; }
         public bool VideoClickResumed { get; init; }
+        public bool FooterButtonPaused { get; init; }
+        public bool FooterButtonResumedAfterMinimize { get; init; }
         public bool OlderVideoMediaOpened { get; init; }
         public bool OlderVideoPlaybackProgress { get; init; }
         public bool OlderVideoSelected { get; init; }

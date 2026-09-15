@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-VIDEO-LORA-001-FIXTURES",
+  "forContractId": "PV-ENHANCE-VIDEO-LORA-001",
+  "cases": [
+    {
+      "name": "single",
+      "accepted": true,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 0.75
+        }
+      ]
+    },
+    {
+      "name": "orderedMultiple",
+      "accepted": true,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 0.75
+        },
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "motion.safetensors",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "bytes": 512,
+          "strength": -0.5
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "accepted": false,
+      "value": []
+    },
+    {
+      "name": "duplicate",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 0.75
+        },
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "copy.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 0.75
+        }
+      ]
+    },
+    {
+      "name": "future",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 2,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 0.75
+        }
+      ]
+    },
+    {
+      "name": "unknown",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 0.75,
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "name": "zero",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 0
+        }
+      ]
+    },
+    {
+      "name": "tooStrong",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 2.1
+        }
+      ]
+    },
+    {
+      "name": "traversal",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "../x.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 0.75
+        }
+      ]
+    },
+    {
+      "name": "unc",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "\\\\server\\folder",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 512,
+          "strength": 0.75
+        }
+      ]
+    },
+    {
+      "name": "invalidHash",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "bytes": 512,
+          "strength": 0.75
+        }
+      ]
+    },
+    {
+      "name": "tooLarge",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 4294967297,
+          "strength": 0.75
+        }
+      ]
+    },
+    {
+      "name": "combinedBound",
+      "accepted": false,
+      "value": [
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bytes": 4294967296,
+          "strength": 0.75
+        },
+        {
+          "schemaVersion": 1,
+          "directory": "C:/synthetic/video-loras",
+          "fileName": "camera.safetensors",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "bytes": 512,
+          "strength": 0.75
+        }
+      ]
+    }
+  ]
+}

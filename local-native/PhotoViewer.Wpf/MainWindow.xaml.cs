@@ -12019,7 +12019,11 @@ public partial class MainWindow : Window
     }
 
     private static PngParametersMetadata? ReadPngParametersMetadata(string path, CancellationToken token)
+        => ReadPngParametersMetadata(path, token, out _);
+
+    private static PngParametersMetadata? ReadPngParametersMetadata(string path, CancellationToken token, out bool promptKnown)
     {
+        promptKnown = false;
         if (!string.Equals(Path.GetExtension(path), ".png", StringComparison.OrdinalIgnoreCase))
             return null;
 
@@ -12048,6 +12052,8 @@ public partial class MainWindow : Window
                 string type = Encoding.ASCII.GetString(chunkHeader, 4, 4);
                 if (string.Equals(type, "IDAT", StringComparison.Ordinal))
                 {
+                    promptKnown = (parametersChunkSeen ? parametersMetadata : comfyPromptFallback) is not null
+                        || (!parametersChunkSeen && !comfyPromptChunkSeen);
                     return parametersChunkSeen
                         ? parametersMetadata
                         : comfyPromptFallback;
@@ -18468,7 +18474,8 @@ public partial class MainWindow : Window
         double settingsBoardTop = compact ? 88 : 52;
         ModalUpscaleSettingsBoardBorder.Margin = new Thickness(0, settingsBoardTop, 150, 12);
         ModalPhotorealSettingsBoardBorder.Margin = new Thickness(0, settingsBoardTop, 150, 12);
-        ModalVideoGenerationBoardBorder.Margin = new Thickness(0, settingsBoardTop, 150, 12);
+        ModalVideoGenerationBoardBorder.Margin = new Thickness(16, settingsBoardTop, 16, 12);
+        UpdateVideoGenerationBoardLayout(width, height);
         ModalTitle.MaxWidth = compact ? 240 : 360;
         ModalEnhancementStatusText.MaxWidth = compact ? 88 : 240;
     }
@@ -25019,6 +25026,7 @@ public partial class MainWindow : Window
             state.VideoQualityId,
             state.VideoSteps);
         RestoreVideoSeedSettings(state.VideoSeedMode, state.VideoSeedValue);
+        _videoLoraDirectory = state.VideoLoraDirectory ?? "";
         RestoreAiStyles(state);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
@@ -25118,8 +25126,7 @@ public partial class MainWindow : Window
 
     private static bool AreViewerStyleCollectionsSupported(ViewerState state)
     {
-        if (state.VideoStyles is { Count: > MaxVideoStyleCount }
-            || state.I2iEditStyles is { Count: > I2iV3MaximumStyleCount })
+        if (state.I2iEditStyles is { Count: > I2iV3MaximumStyleCount })
         {
             return false;
         }
@@ -25315,6 +25322,7 @@ public partial class MainWindow : Window
                 VideoMaximumPixelArea = _videoMaximumPixelArea,
                 VideoSteps = _videoSteps,
                 VideoPrompt = _videoPrompt,
+                VideoLoraDirectory = _videoLoraDirectory,
                 VideoModelId = _videoModelId,
                 VideoQualityId = _videoQualityId,
                 VideoSeedMode = _videoSeedFixed
@@ -25928,7 +25936,7 @@ public partial class MainWindow : Window
             else if (ModalVideoGenerationPopup?.Visibility == Visibility.Visible
                 && !ModalVideoGenerationPopup.IsKeyboardFocusWithin)
             {
-                Keyboard.Focus(ModalVideoPromptTextBox);
+                FocusModalVideoGenerationBoard();
             }
 
             // The settings board is the topmost keyboard surface. Keep normal
@@ -26362,6 +26370,9 @@ public partial class MainWindow : Window
     {
         if (DeleteConfirmationDialog.Visibility == Visibility.Visible
             || AppSettingsDialog.Visibility == Visibility.Visible
+            || (ModalVideoGenerationPopup.Visibility == Visibility.Visible
+                && e.OriginalSource is DependencyObject videoSource
+                && IsDescendantOrSelf(videoSource, ModalVideoGenerationBoardBorder))
             || !IsViewerShortcutSurfaceActive())
         {
             base.OnPreviewMouseWheel(e);
@@ -32855,6 +32866,7 @@ public sealed class ViewerState
     public int? VideoMaximumPixelArea { get; set; }
     public int? VideoSteps { get; set; }
     public string? VideoPrompt { get; set; }
+    public string? VideoLoraDirectory { get; set; }
     public string? VideoModelId { get; set; }
     public string? VideoQualityId { get; set; }
     public string? VideoSeedMode { get; set; }
@@ -32916,6 +32928,8 @@ public sealed class VideoStyleState
     public int MaximumPixelArea { get; set; }
     public int? Steps { get; set; }
     public string Prompt { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? InstructionProgram { get; set; }
     [System.Text.Json.Serialization.JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }

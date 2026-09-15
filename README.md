@@ -86,6 +86,10 @@ contract or synthetic fixture relevant to a change. Stable cross-cutting
 semantics are in [`docs/product-contract.md`](docs/product-contract.md).
 Documentation authority, code ownership, state ownership, and critical-flow
 routing are indexed in [`docs/index.md`](docs/index.md).
+The [storage layout map](docs/architecture/storage-layout.md) distinguishes
+executable deployment, durable data, models, and generated maintenance targets.
+A directory named `.cache` may contain durable data and must not be removed
+based on its name.
 
 `PhotoViewer`, `photoviewer`, and `Browser` still appear in assemblies,
 paths, environment variables, and fixtures as compatibility identifiers. They

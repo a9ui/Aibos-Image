@@ -1,0 +1,11 @@
+[
+  { "label": "固定", "text": "Keep the camera fixed." },
+  { "label": "ゆっくり寄る", "text": "Slowly move the camera closer." },
+  { "label": "ゆっくり引く", "text": "Slowly move the camera back." },
+  { "label": "左へ回り込む", "text": "Slowly orbit the camera left around the subject." },
+  { "label": "右へ回り込む", "text": "Slowly orbit the camera right around the subject." },
+  { "label": "正面へ回る", "text": "Move the camera toward a frontal view of the subject." },
+  { "label": "被写体を追う", "text": "Track the visible subject smoothly with the camera." },
+  { "label": "手持ち風の揺れ", "text": "Use restrained handheld camera sway." },
+  { "label": "POV風の揺れ・視線移動", "text": "Use first-person camera movement with subtle head sway and gaze shifts." }
+]

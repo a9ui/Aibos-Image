@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001-FIXTURE",
+  "forContractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001",
+  "cases": [
+    {
+      "name": "valid",
+      "value": {
+        "schemaVersion": 1,
+        "instruction": "An adult presenter waves. <d>[Japanese]こんにちは。</d>"
+      },
+      "accepted": true
+    },
+    {
+      "name": "empty",
+      "value": {
+        "schemaVersion": 1,
+        "instruction": ""
+      },
+      "accepted": false
+    },
+    {
+      "name": "future",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "wave"
+      },
+      "accepted": false
+    },
+    {
+      "name": "unknown",
+      "value": {
+        "schemaVersion": 1,
+        "instruction": "wave",
+        "enabled": true
+      },
+      "accepted": false
+    },
+    {
+      "name": "control",
+      "value": {
+        "schemaVersion": 1,
+        "instruction": "wave\u0000"
+      },
+      "accepted": false
+    },
+    {
+      "name": "badVersion",
+      "value": {
+        "schemaVersion": "1",
+        "instruction": "wave"
+      },
+      "accepted": false
+    },
+    {
+      "name": "notObject",
+      "value": true,
+      "accepted": false
+    }
+  ]
+}

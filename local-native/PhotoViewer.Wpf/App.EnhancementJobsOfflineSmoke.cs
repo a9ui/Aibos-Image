@@ -147,7 +147,7 @@ public partial class App
                             ],
                             StringComparer.Ordinal)
                         && !string.IsNullOrWhiteSpace(initial.HealthState)
-                        && initial.QueuePauseLabel == "接続して再開"
+                        && initial.QueuePauseLabel == "復旧して再開"
                         && initial.QueuePauseEnabled
                         && !initial.Polling
                         && initial.Status.Contains(

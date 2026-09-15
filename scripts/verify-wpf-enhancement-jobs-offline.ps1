@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$DotnetPath = '',
+    [string]$AssemblyPath = '',
     [switch]$NoRestore,
     [switch]$KeepArtifacts,
     [ValidateRange(5, 120)]
@@ -105,11 +106,15 @@ try {
         '--nologo'
     )
     if ($NoRestore) { $buildArguments += '--no-restore' }
-    & $DotnetPath @buildArguments
-    Assert-True ($LASTEXITCODE -eq 0) 'Aibos WPF build failed.'
-    $wpfDll = Join-Path $artifacts (
-        'bin\PhotoViewer.Wpf\{0}\PhotoViewer.Wpf.dll' -f
-            $Configuration.ToLowerInvariant())
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        & $DotnetPath @buildArguments
+        Assert-True ($LASTEXITCODE -eq 0) 'Aibos WPF build failed.'
+        $wpfDll = Join-Path $artifacts (
+            'bin\PhotoViewer.Wpf\{0}\PhotoViewer.Wpf.dll' -f
+                $Configuration.ToLowerInvariant())
+    } else {
+        $wpfDll = [IO.Path]::GetFullPath($AssemblyPath)
+    }
     Assert-True (
         (Test-Path -LiteralPath $wpfDll -PathType Leaf)) (
         'PhotoViewer.Wpf.dll build output is missing.')

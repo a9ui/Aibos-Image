@@ -719,7 +719,7 @@
                 </Grid>
                 <Grid Margin="0,0,0,10">
                   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                  <TextBlock Grid.Row="0" Text="Style" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBlock Grid.Row="0" Text="スタイル" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,4"/>
                   <Border Grid.Row="1" CornerRadius="8" Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="3">
                     <Grid>
                       <Grid.ColumnDefinitions>
@@ -1806,10 +1806,6 @@
                   <ComboBoxItem Content="500件（標準）" Tag="500"/>
                   <ComboBoxItem Content="1,000件" Tag="1000"/>
                 </ComboBox>
-                <Button x:Name="EnhancementJobsPauseResumeButton" Style="{StaticResource GhostButton}" Content="一時停止"
-                        Click="ToggleEnhancementQueuePaused_Click" IsEnabled="False" MinHeight="30" Margin="0,12,0,0"
-                        AutomationProperties.Name="AI処理待ち列を一時停止"
-                        ToolTip="処理中の1件は完了させ、次の待機ジョブから止めます"/>
                 <Button x:Name="EnhancementJobsUpdateQueuedPromptsButton" Style="{StaticResource GhostButton}" Content="待機中を現在設定へ"
                         Click="UpdateAllQueuedPhotorealPrompts_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
                         AutomationProperties.Name="待機中の実写化設定をすべて更新"
@@ -1821,8 +1817,10 @@
                       <Button x:Name="CompanionStartButton" Content="起動" Click="StartCompanion_Click" Style="{StaticResource GhostButton}" MinHeight="30" Margin="0,0,4,4" AutomationProperties.Name="AIサーバーを起動"/>
                       <Button x:Name="CompanionRestartButton" Content="再起動" Click="RestartCompanion_Click" Style="{StaticResource GhostButton}" MinHeight="30" Margin="0,0,4,4" AutomationProperties.Name="AIサーバーを再起動"/>
                       <Button x:Name="CompanionStopButton" Content="停止" Click="StopCompanion_Click" Style="{StaticResource GhostButton}" MinHeight="30" Margin="0,0,0,4" AutomationProperties.Name="AIサーバーを停止"/>
+                      <Button x:Name="EnhancementJobsPauseResumeButton" Content="復旧して再開" Click="ToggleEnhancementQueuePaused_Click" Style="{StaticResource GhostButton}" IsEnabled="False" MinHeight="30" Margin="4,0,0,4" ToolTip="中断した処理を確認し、待機順を保ったままキューを再開します" AutomationProperties.Name="AIキューを復旧して再開"/>
+                      <Button x:Name="CompanionCancelButton" Content="待機を取り消す" Click="CancelCompanionControl_Click" Style="{StaticResource GhostButton}" MinHeight="30" Margin="4,0,0,4" Visibility="Collapsed" AutomationProperties.Name="サーバー操作の待機を取り消す"/>
                     </WrapPanel>
-                    <TextBlock x:Name="CompanionControlStatusText" Text="起動だけではキューを再開しません。停止・再起動には実行中の処理を中断する確認が必要です。" TextWrapping="Wrap" FontSize="10.5" Foreground="{StaticResource TextSecondary}" AutomationProperties.LiveSetting="Polite"/>
+                    <TextBlock x:Name="CompanionControlStatusText" Text="処理の再開は「復旧して再開」から。" TextWrapping="Wrap" FontSize="11.5" Foreground="{StaticResource TextPrimary}" AutomationProperties.LiveSetting="Polite"/>
                     <TextBlock x:Name="EnhancementJobsHealthStateText" Text="状態を取得できません" Foreground="{StaticResource TextTertiary}"
                                FontSize="11.5" FontWeight="SemiBold" Margin="0,10,0,0"
                                AutomationProperties.Name="AI処理待ち列の状態"
@@ -2565,22 +2563,19 @@
                      Margin="0,0,0,6" AutomationProperties.Name="Video generation settings section"/>
           <TextBlock Text="動画ジョブのモデルと初期値です。変更は次に明示的に追加するジョブから使われ、待機中・処理中のジョブは変わりません。"
                      Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
-          <TextBlock Text="Template" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
-          <ComboBox x:Name="AppVideoPromptTemplateComboBox"
+          <ComboBox x:Name="AppVideoPromptTemplateComboBox" Visibility="Collapsed"
                     Style="{StaticResource PhotorealSettingsComboBox}"
                     DisplayMemberPath="Label"
                     IsSynchronizedWithCurrentItem="False"
                     SelectionChanged="VideoPromptTemplate_SelectionChanged"
                     AutomationProperties.Name="Video prompt template"
                     AutomationProperties.HelpText="Apply a built-in motion prompt. MiniMax語化 can then add source-image details."/>
-          <TextBlock Text="用途と動き方の土台をPromptへ入れます。画像固有の動作・カメラ・表情はMiniMax語化で追加できます。"
-                     Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,5,0,10"/>
-          <TextBlock Text="Style" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
+          <TextBlock Text="スタイル" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
                   BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
             <StackPanel>
               <ListBox x:Name="AppVideoStyleListBox"
-                       MinHeight="42" MaxHeight="112"
+                       MinHeight="80" MaxHeight="180"
                        Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
                        Foreground="{StaticResource TextPrimary}"
                        ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -2646,7 +2641,7 @@
                         AutomationProperties.Name="Delete selected video generation style"/>
               </Grid>
               <Button x:Name="OpenAppVideoStylesFileButton"
-                      Style="{StaticResource GhostButton}" Content="Style保存ファイルを開く"
+                      Style="{StaticResource GhostButton}" Content="スタイルの保存先を開く"
                       Click="OpenVideoStylesFile_Click"
                       HorizontalAlignment="Left" Margin="0,6,0,0" Padding="8,3"
                       AutomationProperties.Name="Open video generation style storage file"
@@ -2821,14 +2816,8 @@
                          AutomationProperties.Name="Estimated video generation time"
                          AutomationProperties.HelpText="Estimated range includes measured landscape and portrait Wan generation plus RIFE 4.25 delivery time; excludes queue wait."
                          AutomationProperties.LiveSetting="Polite"/>
-              <DockPanel Margin="0,11,0,4">
-                <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
-                        Content="Reset" Height="25" Padding="8,2"
-                        Click="ResetVideoGenerationSettings_Click"
-                        AutomationProperties.Name="Reset default video generation settings"/>
-                <TextBlock Text="Default prompt" Foreground="{StaticResource TextSecondary}" FontSize="10.5" VerticalAlignment="Center"/>
-              </DockPanel>
-              <Grid>
+              <ContentControl x:Name="AppVideoPromptAuthoringHost" HorizontalContentAlignment="Stretch"/>
+<Grid Visibility="Collapsed">
                 <TextBox x:Name="AppVideoPromptTextBox"
                          MinHeight="78" MaxHeight="480" MaxLength="8000"
                          AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
@@ -3131,11 +3120,11 @@
               </DockPanel>
             </StackPanel>
           </Border>
-          <TextBlock Text="Style" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
+          <TextBlock Text="スタイル" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
             <StackPanel>
               <ListBox x:Name="AppPhotorealStyleListBox"
-                       MinHeight="42" MaxHeight="112"
+                       MinHeight="80" MaxHeight="180"
                        Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
                        Foreground="{StaticResource TextPrimary}"
                        ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -3791,7 +3780,7 @@
                       ToolTip="小さい画像も長辺1536 pxへ拡大します。通常より処理時間・VRAM使用量・出力サイズが増えます。"
                       AutomationProperties.Name="試験用のAnything2Real V3 1536 px処理を使う"
                       AutomationProperties.HelpText="小さい画像も長辺1536 pxへ拡大する高負荷モードです。対応する認証済みローカルAIでのみ選べます。"/>
-            <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <TextBlock Text="スタイル" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalPhotorealStyleComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}"
                       DisplayMemberPath="Label"
@@ -3974,47 +3963,103 @@
       <Grid x:Name="ModalVideoGenerationPopup" Grid.RowSpan="3" Grid.ColumnSpan="2"
             Visibility="Collapsed" Panel.ZIndex="90" Background="Transparent"
             WindowChrome.IsHitTestVisibleInChrome="True"
+            SizeChanged="VideoGenerationPopup_SizeChanged"
             MouseLeftButtonDown="ModalVideoGenerationBackdrop_MouseLeftButtonDown"
             AutomationProperties.Name="Video generation board overlay">
-        <Border x:Name="ModalVideoGenerationBoardBorder" Width="430" MaxHeight="680" Padding="16" CornerRadius="7"
-                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
+        <Border x:Name="ModalVideoGenerationBoardBorder" Width="860" Padding="16" CornerRadius="7"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="16,52,16,12"
                 Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                PreviewMouseWheel="VideoGenerationBoard_PreviewMouseWheel"
                 KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
-          <ScrollViewer x:Name="ModalVideoGenerationScrollViewer"
-                        VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="0,0,6,0">
-            <DockPanel LastChildFill="True" Margin="0,0,0,12">
+          <Border.Resources>
+            <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource {x:Type ScrollBar}}">
+              <Setter Property="Width" Value="22"/>
+              <Setter Property="MinWidth" Value="22"/>
+            </Style>
+          </Border.Resources>
+          <DockPanel LastChildFill="True">
+            <DockPanel DockPanel.Dock="Top" LastChildFill="True" Margin="0,0,0,12">
               <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}"
                       Width="28" Height="28" Click="CloseVideoGenerationBoard_Click"
-                      ToolTip="Close video generation board"
+                      ToolTip="動画化メニューを閉じる"
                       AutomationProperties.Name="Close video generation board">
                 <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE711;" Foreground="{StaticResource TextSecondary}" FontSize="12"/>
               </Button>
               <StackPanel>
                 <TextBlock Text="動画化" Foreground="{StaticResource TextPrimary}" FontSize="16" FontWeight="SemiBold"/>
                 <TextBlock x:Name="ModalVideoPresetText" Text="MiniMax H3 · 元画像比率プレビュー · 20 step"
+                           Visibility="Collapsed"
                            Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,2,0,0"/>
               </StackPanel>
             </DockPanel>
-            <TextBlock Text="選んだ画像を最初のフレームとして使います。空欄なら選択モデルの既定モーションを使い、MiniMax H3はよく動くDynamicになります。"
-                       Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
-            <TextBlock x:Name="ModalVideoSourceText"
-                       Text="入力: 拡大画面を開いた時点の画像"
-                       Foreground="{StaticResource TextPrimary}" FontSize="10.5"
-                       TextWrapping="Wrap" Margin="0,0,0,8"
-                       AutomationProperties.Name="Video generation source version"/>
-            <TextBlock Text="Template" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
-            <ComboBox x:Name="ModalVideoPromptTemplateComboBox"
+          <StackPanel x:Name="VideoSubmissionFooter" DockPanel.Dock="Bottom" Margin="0,8,0,0">
+            <Border Height="1" Background="{StaticResource BorderStrong}"/>
+            <Button x:Name="VideoSubmissionSummaryButton" Visibility="Collapsed" Style="{StaticResource GhostButton}"
+                    Click="OpenVideoOutputSettings_Click" HorizontalAlignment="Left" Padding="6,3" MinHeight="26" Margin="0,6,0,0"
+                    AutomationProperties.Name="動画の長さと画質を変更"/>
+            <TextBlock x:Name="VideoGenerationStatusText" MaxHeight="62" TextTrimming="CharacterEllipsis"
+                       Foreground="{StaticResource TextPrimary}" FontSize="12"
+                       TextWrapping="Wrap" Margin="0,8,0,0"
+                       AutomationProperties.LiveSetting="Polite"/>
+            <Border x:Name="VideoSubmissionGuideBorder" Visibility="Collapsed" Padding="10,8"
+                    Margin="0,10,0,0" CornerRadius="4" Background="{StaticResource BgPrimary}"
+                    BorderBrush="{StaticResource AccentFill}" BorderThickness="1">
+              <StackPanel>
+              <TextBlock x:Name="VideoSubmissionGuideText" Foreground="{StaticResource TextPrimary}"
+                         FontSize="12" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+
+              </StackPanel>
+            </Border>
+            <Button x:Name="CancelVideoSubmissionButton" Content="追加を取り消す" Visibility="Collapsed"
+                    Style="{StaticResource GhostButton}" HorizontalAlignment="Right" Margin="0,6,0,0" Padding="12,6"
+                    Click="CancelVideoSubmission_Click" AutomationProperties.Name="追加を取り消す"/>
+            <CheckBox x:Name="VideoEnhanceAtExecutionCheckBox" Content="AIでプロンプトを強化"
+                      Foreground="{StaticResource TextPrimary}" Margin="0,10,0,0"
+                      Checked="VideoEnhanceAtExecution_Changed" Unchecked="VideoEnhanceAtExecution_Changed"
+                      ToolTip="キューには先に追加します。順番が来たら、画像と本文をAIで確認して強化し、動画を生成します。外すとAI強化せずに生成します。"
+                      AutomationProperties.Name="動画生成の直前にAIでプロンプトを強化"/>
+            <Button x:Name="QueueVideoGenerationButton"
+                    Style="{StaticResource PrimaryButton}" Content="動画化を実行"
+                    Height="40" Margin="0,10,0,0" HorizontalAlignment="Stretch"
+                    Click="QueueVideoGeneration_Click"
+                    AutomationProperties.Name="Add video generation job"
+                    AutomationProperties.HelpText="Explicitly adds one video job to the same durable GPU queue used by image enhancements."/>
+          </StackPanel>
+          <ScrollViewer x:Name="ModalVideoGenerationScrollViewer"
+                        CanContentScroll="False" PanningMode="VerticalOnly"
+                        VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,0,6,0">
+
+            <Border Padding="12" Margin="0,0,0,16" Background="{StaticResource BgPrimary}" CornerRadius="6" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+              <DockPanel>
+                <Image x:Name="VideoSourceThumbnail" DockPanel.Dock="Left" Width="66" Height="66" Margin="0,0,14,0" Stretch="Uniform"/>
+                <StackPanel>
+                  <TextBlock x:Name="VideoSourceFileText" Text="対象画像" Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                  <TextBlock x:Name="ModalVideoSourceText" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,3,0,7" TextWrapping="Wrap" AutomationProperties.Name="Video generation source version"/>
+                  <DockPanel>
+                    <TextBlock Text="今回の扱い" Foreground="{StaticResource TextSecondary}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="VideoSourceKindComboBox" Style="{StaticResource PhotorealSettingsComboBox}" MinWidth="140"
+                              SelectionChanged="VideoSourceKind_SelectionChanged" AutomationProperties.Name="今回の画像の扱い">
+                      <ComboBoxItem Content="自動で振り分ける"/>
+                      <ComboBoxItem Content="アニメとして扱う"/>
+                      <ComboBoxItem Content="実写として扱う"/>
+                    </ComboBox>
+                  </DockPanel>
+                </StackPanel>
+              </DockPanel>
+            </Border>
+            <ComboBox x:Name="ModalVideoPromptTemplateComboBox" Visibility="Collapsed"
                       Style="{StaticResource PhotorealSettingsComboBox}"
                       DisplayMemberPath="Label"
                       IsSynchronizedWithCurrentItem="False"
                       SelectionChanged="VideoPromptTemplate_SelectionChanged"
                       AutomationProperties.Name="Video prompt template"
                       AutomationProperties.HelpText="Apply a built-in motion prompt. MiniMax語化 can then add source-image details."/>
-            <TextBlock Text="用途と動き方の土台をPromptへ入れます。画像固有の動作・カメラ・表情はMiniMax語化で追加できます。"
-                       Foreground="{StaticResource TextTertiary}" FontSize="10.5"
-                       TextWrapping="Wrap" Margin="0,5,0,10"/>
-            <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <DockPanel Margin="0,0,0,6">
+              <Button DockPanel.Dock="Right" Content="スタイル管理" Style="{StaticResource GhostButton}" Padding="12,5"
+                      Click="OpenVideoStyleManagement_Click"/>
+              <TextBlock Text="スタイル" Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </DockPanel>
             <ComboBox x:Name="ModalVideoStyleComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}"
                       DisplayMemberPath="Label"
@@ -4022,6 +4067,9 @@
                       SelectionChanged="VideoStyle_SelectionChanged"
                       AutomationProperties.Name="Video generation style"
                       AutomationProperties.HelpText="Apply a saved prompt, model, quality, duration, generation FPS, and pixel budget style."/>
+            <Expander x:Name="VideoStyleManagementExpander" Visibility="Collapsed" Header="スタイルを保存・管理"
+                      Foreground="{StaticResource TextSecondary}" Margin="0,7,0,12">
+              <StackPanel Margin="0,5,0,0">
             <Grid Margin="0,6,0,10">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -4046,7 +4094,7 @@
                       AutomationProperties.Name="Delete selected video generation style"/>
             </Grid>
             <Button x:Name="OpenModalVideoStylesFileButton"
-                    Style="{StaticResource GhostButton}" Content="Style保存ファイルを開く"
+                    Style="{StaticResource GhostButton}" Content="スタイルの保存先を開く"
                     Click="OpenVideoStylesFile_Click"
                     HorizontalAlignment="Left" Height="27" Padding="7,2" Margin="0,0,0,8"
                     Foreground="{StaticResource TextPrimary}"
@@ -4056,95 +4104,10 @@
                        Foreground="{StaticResource TextSecondary}" FontSize="10"
                        TextWrapping="Wrap" Margin="0,0,0,8"
                        AutomationProperties.LiveSetting="Polite"/>
-            <TextBlock Text="Model · MiniMax H3" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
-            <ComboBox x:Name="ModalVideoModelComboBox"
-                      Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0" Visibility="Collapsed"
-                      SelectionChanged="VideoGenerationModel_SelectionChanged"
-                      AutomationProperties.Name="Video generation model">
-              <ComboBoxItem Content="MiniMax H3 — 5・10・12・15秒／音声あり" Tag="minimax-h3"/>
-            </ComboBox>
-            <TextBlock x:Name="ModalVideoModelDescriptionText"
-                       Text="MiniMax H3の5・10・12・15秒動画。動画サイズは軽量・標準・高画質から選び、元画像比率で自動計算します。STEP数は独立した生成反復回数です。24fps・AAC音声あり。"
-                       Foreground="{StaticResource TextTertiary}" FontSize="10.5"
-                       TextWrapping="Wrap" Margin="0,5,0,10"/>
-            <StackPanel x:Name="ModalVideoH3ControlsPanel" Margin="0,0,0,10">
-              <TextBlock Text="長さ" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
-              <ComboBox x:Name="ModalVideoH3DurationComboBox"
-                        Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
-                        SelectionChanged="MiniMaxH3Duration_SelectionChanged"
-                        AutomationProperties.Name="MiniMax H3 video duration"
-                        AutomationProperties.HelpText="Selects one measured MiniMax H3 duration profile.">
-                <ComboBoxItem Content="5秒" Tag="5"/>
-                <ComboBoxItem Content="10秒" Tag="10"/>
-                <ComboBoxItem Content="12秒" Tag="12"/>
-                <ComboBoxItem Content="15秒" Tag="15"/>
-              </ComboBox>
-              <TextBlock x:Name="ModalVideoH3StepsLabel" Text="STEP数（生成反復回数・サイズとは独立）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,8,0,4"/>
-              <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="58"/></Grid.ColumnDefinitions>
-                <Slider x:Name="ModalVideoH3StepsSlider" Grid.Column="0" Minimum="1" Maximum="40" Value="20"
-                        TickFrequency="1" IsSnapToTickEnabled="True" SmallChange="1" LargeChange="5"
-                        VerticalAlignment="Center" ValueChanged="MiniMaxH3StepsSlider_ValueChanged"
-                        AutomationProperties.Name="MiniMax H3 video steps slider"
-                        AutomationProperties.HelpText="Changes generation iteration count only. Video size remains unchanged."/>
-                <TextBox x:Name="ModalVideoH3StepsTextBox" Grid.Column="2" Text="20" MaxLength="2"
-                         Padding="7,4" TextAlignment="Right" VerticalContentAlignment="Center"
-                         Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
-                         BorderBrush="{StaticResource BorderStrong}" TextChanged="MiniMaxH3StepsTextBox_TextChanged"
-                         AutomationProperties.Name="MiniMax H3 video steps value"/>
-              </Grid>
-              <TextBlock Text="1〜40の整数で20が既定。ここを変えても動画サイズは変わりません。40は生成時間がおよそ2倍。10秒以上は他の重い作業を閉じて実行してください。"
-                         Foreground="{StaticResource TextTertiary}" FontSize="10.5"
-                         TextWrapping="Wrap" Margin="0,5,0,7"/>
-              <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="0.8*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="1.6*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="0.8*"/></Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                  <TextBlock Text="FPS" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
-                  <Border Padding="7,5" CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
-                    <TextBlock x:Name="ModalVideoH3FpsFixedText" Text="24（固定）" Foreground="{StaticResource TextSecondary}"/>
-                  </Border>
-                </StackPanel>
-                <StackPanel Grid.Column="2">
-                  <TextBlock x:Name="ModalVideoH3ResolutionLabel" Text="動画サイズ（STEPとは独立）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
-                  <ComboBox x:Name="ModalVideoH3ResolutionComboBox"
-                            Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="2"
-                            SelectionChanged="MiniMaxH3Resolution_SelectionChanged"
-                            AutomationProperties.Name="MiniMax H3 video size"
-                            AutomationProperties.HelpText="Selects the source-aspect pixel budget independently from STEP count.">
-                    <ComboBoxItem Content="軽量 · 230k px" Tag="230400"/>
-                    <ComboBoxItem Content="標準 · 307k px" Tag="307200"/>
-                    <ComboBoxItem Content="高画質 · 414k px（推奨）" Tag="414720"/>
-                  </ComboBox>
-                </StackPanel>
-                <StackPanel Grid.Column="4">
-                  <TextBlock Text="Seed" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
-                  <Border Padding="7,5" CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
-                    <TextBlock x:Name="ModalVideoH3SeedFixedText" Text="自動" Foreground="{StaticResource TextSecondary}"/>
-                  </Border>
-                </StackPanel>
-              </Grid>
-            </StackPanel>
-            <StackPanel x:Name="ModalVideoWanControlsPanel" Visibility="Collapsed">
-            <TextBlock Text="品質" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
-            <ComboBox x:Name="ModalVideoQualityComboBox"
-                      Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
-                      SelectionChanged="VideoGenerationQuality_SelectionChanged"
-                      AutomationProperties.Name="Video generation quality">
-              <ComboBoxItem Content="標準 · 20 step（推奨）" Tag="wan22-ti2v-5b-normal-v1"/>
-              <ComboBoxItem Content="高品質 · 40 step（約2倍）" Tag="wan22-ti2v-5b-high-v1"/>
-            </ComboBox>
-            <TextBlock Text="高品質はWan生成だけを40 stepにします。解像度・RIFE 30fps仕上げ・単一GPUキューは標準と同じです。"
-                       Foreground="{StaticResource TextTertiary}" FontSize="10.5"
-                       TextWrapping="Wrap" Margin="0,5,0,10"/>
-            </StackPanel>
-            <DockPanel Margin="0,0,0,4">
-              <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
-                      Content="Reset" Height="24" Padding="8,2"
-                      Click="ResetVideoGenerationSettings_Click"
-                      AutomationProperties.Name="Reset video generation settings"/>
-              <TextBlock Text="Prompt" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
-            </DockPanel>
-            <Grid>
+              </StackPanel>
+            </Expander>
+            <ContentControl x:Name="ModalVideoPromptAuthoringHost" Margin="0,18,0,0" HorizontalContentAlignment="Stretch"/>
+<Grid Visibility="Collapsed">
               <TextBox x:Name="ModalVideoPromptTextBox"
                        MinHeight="92" MaxHeight="480" MaxLength="8000"
                        AcceptsReturn="True" TextWrapping="Wrap"
@@ -4172,12 +4135,23 @@
                 </Thumb.Template>
               </Thumb>
             </Grid>
+
+            <Expander x:Name="VideoPromptPreparationExpander" Visibility="Collapsed" Foreground="{StaticResource TextPrimary}" Margin="0,12,0,6">
+              <Expander.Header>
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock x:Name="ModalVideoH3PromptAssistantTitle" Text="生成用プロンプト" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="VideoPromptPreparationStateText" Margin="12,0,0,0" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+                </StackPanel>
+              </Expander.Header>
             <Border x:Name="ModalVideoH3PromptRewritePanel"
                     Visibility="Collapsed" Margin="0,10,0,0" Padding="10"
                     CornerRadius="5" Background="{StaticResource SoftFill}"
                     BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
-                    AutomationProperties.Name="{DynamicResource UiMotionDirectorPanelAutomation}">
+                    AutomationProperties.Name="H3 prompt candidate">
               <StackPanel>
+                <!-- Retained as a deterministic regression seam. Production
+                     authoring now uses inline options in the unified editor. -->
+                <StackPanel x:Name="LegacyMotionDirectorPanel" Visibility="Collapsed">
                 <DockPanel LastChildFill="True" Margin="0,0,0,5">
                   <Button x:Name="ModalMotionDirectorBuildButton"
                           DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}"
@@ -4282,6 +4256,7 @@
                            FontSize="10" TextWrapping="Wrap" Margin="0,0,0,5"
                            AutomationProperties.LiveSetting="Polite"/>
                 <Border Height="1" Background="{StaticResource BorderStrong}" Margin="0,3,0,7"/>
+                </StackPanel>
                 <DockPanel LastChildFill="True" Margin="0,0,0,5">
                   <Button x:Name="ModalVideoH3RewritePromptButton"
                           DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
@@ -4290,11 +4265,9 @@
                           Click="RewriteVideoPromptForH3_Click"
                           AutomationProperties.Name="{DynamicResource UiVideoH3RewriteButtonAutomation}"
                           AutomationProperties.HelpText="{DynamicResource UiVideoH3RewriteButtonHelp}"/>
-                  <TextBlock Text="{DynamicResource UiMotionDirectorAiProposalTitle}"
-                             Foreground="{StaticResource TextPrimary}" FontSize="11.5"
-                             FontWeight="SemiBold" VerticalAlignment="Center"/>
+
                 </DockPanel>
-                <TextBlock Text="{DynamicResource UiVideoH3PromptAssistantHelp}"
+                <TextBlock x:Name="ModalVideoH3PromptAssistantHelp" Text="{DynamicResource UiVideoH3PromptAssistantHelp}"
                            Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                            TextWrapping="Wrap" Margin="0,0,0,8"/>
                 <TextBlock x:Name="ModalVideoH3PromptRewriteStatusText"
@@ -4306,7 +4279,7 @@
                            FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8"
                            AutomationProperties.Name="{DynamicResource UiVideoH3ConformanceAutomation}"
                            AutomationProperties.LiveSetting="Polite"/>
-                <Grid Margin="0,0,0,6">
+                <Grid x:Name="ModalVideoH3RewriteModePanel" Margin="0,0,0,6">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="10"/>
@@ -4326,9 +4299,10 @@
                     <ComboBoxItem Content="{DynamicResource UiVideoH3RewriteModeAuto}" Tag="auto"/>
                   </ComboBox>
                 </Grid>
-                <TextBlock Text="{DynamicResource UiVideoH3ImageAnalysisOn}"
+                <TextBlock Visibility="Collapsed" Text="{DynamicResource UiVideoH3ImageAnalysisOn}"
                            Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                            TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <StackPanel x:Name="ModalVideoH3PromptReviewPanel">
                 <TextBlock Text="{DynamicResource UiVideoH3CandidateLabel}"
                            Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                            Margin="0,0,0,4"/>
@@ -4363,8 +4337,155 @@
                           AutomationProperties.Name="{DynamicResource UiVideoH3UndoButtonAutomation}"
                           AutomationProperties.HelpText="{DynamicResource UiVideoH3UndoButtonHelp}"/>
                 </Grid>
+                </StackPanel>
               </StackPanel>
             </Border>
+            </Expander>
+            <Grid x:Name="VideoCommonSettingsPanel" Margin="0,18,0,12">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0">
+                <TextBlock Text="長さ" Foreground="{StaticResource TextPrimary}" FontSize="13" Margin="0,0,0,6"/>
+              <ComboBox x:Name="ModalVideoH3DurationComboBox"
+                        Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                        SelectionChanged="MiniMaxH3Duration_SelectionChanged"
+                        AutomationProperties.Name="MiniMax H3 video duration"
+                        AutomationProperties.HelpText="Selects one measured MiniMax H3 duration profile.">
+                <ComboBoxItem Content="5秒" Tag="5"/>
+                <ComboBoxItem Content="10秒" Tag="10"/>
+                <ComboBoxItem Content="12秒" Tag="12"/>
+                <ComboBoxItem Content="15秒" Tag="15"/>
+              </ComboBox>
+              </StackPanel>
+              <StackPanel Grid.Column="2">
+                <TextBlock x:Name="ModalVideoH3ResolutionLabel" Text="画質" Foreground="{StaticResource TextPrimary}" FontSize="13" Margin="0,0,0,6"/>
+                  <ComboBox x:Name="ModalVideoH3ResolutionComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="2"
+                            SelectionChanged="MiniMaxH3Resolution_SelectionChanged"
+                            AutomationProperties.Name="MiniMax H3 video size"
+                            AutomationProperties.HelpText="Selects the source-aspect pixel budget independently from STEP count.">
+                    <ComboBoxItem Content="軽量" Tag="230400"/>
+                    <ComboBoxItem Content="標準" Tag="307200"/>
+                    <ComboBoxItem Content="高画質（推奨）" Tag="414720"/>
+                  </ComboBox>
+              </StackPanel>
+            </Grid>
+            <Expander x:Name="VideoLoraExpander" Header="使用するLoRA" Foreground="{StaticResource TextPrimary}" Margin="0,8,0,10">
+              <StackPanel Margin="0,8,0,0">
+                <DockPanel Margin="0,0,0,7">
+                  <Button DockPanel.Dock="Right" Content="フォルダを選ぶ" Style="{StaticResource GhostButton}" Padding="8,4" Click="ChooseVideoLoraFolder_Click"/>
+                  <Button x:Name="VideoLoraOpenFolderButton" DockPanel.Dock="Right" Content="フォルダを開く"
+                          Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,6,0" IsEnabled="False"
+                          ToolTip="LoRAの保存フォルダをエクスプローラーで開く" Click="OpenVideoLoraFolder_Click"/>
+                  <Button DockPanel.Dock="Right" Content="一覧を更新" Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,6,0" Click="RefreshVideoLoras_Click"/>
+                  <TextBlock x:Name="VideoLoraFolderText" Text="保存フォルダを選んでください" Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                </DockPanel>
+                <StackPanel x:Name="VideoLoraRows"/>
+                <Button x:Name="VideoLoraAddButton" Content="＋" HorizontalAlignment="Left" Width="28" Height="28"
+                        Style="{StaticResource GhostButton}" Padding="0" FontSize="20" Margin="0,8,0,0"
+                        ToolTip="LoRAの行を追加" AutomationProperties.Name="LoRAの行を追加" Click="AddVideoLora_Click"/>
+                <TextBlock x:Name="VideoLoraStatus" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                <TextBlock Text="チェックしたLoRAを上から順に適用します。強度0は適用しません。H3との互換性は生成時に確認します。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+              </StackPanel>
+            </Expander>
+            <Expander x:Name="VideoOutputSettingsExpander" Header="詳細設定" Foreground="{StaticResource TextPrimary}" Margin="0,12,0,10">
+              <StackPanel Margin="0,10,0,0">
+            <ContentControl x:Name="VideoAutomationSettingsHost" HorizontalContentAlignment="Stretch" Margin="0,0,0,12"/>
+            <TextBlock Text="Model · MiniMax H3" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalVideoModelComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0" Visibility="Collapsed"
+                      SelectionChanged="VideoGenerationModel_SelectionChanged"
+                      AutomationProperties.Name="Video generation model">
+              <ComboBoxItem Content="MiniMax H3 — 5・10・12・15秒／音声あり" Tag="minimax-h3"/>
+            </ComboBox>
+
+            <StackPanel x:Name="ModalVideoH3ControlsPanel" Margin="0,0,0,10">
+
+              <TextBlock x:Name="ModalVideoH3StepsLabel" Text="STEP数（生成反復回数・サイズとは独立）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,8,0,4"/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="58"/></Grid.ColumnDefinitions>
+                <Slider x:Name="ModalVideoH3StepsSlider" Grid.Column="0" Minimum="1" Maximum="40" Value="20"
+                        TickFrequency="1" IsSnapToTickEnabled="True" SmallChange="1" LargeChange="5"
+                        VerticalAlignment="Center" ValueChanged="MiniMaxH3StepsSlider_ValueChanged"
+                        AutomationProperties.Name="MiniMax H3 video steps slider"
+                        AutomationProperties.HelpText="Changes generation iteration count only. Video size remains unchanged."/>
+                <TextBox x:Name="ModalVideoH3StepsTextBox" Grid.Column="2" Text="20" MaxLength="2"
+                         Padding="7,4" TextAlignment="Right" VerticalContentAlignment="Center"
+                         Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                         BorderBrush="{StaticResource BorderStrong}" TextChanged="MiniMaxH3StepsTextBox_TextChanged"
+                         AutomationProperties.Name="MiniMax H3 video steps value"/>
+              </Grid>
+              <TextBlock Text="1〜40の整数で20が既定。ここを変えても動画サイズは変わりません。40は生成時間がおよそ2倍。10秒以上は他の重い作業を閉じて実行してください。"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,5,0,7"/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="0.8*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="1.6*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="0.8*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="FPS" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <Border Padding="7,5" CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                    <TextBlock x:Name="ModalVideoH3FpsFixedText" Text="24（固定）" Foreground="{StaticResource TextSecondary}"/>
+                  </Border>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+
+
+                </StackPanel>
+                <StackPanel Grid.Column="4">
+                  <TextBlock Text="Seed" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <Border Padding="7,5" CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                    <TextBlock x:Name="ModalVideoH3SeedFixedText" Text="自動" Foreground="{StaticResource TextSecondary}"/>
+                  </Border>
+                </StackPanel>
+              </Grid>
+            </StackPanel>
+            <StackPanel x:Name="ModalVideoWanControlsPanel" Visibility="Collapsed">
+            <TextBlock Text="品質" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalVideoQualityComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                      SelectionChanged="VideoGenerationQuality_SelectionChanged"
+                      AutomationProperties.Name="Video generation quality">
+              <ComboBoxItem Content="標準 · 20 step（推奨）" Tag="wan22-ti2v-5b-normal-v1"/>
+              <ComboBoxItem Content="高品質 · 40 step（約2倍）" Tag="wan22-ti2v-5b-high-v1"/>
+            </ComboBox>
+            <TextBlock Text="高品質はWan生成だけを40 stepにします。解像度・RIFE 30fps仕上げ・単一GPUキューは標準と同じです。"
+                       Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,5,0,10"/>
+            </StackPanel>
+                <Expander Header="サイズ・処理時間の詳細" Foreground="{StaticResource TextSecondary}" Margin="0,8,0,0">
+                  <StackPanel>
+            <TextBlock x:Name="ModalVideoModelDescriptionText"
+                       Text="MiniMax H3の5・10・12・15秒動画。動画サイズは軽量・標準・高画質から選び、元画像比率で自動計算します。STEP数は独立した生成反復回数です。24fps・AAC音声あり。"
+                       Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,5,0,10"/>
+            <TextBlock x:Name="ModalVideoDeliveryText"
+                       Text="生成: 16 fps・97f → 最終出力: 30 fps・180f・6.000秒 · RIFE 4.25 · H.264 / yuv420p · 音声なし"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,8,0,0"
+                       AutomationProperties.Name="Final video delivery"
+                       AutomationProperties.HelpText="Wan generates the selected number of frames at 12 or 16 frames per second. RIFE 4.25 delivers exactly 30 frames per second, H.264 yuv420p, and no audio."/>
+            <TextBlock x:Name="ModalVideoGenerationEstimateText"
+                       Text="完了目安: 約2分38秒〜4分53秒（Wan生成＋RIFE 4.25仕上げ・RTX 4070 SUPER横長/縦長実測範囲・キュー待ちを除く）"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,8,0,0"
+                       AutomationProperties.Name="Estimated video generation time"
+                       AutomationProperties.HelpText="Estimated range includes measured landscape and portrait Wan generation plus RIFE 4.25 delivery time; excludes queue wait."
+                       AutomationProperties.LiveSetting="Polite"/>
+            <TextBlock x:Name="ModalVideoResolutionHintText"
+                       Text="選択した画素数上限: 409,600px。元画像比率を保ち、32px単位で上限内に自動調整します。1 worker・GPU推論の並列化なし。"
+                       Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                  </StackPanel>
+                </Expander>
+              </StackPanel>
+            </Expander>
+            <Expander x:Name="VideoSubmissionPreviewExpander" Header="生成に使う内容を確認" Foreground="{StaticResource TextPrimary}" Margin="0,4,0,12" Expanded="VideoSubmissionPreview_Expanded">
+              <StackPanel Margin="0,10,0,0">
+                <TextBlock x:Name="VideoSubmissionPreviewHelp" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <TextBox x:Name="VideoResolvedPromptPreview" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" MaxHeight="280" Padding="10" Background="{StaticResource BgPrimary}" Foreground="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"/>
+                <TextBlock x:Name="VideoLastSubmissionLabel" Visibility="Collapsed" Foreground="{StaticResource Success}" Margin="0,14,0,6"/>
+                <TextBox x:Name="VideoLastSubmissionPreview" Visibility="Collapsed" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" MaxHeight="220" Padding="10" Background="{StaticResource BgPrimary}" Foreground="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"/>
+              </StackPanel>
+            </Expander>
             <StackPanel x:Name="ModalVideoWanTuningPanel" Visibility="Collapsed">
             <Grid Margin="0,12,0,0">
               <Grid.ColumnDefinitions>
@@ -4428,34 +4549,9 @@
               </StackPanel>
             </Grid>
             </StackPanel>
-            <TextBlock x:Name="ModalVideoDeliveryText"
-                       Text="生成: 16 fps・97f → 最終出力: 30 fps・180f・6.000秒 · RIFE 4.25 · H.264 / yuv420p · 音声なし"
-                       Foreground="{StaticResource TextSecondary}" FontSize="10.5"
-                       TextWrapping="Wrap" Margin="0,8,0,0"
-                       AutomationProperties.Name="Final video delivery"
-                       AutomationProperties.HelpText="Wan generates the selected number of frames at 12 or 16 frames per second. RIFE 4.25 delivers exactly 30 frames per second, H.264 yuv420p, and no audio."/>
-            <TextBlock x:Name="ModalVideoGenerationEstimateText"
-                       Text="完了目安: 約2分38秒〜4分53秒（Wan生成＋RIFE 4.25仕上げ・RTX 4070 SUPER横長/縦長実測範囲・キュー待ちを除く）"
-                       Foreground="{StaticResource TextSecondary}" FontSize="10.5"
-                       TextWrapping="Wrap" Margin="0,8,0,0"
-                       AutomationProperties.Name="Estimated video generation time"
-                       AutomationProperties.HelpText="Estimated range includes measured landscape and portrait Wan generation plus RIFE 4.25 delivery time; excludes queue wait."
-                       AutomationProperties.LiveSetting="Polite"/>
-            <TextBlock x:Name="ModalVideoResolutionHintText"
-                       Text="選択した画素数上限: 409,600px。元画像比率を保ち、32px単位で上限内に自動調整します。1 worker・GPU推論の並列化なし。"
-                       Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,0"/>
-            <TextBlock x:Name="VideoGenerationStatusText"
-                       Foreground="{StaticResource TextSecondary}" FontSize="10.5"
-                       TextWrapping="Wrap" Margin="0,8,0,0"
-                       AutomationProperties.LiveSetting="Polite"/>
-            <Button x:Name="QueueVideoGenerationButton"
-                    Style="{StaticResource GhostButton}" Content="動画化を実行"
-                    Height="34" Margin="0,12,0,0" HorizontalAlignment="Stretch"
-                    Click="QueueVideoGeneration_Click"
-                    AutomationProperties.Name="Add video generation job"
-                    AutomationProperties.HelpText="Explicitly adds one video job to the same durable GPU queue used by image enhancements."/>
             </StackPanel>
           </ScrollViewer>
+          </DockPanel>
         </Border>
       </Grid>
 
