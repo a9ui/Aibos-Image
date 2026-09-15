@@ -3998,7 +3998,7 @@
                     Click="OpenVideoOutputSettings_Click" HorizontalAlignment="Left" Padding="6,3" MinHeight="26" Margin="0,6,0,0"
                     AutomationProperties.Name="動画の長さと画質を変更"/>
             <TextBlock x:Name="VideoGenerationStatusText" MaxHeight="62" TextTrimming="CharacterEllipsis"
-                       Foreground="#D5E1F5" FontSize="12"
+                       Foreground="{StaticResource TextPrimary}" FontSize="12"
                        TextWrapping="Wrap" Margin="0,8,0,0"
                        AutomationProperties.LiveSetting="Polite"/>
             <Border x:Name="VideoSubmissionGuideBorder" Visibility="Collapsed" Padding="10,8"
@@ -4030,14 +4030,14 @@
                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="0,0,6,0">
 
-            <Border Padding="12" Margin="0,0,0,16" Background="#101827" CornerRadius="6" BorderBrush="#35455E" BorderThickness="1">
+            <Border Padding="12" Margin="0,0,0,16" Background="{StaticResource BgPrimary}" CornerRadius="6" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
               <DockPanel>
                 <Image x:Name="VideoSourceThumbnail" DockPanel.Dock="Left" Width="66" Height="66" Margin="0,0,14,0" Stretch="Uniform"/>
                 <StackPanel>
-                  <TextBlock x:Name="VideoSourceFileText" Text="対象画像" Foreground="#F0F4FF" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                  <TextBlock x:Name="ModalVideoSourceText" Foreground="#B7C5DD" FontSize="11" Margin="0,3,0,7" TextWrapping="Wrap" AutomationProperties.Name="Video generation source version"/>
+                  <TextBlock x:Name="VideoSourceFileText" Text="対象画像" Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                  <TextBlock x:Name="ModalVideoSourceText" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,3,0,7" TextWrapping="Wrap" AutomationProperties.Name="Video generation source version"/>
                   <DockPanel>
-                    <TextBlock Text="今回の扱い" Foreground="#B7C5DD" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="今回の扱い" Foreground="{StaticResource TextSecondary}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     <ComboBox x:Name="VideoSourceKindComboBox" Style="{StaticResource PhotorealSettingsComboBox}" MinWidth="140"
                               SelectionChanged="VideoSourceKind_SelectionChanged" AutomationProperties.Name="今回の画像の扱い">
                       <ComboBoxItem Content="自動で振り分ける"/>
@@ -4140,7 +4140,7 @@
               <Expander.Header>
                 <StackPanel Orientation="Horizontal">
                   <TextBlock x:Name="ModalVideoH3PromptAssistantTitle" Text="生成用プロンプト" FontWeight="SemiBold"/>
-                  <TextBlock x:Name="VideoPromptPreparationStateText" Margin="12,0,0,0" Foreground="#B9CCF5" FontSize="11"/>
+                  <TextBlock x:Name="VideoPromptPreparationStateText" Margin="12,0,0,0" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
                 </StackPanel>
               </Expander.Header>
             <Border x:Name="ModalVideoH3PromptRewritePanel"
@@ -4344,7 +4344,7 @@
             <Grid x:Name="VideoCommonSettingsPanel" Margin="0,18,0,12">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <StackPanel Grid.Column="0">
-                <TextBlock Text="長さ" Foreground="#F0F4FF" FontSize="13" Margin="0,0,0,6"/>
+                <TextBlock Text="長さ" Foreground="{StaticResource TextPrimary}" FontSize="13" Margin="0,0,0,6"/>
               <ComboBox x:Name="ModalVideoH3DurationComboBox"
                         Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
                         SelectionChanged="MiniMaxH3Duration_SelectionChanged"
@@ -4357,7 +4357,7 @@
               </ComboBox>
               </StackPanel>
               <StackPanel Grid.Column="2">
-                <TextBlock x:Name="ModalVideoH3ResolutionLabel" Text="画質" Foreground="#F0F4FF" FontSize="13" Margin="0,0,0,6"/>
+                <TextBlock x:Name="ModalVideoH3ResolutionLabel" Text="画質" Foreground="{StaticResource TextPrimary}" FontSize="13" Margin="0,0,0,6"/>
                   <ComboBox x:Name="ModalVideoH3ResolutionComboBox"
                             Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="2"
                             SelectionChanged="MiniMaxH3Resolution_SelectionChanged"
@@ -4369,7 +4369,7 @@
                   </ComboBox>
               </StackPanel>
             </Grid>
-            <Expander x:Name="VideoLoraExpander" Header="使用するLoRA" Foreground="#D7E9FF" Margin="0,8,0,10">
+            <Expander x:Name="VideoLoraExpander" Header="使用するLoRA" Foreground="{StaticResource TextPrimary}" Margin="0,8,0,10">
               <StackPanel Margin="0,8,0,0">
                 <DockPanel Margin="0,0,0,7">
                   <Button DockPanel.Dock="Right" Content="フォルダを選ぶ" Style="{StaticResource GhostButton}" Padding="8,4" Click="ChooseVideoLoraFolder_Click"/>
@@ -4377,14 +4377,14 @@
                           Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,6,0" IsEnabled="False"
                           ToolTip="LoRAの保存フォルダをエクスプローラーで開く" Click="OpenVideoLoraFolder_Click"/>
                   <Button DockPanel.Dock="Right" Content="一覧を更新" Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,6,0" Click="RefreshVideoLoras_Click"/>
-                  <TextBlock x:Name="VideoLoraFolderText" Text="保存フォルダを選んでください" Foreground="#C7D8EB" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="VideoLoraFolderText" Text="保存フォルダを選んでください" Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                 </DockPanel>
                 <StackPanel x:Name="VideoLoraRows"/>
                 <Button x:Name="VideoLoraAddButton" Content="＋" HorizontalAlignment="Left" Width="28" Height="28"
                         Style="{StaticResource GhostButton}" Padding="0" FontSize="20" Margin="0,8,0,0"
                         ToolTip="LoRAの行を追加" AutomationProperties.Name="LoRAの行を追加" Click="AddVideoLora_Click"/>
-                <TextBlock x:Name="VideoLoraStatus" Foreground="#C7D8EB" TextWrapping="Wrap" Margin="0,8,0,0"/>
-                <TextBlock Text="チェックしたLoRAを上から順に適用します。強度0は適用しません。H3との互換性は生成時に確認します。" Foreground="#C7D8EB" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                <TextBlock x:Name="VideoLoraStatus" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                <TextBlock Text="チェックしたLoRAを上から順に適用します。強度0は適用しません。H3との互換性は生成時に確認します。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,0"/>
               </StackPanel>
             </Expander>
             <Expander x:Name="VideoOutputSettingsExpander" Header="詳細設定" Foreground="{StaticResource TextPrimary}" Margin="0,12,0,10">
@@ -4476,14 +4476,14 @@
                 </Expander>
               </StackPanel>
             </Expander>
-            <Expander x:Name="VideoSubmissionPreviewExpander" Header="生成に使う内容を確認" Foreground="#D5E1F5" Margin="0,4,0,12" Expanded="VideoSubmissionPreview_Expanded">
+            <Expander x:Name="VideoSubmissionPreviewExpander" Header="生成に使う内容を確認" Foreground="{StaticResource TextPrimary}" Margin="0,4,0,12" Expanded="VideoSubmissionPreview_Expanded">
               <StackPanel Margin="0,10,0,0">
-                <TextBlock x:Name="VideoSubmissionPreviewHelp" Foreground="#B7C5DD" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <TextBlock x:Name="VideoSubmissionPreviewHelp" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8"/>
                 <TextBox x:Name="VideoResolvedPromptPreview" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto" MaxHeight="280" Padding="10" Background="#101827" Foreground="#F0F4FF" BorderBrush="#3F5474"/>
-                <TextBlock x:Name="VideoLastSubmissionLabel" Visibility="Collapsed" Foreground="#A0EEDA" Margin="0,14,0,6"/>
+                         VerticalScrollBarVisibility="Auto" MaxHeight="280" Padding="10" Background="{StaticResource BgPrimary}" Foreground="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"/>
+                <TextBlock x:Name="VideoLastSubmissionLabel" Visibility="Collapsed" Foreground="{StaticResource Success}" Margin="0,14,0,6"/>
                 <TextBox x:Name="VideoLastSubmissionPreview" Visibility="Collapsed" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto" MaxHeight="220" Padding="10" Background="#101827" Foreground="#F0F4FF" BorderBrush="#3F5474"/>
+                         VerticalScrollBarVisibility="Auto" MaxHeight="220" Padding="10" Background="{StaticResource BgPrimary}" Foreground="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"/>
               </StackPanel>
             </Expander>
             <StackPanel x:Name="ModalVideoWanTuningPanel" Visibility="Collapsed">
