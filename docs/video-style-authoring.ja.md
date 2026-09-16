@@ -1,11 +1,11 @@
 # Aibos Image 動画スタイルJSON・指示言語ガイド
 
-確認日: 2026-09-16。実装基準: `3fe8d559d13edeffdc3214df410ce509b5b5f077`。
+確認日: 2026-09-16。実装基準: この資料と同じリビジョンの `VideoPromptProgram.cs`、`VideoDirectionTimeline.cs`、`VideoPromptEnhancement.cs`。
 対象: ネイティブWPF版 Aibos Image、MiniMax H3向け動画スタイル、保存形式 Version 1。
 
 AI補完の新しい動作・音声設定と旧ジョブとの互換性は、[動画のAI補完](video-prompt-enrichment.ja.md)を参照してください。以下のスタイル保存形式とは別の、生成ジョブ側の版2契約です。
 
-この資料は、別のAIや編集者が会話履歴なしでスタイルを理解・編集するための、単独で読めるリファレンスです。例文は架空の通常動作です。既存スタイルの本文や個人の設定は含みません。新しい言語の提案ではなく、上記リビジョンの実装を説明します。将来の実装を保証するものではありません。
+この資料は、別のAIや編集者が会話履歴なしでスタイルを理解・編集するための、単独で読めるリファレンスです。例文は架空の通常動作です。既存スタイルの本文や個人の設定は含みません。同じリビジョンの実装を説明し、旧版や将来版の動作は保証しません。
 
 ## 1. 最初に理解すること
 
@@ -209,7 +209,7 @@ AI強化OFFは文法をAIで修正しません。選択した文字列を連結�
 | `Keyword` | `""` | `contains` / `absent` の検索文字列、最大200文字 |
 | `ChoiceIndex` | `0` | 0始まりの候補番号。0〜15かつ実際の候補数未満 |
 | `Group` | `""` | 手動でONにしたとき、同じグループの別トークンをOFFにする。最大120文字 |
-| `DirectionAspect` | `""` | 共通演技メニューとの対応。`""`, `opening`, `arms`, `expression`, `mood` |
+| `DirectionAspect` | `""` | 共通演出メニューとの対応。`""`, `opening`, `arms`, `expression`, `mood`, `camera`, `capture`。未指定のCategory=cameraもカメラ指示に対応 |
 | `DirectionReplacement` | `""` | 対応する共通演技を選んだとき、その箇所に残す接続用の文。最大1000文字。Aspectなしでは非空にできない |
 
 `Group` は取込時に矛盾したONを自動修復する機能ではありません。同じグループを使うなら、配布時から既定状態を整えます。手動でONにしたときに限り、現在のバリアント本文に現れる同グループの別項目をOFFにします。候補一組だけなら `[A / B]` の方が簡単です。
@@ -316,12 +316,15 @@ AI強化OFF、ImageChoices=false、またはMode=onなら `ChoiceIndex` の候�
 | `ActionSamples` | `""` | AIが秒数付き動作を考える際の参考例。ActionPlot有効時のみ強化指示に含める |
 | `SourceRules` | `false` | 元画像プロンプトから `[]` のauto条件を判定 |
 | `ImageChoices` | `false` | AI強化時に `{}` のauto候補を画像から選択 |
-| `ActionPlot` | `false` | AI強化時に選択時間内の最大3つの動作段階を考える |
+| `ActionPlot` | `false` | AI補完時にActionSamplesを細部の参考にする。新しい主動作を作る許可ではない |
 | `PhysicalContinuity` | `false` | AI強化時に支持・接触・重力・慣性・収束の連続性を指示 |
 | `OpeningMotionId` | `"original"` | 冒頭の身体の動き。付録の登録IDのみ |
 | `ArmMotionId` | `"original"` | 腕・手の冒頭動作や小さなしぐさ。付録の登録IDのみ |
-| `ExpressionId` | `"original"` | 動画全体の表情。付録の登録IDのみ |
-| `MoodId` | `"original"` | 主動作を行うときの全体の雰囲気。付録の登録IDのみ |
+| `ExpressionId` | `"original"` | 区間なしの場合の表情。付録の登録IDのみ |
+| `MoodId` | `"original"` | 区間なしの場合の雰囲気。付録の登録IDのみ |
+| `CameraMotionId` | `"original"` | 区間なしの場合のカメラワーク。VideoDirectionTimeline.Camerasの登録ID |
+| `CaptureModeId` | `"original"` | 動画全体の撮り方。`original`, `pov`, `handheld`, `stabilized`, `phone`, `documentary`, `shoulder`, `body-mounted` |
+| `DirectionPhases` | `[]` | 共通時間軸の最大3区間。空なら上記の全体設定を使う。各区間の項目は後述 |
 | `OriginalDefault` | `"anime"` | Original入力の既定扱い。`anime` / `photoreal` |
 | `PreferredLoraId` | `""` | 推奨LoRAのメモ。生成文に送らず、自動ロードもしない |
 | `Options` | `{}` | オプション設定辞書 |
@@ -350,11 +353,11 @@ H3の見出しが一部分だけ存在する本文を、自動で完全修復す
 
 ### 7.3 AI強化の範囲
 
-ActionPlotは選択時間内の始まり・展開・終わりを最大3段階で考える補助です。ActionSamplesは参考例であって、全部を強制追加するものではありません。強化OFF時はActionPlotとPhysicalContinuityの追加指示を出しません。
+ActionPlotはActionSamplesを細部の参考に使う指定です。例を全部追加したり、元の動作を大きく・速くする指定ではありません。AI補完OFF時はActionPlotとPhysicalContinuityの追加指示を出しません。
 
 PhysicalContinuityは物理シミュレーターでも必須LoRAでもありません。元画像を初期状態として扱い、支持・接触を守り、明示された実行可能な解放や既に支持されていない変位に限って連続した動きを指示します。支持状態が不明なら、勝手な解放や静止位置・初速を想像しません。
 
-AI強化後の本文はジョブの実行用コピーです。保存済みスタイル、注釈前の本文、日本語説明、送信済み要求を上書きしません。強化が失敗したときに黙って未強化生成へ切り替える仕様でもありません。
+AI補完後の本文はジョブの実行用コピーです。保存済みスタイル、注釈前の本文、日本語説明、送信済み要求を上書きしません。AIの出力が使えなければ一度だけ補正を試し、適用できない場合は元の本文と適用済みの手動設定で生成を続けます。診断に理由を記録し、補完の失敗だけで動画全体を止めません。
 
 ## 8. 冒頭の動き・腕・表情・ムードと本文の重複
 
@@ -364,7 +367,7 @@ AI強化後の本文はジョブの実行用コピーです。保存済みスタ
 |---|---|
 | 冒頭の動き | 元画像の直後、最初の1〜2秒の身体の移動や姿勢。動画全体で繰り返す指示ではない |
 | 腕の動き | 元姿勢からの腕・手の動き、その後の姿勢・小さなしぐさ。身体全体の移動ではない |
-| 表情 | 動画全体で主動作に反応する顔の方向性。顔を固定する指示ではない |
+| 表情 | 主動作に反応する顔の方向性。区間があればその区間に適用し、なければ動画全体に適用する。顔を固定する指示ではない |
 | ムード | 既存の主動作をどんな調子で行うか。新しい出来事や主動作を追加するものではない |
 
 主動作に必要な手の動き、物を持つこと、支持や接触が、飾りの腕のしぐさより優先です。表情とムードが競合する顔の指示では、明示した表情が優先します。現在の共通演技カタログは女性の被写体向けの英文です。他の被写体へそのまま一般化するIDではありません。
@@ -390,11 +393,23 @@ AI強化後の本文はジョブの実行用コピーです。保存済みスタ
 
 ## 9. カメラ、視点、Additionalの整理
 
-専用の `CameraId` やカメラ用JSONタイムラインはありません。カメラは本文冒頭の映像説明内にある `[]` の選択肢として記述し、Categoryをcameraまたはviewpointにします。
+既存の文中カメラ選択肢は保持します。`Category=camera` または `DirectionAspect=camera` のトークンは、共通のカメラワークに対応します。別の動きを選んだ区間ではその句を置き換え、`original` の区間では元の選択を使います。`viewpoint` だけでは置換の対象になりません。
 
 候補として固定、寄る、引く、左右へ回り込む、正面へ移る、追従、低い／高い角度、手持ち風、POV風などを書けます。意味を持つのは候補の英文であり、日本語Labelだけ変えても動きは変わりません。POV風は撮影者側の位置・頭の揺れ・視線移動として記述し、被写体の移動と分けます。
 
-「低い角度から正面へ移り、その後顔へ寄る」のような順序は一つの候補内の時間順の文章で指定します。視点・注目先・角度を別トークンに分けることもできますが、矛盾する組合せをUIが自動で解消する保証はありません。最終本文を確認してください。
+`DirectionPhases` の各要素は `EndMillionths`, `CameraId`, `ArmsId`, `ExpressionId`, `MoodId` を持ちます。終了位置は全体を1,000,000とした整数で増加させ、最後は必ず1,000,000です。最初の開始は0、次の開始は前の終了です。動画尺が変われば割合を保って実際の秒数へ変換します。区間がある場合、全体用のCameraMotionId・ArmMotionId・ExpressionId・MoodIdより区間の設定を使います。
+
+```json
+"DirectionPhases": [
+  { "EndMillionths": 200000, "CameraId": "front", "ArmsId": "lower", "ExpressionId": "surprised", "MoodId": "dramatic" },
+  { "EndMillionths": 600000, "CameraId": "upper-body", "ArmsId": "lower", "ExpressionId": "suspicious", "MoodId": "dramatic" },
+  { "EndMillionths": 1000000, "CameraId": "face", "ArmsId": "still", "ExpressionId": "calm", "MoodId": "soft" }
+]
+```
+
+これは主動作を3回書く指定ではありません。共通の主動作を一度残し、各時間帯の変化を映像欄へまとめます。同じ腕の動作が続く場合は繰り返さず、変更区間だけを記述します。新規AIセリフは同じ区間内へ割り当て、既存セリフは分割・複製しません。区間の `original` は元のスタイル指示へ戻る意味で、直前の選択を引き継ぐ指定ではありません。
+
+撮り方を変更すると、明示的なカメラトークン内の既知の手持ち・微振動の句だけを置き換えます。自由文の意味を推測して削除する機能ではありません。各IDの英語の定義は `VideoSubjectDirection.cs` と `VideoDirectionTimeline.cs` を正本にします。
 
 `Additional action` / `Additional event` という見出しに特別な機能はありません。既存の追加指示を選択可能にする場合は、見出しとその本文の対象範囲を確認し、まとまりごとに括弧へ入れます。OFFで見出しだけ・接続語だけが残らないようにします。独立して併用できる追加指示は別々の `[]`、どれか一つなら `[A / B]` またはGroupを使います。構造化だけを依頼された場合、選択肢化を理由に内容を増減しません。
 
@@ -407,7 +422,7 @@ For the target video, at 0.00 seconds into the target video, <Picture 1> (from [
 
 integrated_multimodal_description: [Shot 1] Preserve the reference image's appearance and composition. The woman looks toward the camera and says <d>[Japanese] こんにちは。</d>.
 
-overall_soundscape: Quiet room ambience and the spoken line described above.
+overall_soundscape: Quiet room ambience and soft fabric movement.
 
 non_diegetic_music: N/A
 ```
@@ -632,6 +647,14 @@ H3の冒頭・映像・音・音楽・セリフを保持し、日本語の説明
 | `bashful-smile` | 照れ笑い |
 | `resolute-soft` | 穏やかだが意志が強い |
 | `blank-surprise` | きょとんとしている |
+| `flustered` | 恥ずかしそうに目を伏せる |
+| `melting-smile` | とろけるような微笑み |
+| `knowing-grin` | 得意げな笑み（ドヤ顔） |
+| `mischievous-grin` | いたずらそうににやり |
+| `affectionate` | 愛おしそうなまなざし |
+| `dazed` | ぼんやり夢見心地 |
+| `trying-not-smile` | 笑みを隠そうとする |
+| `quiet-delight` | うれしさがにじむ |
 
 ### MoodId
 
@@ -675,6 +698,33 @@ H3の冒頭・映像・音・音楽・セリフを保持し、日本語の説明
 | `reassuring` | 包み込むように穏やか |
 | `curious` | 探るように興味深く |
 | `restrained` | 感情を抑えた |
+| `romantic` | ロマンチック |
+| `seductive` | 魅惑的（セダクティブ） |
+| `intimate` | 親密でやわらかい |
+| `flirtatious` | 小悪魔のようにお茶目 |
+| `cinematic` | 映画のワンシーンのように |
+| `suspenseful` | 緊張感を含んだ |
+
+### CameraMotionId / 各区間のCameraId
+
+| ID | 表示名 |
+|---|---|
+| `original` | 元のカメラ指示 |
+| `fixed` | 構図を保つ |
+| `push` / `pull` | ゆっくり寄る / ゆっくり引く |
+| `arc-left` / `arc-right` | 左へ回り込む / 右へ回り込む |
+| `front` / `three-quarter` | 正面へ回り込む / 斜め前へ回り込む |
+| `track` | 被写体を追う |
+| `pan-left` / `pan-right` | 左へパン / 右へパン |
+| `truck-left` / `truck-right` | 左へ平行移動 / 右へ平行移動 |
+| `tilt-up` / `tilt-down` | 上へ視線を移す / 下へ視線を移す |
+| `eye-level` | 目線の高さへ移る |
+| `low-angle` / `high-angle` | 低い位置から見上げる / 高い位置から見下ろす |
+| `face` / `hands` / `upper-body` | 顔に寄る / 手元に寄る / 上半身に寄る |
+| `full-body` | 全身を収める |
+| `zoom-in` / `zoom-out` | その場からズームイン / その場からズームアウト |
+
+これらは公式ガイドにあるカメラ動作と、目・眉・口などの具体的な描写を使うプリセットです。各項目の効き方や指定秒どおりの切替を全画像で実証したものではありません。画像の姿勢、遮蔽、主動作と両立する項目を選んでください。
 
 ## 15. 実装を確認するための参照先
 
@@ -690,10 +740,11 @@ H3の冒頭・映像・音・音楽・セリフを保持し、日本語の説明
 | 画像種別、本文・ベースの選択 | [MainWindow.VideoPromptProgram.cs](../local-native/PhotoViewer.Wpf/MainWindow.VideoPromptProgram.cs) |
 | 色付き選択と編集操作 | [VideoPromptAuthoringControl.cs](../local-native/PhotoViewer.Wpf/VideoPromptAuthoringControl.cs) |
 | 演技カタログと優先順位 | [VideoSubjectDirection.cs](../local-native/PhotoViewer.Wpf/VideoSubjectDirection.cs) |
+| 共通時間軸・撮り方・カメラワーク | [VideoDirectionTimeline.cs](../local-native/PhotoViewer.Wpf/VideoDirectionTimeline.cs) |
 | 映像部分への挿入、引用・セリフの保護 | [VideoPromptSections.cs](../local-native/PhotoViewer.Wpf/VideoPromptSections.cs) |
 | キュー追加と強化指示の確定 | [MainWindow.VideoSubmission.cs](../local-native/PhotoViewer.Wpf/MainWindow.VideoSubmission.cs) |
 | H3の冒頭・セクション定義 | [MiniMaxH3I2vaPromptConformance.cs](../local-native/PhotoViewer.Wpf/MiniMaxH3I2vaPromptConformance.cs) |
-| 実行直前のAI強化契約 | [enhancement-video-prompt-enhancement-v1.json](../contracts/enhancement-video-prompt-enhancement-v1.json) |
+| 実行直前のAI補完契約 | [enhancement-video-prompt-enhancement-v2.json](../contracts/enhancement-video-prompt-enhancement-v2.json) |
 | 実際のLoRA適用契約 | [enhancement-video-lora-v1.json](../contracts/enhancement-video-lora-v1.json) |
 | 選択言語の合成検証 | [verify-wpf-video-prompt-program.ps1](../scripts/verify-wpf-video-prompt-program.ps1) |
 

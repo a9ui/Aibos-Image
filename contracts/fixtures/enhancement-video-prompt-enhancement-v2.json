@@ -221,6 +221,51 @@
       "accepted": false
     },
     {
+      "name": "v2-shared-timeline",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The presenter waves.\nFrom 0.00 to 3.00 seconds: Surprised.\nFrom 3.00 to 5.17 seconds: Calm.",
+        "options": {
+          "sourceKind": "anime", "referencePrompt": "", "dialogue": "auto", "speechAmount": 2,
+          "music": "preserve", "physicalContinuity": false, "actionSamples": "", "choices": [],
+          "timeline": [
+            { "startMs": 0, "endMs": 3000, "anchor": "From 0.00 to 3.00 seconds:" },
+            { "startMs": 3000, "endMs": 5166, "anchor": "From 3.00 to 5.17 seconds:" }
+          ]
+        }
+      },
+      "accepted": true
+    },
+    {
+      "name": "v2-timeline-gap",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The presenter waves.\nFrom 0.00 to 3.00 seconds: Surprised.\nFrom 3.00 to 5.17 seconds: Calm.",
+        "options": {
+          "sourceKind": "anime", "referencePrompt": "", "dialogue": "auto", "speechAmount": 2,
+          "music": "preserve", "physicalContinuity": false, "actionSamples": "", "choices": [],
+          "timeline": [
+            { "startMs": 0, "endMs": 2900, "anchor": "From 0.00 to 3.00 seconds:" },
+            { "startMs": 3000, "endMs": 5166, "anchor": "From 3.00 to 5.17 seconds:" }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-timeline-missing-anchor",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The presenter waves.",
+        "options": {
+          "sourceKind": "anime", "referencePrompt": "", "dialogue": "auto", "speechAmount": 2,
+          "music": "preserve", "physicalContinuity": false, "actionSamples": "", "choices": [],
+          "timeline": [{ "startMs": 0, "endMs": 5166, "anchor": "From 0.00 to 5.17 seconds:" }]
+        }
+      },
+      "accepted": false
+    },
+    {
       "name": "v2-future",
       "value": {
         "schemaVersion": 3,

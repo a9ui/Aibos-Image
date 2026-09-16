@@ -31,6 +31,9 @@ public sealed class VideoPromptProgram
     public string ArmMotionId { get; set; } = "original";
     public string ExpressionId { get; set; } = "original";
     public string MoodId { get; set; } = "original";
+    public string CameraMotionId { get; set; } = "original";
+    public string CaptureModeId { get; set; } = "original";
+    public List<VideoDirectionPhase> DirectionPhases { get; set; } = [];
     public string OriginalDefault { get; set; } = "anime";
     public string PreferredLoraId { get; set; } = "";
     public Dictionary<string, VideoPromptOption> Options { get; set; } = new(StringComparer.Ordinal);
@@ -89,7 +92,7 @@ public sealed class VideoPromptProgram
                 || !Bounded(option.DirectionAspect, 16)
                 || !Bounded(option.DirectionReplacement, 1000)
                 || (option.DirectionAspect.Length == 0 && option.DirectionReplacement.Length > 0)
-                || option.DirectionAspect is not ("" or "opening" or "arms" or "expression" or "mood")
+                || option.DirectionAspect is not ("" or "opening" or "arms" or "expression" or "mood" or "camera" or "capture")
                 || option.Category is not ("" or "camera" or "action" or "expression" or "viewpoint" or "ending" or "sound" or "detail")
                 || option.ChoiceLabels is null || option.ChoiceLabels.Count > 16
                 || option.ChoiceLabels.Any(label => !Bounded(label, 120)))
@@ -153,30 +156,35 @@ public sealed class VideoPromptProgram
         return true;
     }
 
+    public static string DirectionAspectFor(VideoPromptOption option)
+        => option.DirectionAspect.Length > 0 ? option.DirectionAspect : option.Category == "camera" ? "camera" : "";
+
     public bool IsDirectionReplaced(VideoPromptOption option)
-        => option.DirectionAspect switch
+        => DirectionAspectFor(option) switch
         {
             "opening" => OpeningMotionId != "original",
-            "arms" => ArmMotionId != "original",
-            "expression" => ExpressionId != "original",
-            "mood" => MoodId != "original",
+            "capture" => CaptureModeId != "original",
+            "camera" or "arms" or "expression" or "mood" => VideoDirectionTimeline.Overrides(this, DirectionAspectFor(option)),
             _ => false,
         };
 
     public void RestoreOriginalDirection(string aspect)
     {
+        foreach (var phase in DirectionPhases) phase.Set(aspect, "original");
         switch (aspect)
         {
             case "opening": OpeningMotionId = "original"; break;
             case "arms": ArmMotionId = "original"; break;
             case "expression": ExpressionId = "original"; break;
             case "mood": MoodId = "original"; break;
+            case "camera": CameraMotionId = "original"; break;
+            case "capture": CaptureModeId = "original"; break;
         }
     }
 
-    public bool IsOn(VideoPromptOption option, string? sourcePrompt)
+    public bool IsOn(VideoPromptOption option, string? sourcePrompt, bool ignoreDirection = false)
     {
-        if (IsDirectionReplaced(option) && option.DirectionReplacement.Length == 0) return false;
+        if (!ignoreDirection && IsDirectionReplaced(option) && option.DirectionReplacement.Length == 0) return false;
         if (option.Mode != "auto" || !SourceRules)
             return option.Mode == "on" || (option.Mode == "auto" && option.DefaultOn);
         // Unknown metadata is not evidence that a word or a prompt is absent.
@@ -191,7 +199,24 @@ public sealed class VideoPromptProgram
         };
     }
 
-    public bool TryResolveH3(string kind, string? sourcePrompt, out string prompt, out string error)
+    private Dictionary<string, string> OriginalDirections(string kind, string? sourcePrompt)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!VideoPromptLanguage.TryParse(TemplateFor(kind), out var tokens, out _)) return result;
+        foreach (var token in tokens.Where(t => t.Kind != 't'))
+        {
+            var option = OptionFor(token);
+            string aspect = DirectionAspectFor(option);
+            if (aspect.Length == 0 || !IsOn(option, sourcePrompt, ignoreDirection: true)
+                || token.Choices.Count > 0 && option.ChoiceIndex >= token.Choices.Count) continue;
+            string text = token.Choices.Count > 0 ? token.Choices[option.ChoiceIndex] : token.Text;
+            if (aspect == "camera") text = VideoDirectionTimeline.ApplyCaptureOverride(text, this);
+            result[aspect] = result.TryGetValue(aspect, out string? previous) ? previous + " " + text : text;
+        }
+        return result;
+    }
+
+    public bool TryResolveH3(string kind, string? sourcePrompt, out string prompt, out string error, int durationMs = 15083)
     {
         prompt = "";
         if (!Validate(out error) || !VideoPromptLanguage.TryParse(TemplateFor(kind), out var tokens, out error)) return false;
@@ -205,8 +230,9 @@ public sealed class VideoPromptProgram
             { error = "候補が編集されています。色付きの部分から選び直してください。"; return false; }
             // With enhancement off, image choices use the selected/default
             // alternative. No AI instructions or optional planning are emitted.
-            resolved.Append(IsDirectionReplaced(option) ? option.DirectionReplacement
-                : token.Choices.Count > 0 ? token.Choices[option.ChoiceIndex] : token.Text);
+            string selected = IsDirectionReplaced(option) ? option.DirectionReplacement
+                : token.Choices.Count > 0 ? token.Choices[option.ChoiceIndex] : token.Text;
+            resolved.Append(DirectionAspectFor(option) == "camera" ? VideoDirectionTimeline.ApplyCaptureOverride(selected, this) : selected);
         }
         string body = resolved.ToString().Trim();
         if (body.Length == 0) { error = "本文か使用する候補を入力してください。"; return false; }
@@ -222,7 +248,8 @@ public sealed class VideoPromptProgram
             body = MiniMaxH3I2vaPromptConformance.Opening + MiniMaxH3I2vaPromptConformance.IntegratedPrefix + body
                 + MiniMaxH3I2vaPromptConformance.SoundscapePrefix + "N/A"
                 + MiniMaxH3I2vaPromptConformance.MusicPrefix + "N/A";
-        if (!VideoSubjectDirection.TryApply(body, this, out body, out error)) return false;
+        string direction = VideoDirectionTimeline.Instruction(this, durationMs, OriginalDirections(kind, sourcePrompt));
+        if (!VideoPromptSections.TryInsertVisual(body, direction, out body, out error)) return false;
         if (body.Length > 8000) { error = "生成用の本文を8,000文字以内にしてください。"; return false; }
         // Conformance remains available for AI candidates. Direct enqueue does
         // not force rewriting or alter the user's existing H3 sections.
@@ -264,7 +291,8 @@ public sealed class VideoPromptProgram
                 {
                     if (token.Choices.Count > 0 && option.ChoiceIndex >= token.Choices.Count)
                     { error = "手動選択肢が編集されています。選び直してください。"; return false; }
-                    text.Append(token.Choices.Count > 0 ? token.Choices[option.ChoiceIndex] : token.Text);
+                    string selected = token.Choices.Count > 0 ? token.Choices[option.ChoiceIndex] : token.Text;
+                    text.Append(DirectionAspectFor(option) == "camera" ? VideoDirectionTimeline.ApplyCaptureOverride(selected, this) : selected);
                 }
             }
             else if (ImageChoices && option.Mode == "auto")
@@ -281,7 +309,8 @@ public sealed class VideoPromptProgram
                     error = "選択肢が編集されています。色付き部分を押して選び直してください。";
                     return false;
                 }
-                text.Append(token.Choices[option.ChoiceIndex]);
+                string selected = token.Choices[option.ChoiceIndex];
+                text.Append(DirectionAspectFor(option) == "camera" ? VideoDirectionTimeline.ApplyCaptureOverride(selected, this) : selected);
             }
         }
         if (string.IsNullOrWhiteSpace(baseTemplate) && string.IsNullOrWhiteSpace(text.ToString()))
@@ -308,7 +337,7 @@ public sealed class VideoPromptProgram
             text.Append(" Keep the requested actions; do not invent an additional action plot.");
         if (PhysicalContinuity)
             text.Append("\nPhysical continuity: Treat the reference as the initial frame, not a frozen pose throughout the clip. Preserve visible support, attachment points, and contact constraints. After an explicitly requested and visibly plausible release, allow unsupported soft tissue, fabric, hair, and objects to move continuously under gravity, inertia, and damped settling. If already unsupported and clearly temporarily displaced, continue that existing state smoothly without inventing a release event or an initial velocity direction. Do not force supported parts downward, change anatomy, or snap to a guessed resting pose. If support or displacement is uncertain, add no inferred physical action. Describe any supported transition in time order within the selected duration.");
-        if (VideoSubjectDirection.IsSelected(this)) text.Append("\n\n" + VideoSubjectDirection.Instruction(this));
+        if (VideoSubjectDirection.IsSelected(this)) text.Append("\n\n" + VideoDirectionTimeline.Instruction(this, frameCount * 1000 / 24, OriginalDirections(sourceKind, sourcePrompt)));
         instruction = text.ToString();
         if (instruction.Length > 8000 || Encoding.UTF8.GetByteCount(instruction) > 14000)
         {
@@ -325,10 +354,10 @@ public sealed class VideoPromptProgram
     // pass through the existing local resolver, including acting replacements;
     // no substring guessing against the user's prose or dialogue is involved.
     public bool TryResolveEnrichment(string kind, string? sourcePrompt, out string prompt,
-        out VideoEnrichmentChoice[] choices, out string error)
+        out VideoEnrichmentChoice[] choices, out string error, int durationMs = 15083)
     {
         choices = [];
-        if (!TryResolveH3(kind, sourcePrompt, out prompt, out error)) return false;
+        if (!TryResolveH3(kind, sourcePrompt, out prompt, out error, durationMs)) return false;
         if (!ImageChoices) return true;
         if (!VideoPromptLanguage.TryParse(TemplateFor(kind), out var tokens, out error)) return false;
         var shadow = Clone();
@@ -350,7 +379,7 @@ public sealed class VideoPromptProgram
         if (slots.Count == 0) return true;
         if (kind == "photoreal" && !string.IsNullOrWhiteSpace(PhotorealTemplate)) shadow.PhotorealTemplate = text.ToString();
         else shadow.Template = text.ToString();
-        if (!shadow.TryResolveH3(kind, sourcePrompt, out string marked, out error)) return false;
+        if (!shadow.TryResolveH3(kind, sourcePrompt, out string marked, out error, durationMs)) return false;
         var captured = new List<VideoEnrichmentChoice>();
         foreach (var slot in slots)
         {

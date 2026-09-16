@@ -22,6 +22,7 @@ public partial class MainWindow
     private string? _videoProgramMetadataStamp;
     private string? _videoProgramMetadataPrompt;
     private bool _syncingVideoAuthoringControls;
+    private int VideoDirectionDurationMs() => MiniMaxH3FrameCountForDuration(_videoDurationSeconds) * 1000 / 24;
 
     private void FocusModalVideoGenerationBoard()
     {
@@ -75,7 +76,7 @@ public partial class MainWindow
                 }
                 ((VideoPromptAuthoringControl)host.Content).Load(_videoPromptProgram, _videoPrompt,
                     _videoProgramOverrideSourceKey == VideoProgramSourceKey() ? _videoProgramSourceOverride : "auto",
-                    EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceAtExecution);
+                    EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceAtExecution, VideoDirectionDurationMs());
             }
         }
         finally { _syncingVideoAuthoringControls = false; }
@@ -103,7 +104,7 @@ public partial class MainWindow
             ApplyDirectVideoSourceVariant();
             foreach (ContentControl host in new[] { ModalVideoPromptAuthoringHost, AppVideoPromptAuthoringHost })
                 if (host.Content is VideoPromptAuthoringControl peer && !ReferenceEquals(peer, sender))
-                    peer.Load(_videoPromptProgram, _videoPrompt, _videoProgramSourceOverride, EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceAtExecution);
+                    peer.Load(_videoPromptProgram, _videoPrompt, _videoProgramSourceOverride, EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), _videoEnhanceAtExecution, VideoDirectionDurationMs());
             SetVideoStyleStatus("変更は今回の動画に使います。残したい場合は名前を付けてスタイルを保存してください。");
         }
         finally { _syncingVideoAuthoringControls = false; }
@@ -126,7 +127,7 @@ public partial class MainWindow
         {
             if (_changingVideoPromptForH3History
                 || (_videoProgramAppliedContext == VideoProgramContext() && _videoProgramAppliedPrompt == _videoPrompt)
-                || !_videoPromptProgram.TryResolveH3(EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), out prompt, out _)) return;
+                || !_videoPromptProgram.TryResolveH3(EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), out prompt, out _, VideoDirectionDurationMs())) return;
         }
         else
         {
@@ -354,7 +355,7 @@ public partial class MainWindow
     {
         if (!_videoPromptProgram.Enabled) return null;
         if (_videoProgramAppliedContext == VideoProgramContext() && _videoProgramAppliedPrompt == _videoPrompt) return null;
-        if (_videoPromptProgram.TryResolveH3(EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), out string direct, out string error)
+        if (_videoPromptProgram.TryResolveH3(EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), out string direct, out string error, VideoDirectionDurationMs())
             && _videoPrompt == direct) return null;
         return error.Length > 0 ? error : "本文の選択を読み直してください。";
     }
@@ -387,6 +388,8 @@ public partial class MainWindow
 
     public void SelectActingForSmoke(string opening, string expression, string mood, string arms = "original")
         => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).SelectActingForSmoke(opening, expression, mood, arms);
+
+    public void RevealVideoTimelineForSmoke() => ((VideoPromptAuthoringControl)ModalVideoPromptAuthoringHost.Content).RevealTimelineForSmoke();
 
     public bool ExerciseVideoAuthoringForSmoke(Action<string, FrameworkElement> capture)
     {

@@ -35,6 +35,8 @@
         "actionSamples",
         "choices"
       ],
+      "optionalKeys": ["timeline"],
+      "timeline": "Optional 1..3 contiguous app-owned intervals {startMs,endMs,anchor}. Start is zero, ends increase within 15083 ms; each bounded anchor occurs in instruction in order. This is one shared clock for camera, arms, expression, mood and added speech, never separate model-generated clocks.",
       "sourceKind": [
         "anime",
         "photoreal"
@@ -64,6 +66,7 @@
   "execution": {
     "timing": "Existing FIFO claim and single GPU lease, before H3; 360-second shared deadline and bounded invalid-response retries. Never inference on enqueue or passive reads.",
     "compiler": "Retain resolved source body and explicit selections. AI supplies short onset, transition, settling and optional physical details, without increasing action scale, speed, distance, repetitions or emotional intensity. No automatic camera move. Compatible no-addition result is valid.",
+    "timeline": "When supplied, AI returns one phaseDetails string per interval and new speech uses a phase index instead of generated timestamps. Details and speech are inserted next to the corresponding selected directions. The app allocates speaking time inside that interval and the whole-clip budget; a new line that cannot fit is omitted without dropping valid motion details. Existing lines are neither repeated nor split at interval boundaries.",
     "audio": "Preserve existing dialogue and speaker IDs when enabled; generate short Japanese onscreen dialogue only when no authored speech/silence direction exists. A sparse/normal/full speech budget is a heuristic limit, not measured lip sync. OFF edits only recognized speech syntax; ambiguous prose is diagnosed, never silently erased. BGM is independent from physical sound.",
     "format": "Application creates the I2VA 0.00-second image binding and ordered integrated_multimodal_description, overall_soundscape, non_diegetic_music fields, with dedicated speech tags. Final bound 8000 code units.",
     "fallback": "Unusable generated details or selected alternatives receive at most one correction, then use the frozen direct prompt with applied manual audio overrides and a warning. Unsupported source authoring formats skip optional inference and use the frozen direct prompt when no manual audio-OFF setting would be discarded. Source identity, runtime ownership, cleanup and cancellation remain required. An unapplied explicit audio-OFF request is diagnosed, never silently ignored.",

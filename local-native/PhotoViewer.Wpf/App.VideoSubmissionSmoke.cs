@@ -211,5 +211,18 @@ public partial class App
             && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("music").GetString() == "off"
             && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("speechAmount").GetInt32() == 2;
         window.ConfigureVideoEnrichmentForSmoke(false, false, true, 1, true);
+        var timed = draft.Clone();
+        timed.CaptureModeId = "pov";
+        timed.DirectionPhases = [new() { EndMillionths = 333333, ExpressionId = "surprised", CameraId = "front" },
+            new() { EndMillionths = 666667, ExpressionId = "suspicious", CameraId = "upper-body" },
+            new() { ExpressionId = "calm", CameraId = "face" }];
+        window.SetVideoPromptProgramForSmoke(timed);
+        checks["sharedTimelineEnqueuesWithoutWaitingForAiAndKeepsActualDuration"] = await window.SubmitVideoGenerationForSmokeAsync()
+            && rewrites == 0 && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("timeline").GetArrayLength() == 3
+            && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("timeline")[2].GetProperty("endMs").GetInt32() == 5166
+            && publishedPrompt.Contains("From 3.44 to 5.17 seconds:") && publishedPrompt.Contains("same observer's first-person viewpoint");
+        window.RevealVideoTimelineForSmoke(); window.UpdateLayout();
+        window.CaptureVideoVariantForSmoke((_, visual) => capture("video-timeline-settings", visual));
+        window.SetVideoPromptProgramForSmoke(draft);
     }
 }

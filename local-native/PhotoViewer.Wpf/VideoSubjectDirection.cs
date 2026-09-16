@@ -74,7 +74,7 @@ public static class VideoSubjectDirection
         new("soft-fists", "手を軽く握る", "She loosely closes her free hands without straining her fingers."),
         new("unclench", "握った手をゆるめる", "She gently unclenches her free hands and relaxes her fingers."),
         new("hands-heart", "両手を胸元に重ねる", "She rests her free hands lightly over her own upper chest in a quiet gesture."),
-        new("small-gesture", "会話するように手を動かす", "She uses occasional small, restrained free-hand gestures without adding dialogue."),
+        new("small-gesture", "会話するように手を動かす", "She uses occasional small, restrained free-hand gestures."),
     ];
     public static readonly Choice[] Expressions =
     [
@@ -82,7 +82,7 @@ public static class VideoSubjectDirection
         new("bright", "明るい表情", "A bright, open expression."),
         new("cheerful", "楽しそう", "She looks cheerful and appears to enjoy performing the requested action."),
         new("gentle-smile", "穏やかな微笑み", "A gentle, relaxed smile."),
-        new("laughing", "笑いをこらえきれない", "An amused expression with occasional natural smiles, without adding dialogue."),
+        new("laughing", "笑いをこらえきれない", "An amused expression with occasional natural smiles."),
         new("playful", "いたずらっぽい", "A playful, mischievous smile."),
         new("confident", "自信たっぷり", "A composed, self-assured expression."),
         new("proud", "得意げ", "A pleased, slightly proud expression."),
@@ -130,6 +130,14 @@ public static class VideoSubjectDirection
         new("bashful-smile", "照れ笑い", "A bashful smile that comes and goes naturally."),
         new("resolute-soft", "穏やかだが意志が強い", "A gentle expression with quiet resolve."),
         new("blank-surprise", "きょとんとしている", "A mildly surprised, momentarily blank expression that responds naturally."),
+        new("flustered", "恥ずかしそうに目を伏せる", "A bashful expression with briefly lowered eyes and a small self-conscious smile."),
+        new("melting-smile", "とろけるような微笑み", "A soft, dreamy smile with relaxed brows and gently softened eyes."),
+        new("knowing-grin", "得意げな笑み（ドヤ顔）", "A small knowing grin with one slightly raised eyebrow."),
+        new("mischievous-grin", "いたずらそうににやり", "A mischievous grin, with a slight lift at one corner of the mouth."),
+        new("affectionate", "愛おしそうなまなざし", "An affectionate gaze with relaxed eyelids and a soft smile."),
+        new("dazed", "ぼんやり夢見心地", "A dreamy, slightly unfocused gaze with relaxed facial muscles."),
+        new("trying-not-smile", "笑みを隠そうとする", "The corners of the mouth briefly lift as she tries to maintain a composed expression."),
+        new("quiet-delight", "うれしさがにじむ", "The eyes brighten and a small delighted smile gradually appears."),
     ];
     public static readonly Choice[] Moods =
     [
@@ -171,19 +179,28 @@ public static class VideoSubjectDirection
         new("reassuring", "包み込むように穏やか", "A reassuring, patient manner."),
         new("curious", "探るように興味深く", "An inquisitive, exploratory manner."),
         new("restrained", "感情を抑えた", "An emotionally restrained manner."),
+        new("romantic", "ロマンチック", "A tender, romantic manner expressed through attentive pauses and gentle expression, without adding contact or new actions."),
+        new("seductive", "魅惑的（セダクティブ）", "A poised, inviting manner with unhurried, deliberate expression, without increasing the action or introducing contact."),
+        new("intimate", "親密でやわらかい", "A warm, personal manner with subtle expression and natural pauses, keeping the existing distance and action."),
+        new("flirtatious", "小悪魔のようにお茶目", "A lightly flirtatious, teasing manner expressed through subtle timing, without introducing events or increasing the action."),
+        new("cinematic", "映画のワンシーンのように", "A composed, expressive performance with deliberate pauses, keeping the original visual medium and lighting."),
+        new("suspenseful", "緊張感を含んだ", "A watchful, suspenseful manner with restrained anticipation, without inventing threats or events."),
     ];
 
     public static bool IsValid(VideoPromptProgram program)
-        => Opening.Any(c => c.Id == program.OpeningMotionId)
+        => VideoDirectionTimeline.IsValid(program) && Opening.Any(c => c.Id == program.OpeningMotionId)
             && Arms.Any(c => c.Id == program.ArmMotionId)
             && Expressions.Any(c => c.Id == program.ExpressionId)
             && Moods.Any(c => c.Id == program.MoodId);
 
     public static bool IsSelected(VideoPromptProgram program)
-        => program.OpeningMotionId != "original" || program.ArmMotionId != "original" || program.ExpressionId != "original" || program.MoodId != "original";
+        => program.OpeningMotionId != "original" || program.ArmMotionId != "original" || program.ExpressionId != "original" || program.MoodId != "original"
+            || program.CaptureModeId != "original" || program.CameraMotionId != "original" || program.DirectionPhases.Count > 0;
 
     public static string Instruction(VideoPromptProgram program)
     {
+        if (program.DirectionPhases.Count > 0 || program.CaptureModeId != "original" || program.CameraMotionId != "original")
+            return VideoDirectionTimeline.Instruction(program, 15083, null);
         var parts = new List<string>();
         string opening = Opening.Single(c => c.Id == program.OpeningMotionId).Text;
         string arms = Arms.Single(c => c.Id == program.ArmMotionId).Text;
@@ -196,7 +213,7 @@ public static class VideoSubjectDirection
         if (expression.Length > 0) parts.Add("Facial direction throughout the clip: " + expression
             + " Let the expression respond naturally to the ongoing action; do not freeze the face.");
         if (mood.Length > 0) parts.Add("Overall performance mood: " + mood);
-        if (parts.Count > 0) parts.Add("These selected acting directions take precedence only for their named aspects. An explicit facial direction takes precedence over mood for facial expression. Opening movement controls initial body position; arm direction controls only available arms and hands. Keep the requested main action, existing people, camera, setting, spoken lines, soundscape and music unchanged.");
+        if (parts.Count > 0) parts.Add("These selected acting directions take precedence only for their named aspects. An explicit facial direction takes precedence over mood for facial expression. Opening movement controls initial body position; arm direction controls only available arms and hands. Keep the requested main action, existing people, camera, setting and other selected details.");
         return string.Join("\n", parts);
     }
 

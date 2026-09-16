@@ -12,7 +12,7 @@ namespace PhotoViewer.Wpf;
 
 // One native input surface: edit the notation or operate the same text.
 // No persistence, image reads, inference, or jobs are started by this control.
-public sealed class VideoPromptAuthoringControl : UserControl
+public sealed partial class VideoPromptAuthoringControl : UserControl
 {
     private static Brush ColorBrush(string color) => (Brush)new BrushConverter().ConvertFromString(color)!;
     private static readonly Brush Ink = ColorBrush("#F0F4FF");
@@ -71,16 +71,13 @@ public sealed class VideoPromptAuthoringControl : UserControl
         header.Children.Add(_edit);
         header.Children.Add(Label("プロンプト", true));
         panel.Children.Add(header);
-        var acting = new UniformGrid { Columns = 2, Margin = new Thickness(0, 0, 0, 10) };
+        var acting = new UniformGrid { Columns = 2, Margin = new Thickness(0, 0, 0, 6) };
         AddActingChoice(acting, _openingMotion, "冒頭の動き", "開始直後の1〜2秒", "#6EE7D0", VideoSubjectDirection.Opening,
             value => _program.OpeningMotionId = value);
-        AddActingChoice(acting, _armMotion, "腕・手の動き", "姿勢・しぐさ", "#93C5FD", VideoSubjectDirection.Arms,
-            value => _program.ArmMotionId = value);
-        AddActingChoice(acting, _expression, "表情", "動画全体の表情", "#F0ABFC", VideoSubjectDirection.Expressions,
-            value => _program.ExpressionId = value);
-        AddActingChoice(acting, _mood, "ムード", "演じ方・全体の雰囲気", "#FDE68A", VideoSubjectDirection.Moods,
-            value => _program.MoodId = value);
+        AddActingChoice(acting, _captureMode, "カメラの撮り方", "動画全体", "#A5B4FC", VideoDirectionTimeline.CaptureModes,
+            value => _program.CaptureModeId = value);
         panel.Children.Add(acting);
+        BuildTimelineControls(panel);
         SetEditStyle();
         AutomationProperties.SetName(_edit, "本文を編集");
         _edit.ToolTip = "もう一度押すと、本文の選択操作に戻ります";
@@ -139,16 +136,16 @@ public sealed class VideoPromptAuthoringControl : UserControl
         RefreshMode();
     }
 
-    public void Load(VideoPromptProgram program, string rawPrompt, string sourceOverride, string effectiveKind, string? sourcePrompt, bool imageAutomationEnabled = false)
+    public void Load(VideoPromptProgram program, string rawPrompt, string sourceOverride, string effectiveKind, string? sourcePrompt, bool imageAutomationEnabled = false, int durationMs = 15083)
     {
         _loading = true;
         try
         {
             _program = program.Clone();
+            _durationMs = durationMs;
             _openingMotion.SelectedValue = program.OpeningMotionId;
-            _armMotion.SelectedValue = program.ArmMotionId;
-            _expression.SelectedValue = program.ExpressionId;
-            _mood.SelectedValue = program.MoodId;
+            _captureMode.SelectedValue = program.CaptureModeId;
+            RefreshTimelineControls();
             _photo = effectiveKind == "photoreal" && (program.UseSourceVariants || !string.IsNullOrEmpty(program.PhotorealTemplate));
             _sourcePrompt = sourcePrompt;
             _imageAutomationEnabled = imageAutomationEnabled;
@@ -179,28 +176,12 @@ public sealed class VideoPromptAuthoringControl : UserControl
         selector.SelectionChanged += (_, _) =>
         {
             if (_loading || selector.SelectedValue is not string value) return;
-            if (!_program.Enabled)
+            if (!EnsureDirectionProgram())
             {
-                string original = _program.UseSourceVariants && _photo ? _program.BaseH3Template : _input.Text;
-                string photo = _program.UseSourceVariants && _photo ? _input.Text : _program.PhotorealBaseH3Template;
-                if (EscapeLiteral(original).Length > 8000 || EscapeLiteral(photo).Length > 8000)
-                {
-                    _hint.Text = "本文が長いため演技の指定を追加できません。元の本文は変更していません。";
-                    _loading = true;
-                    try { selector.SelectedValue = "original"; } finally { _loading = false; }
-                    return;
-                }
-                // Convert literal variants losslessly only on an explicit choice.
-                if (!_program.UseSourceVariants) _program.BaseH3Template = _input.Text;
-                else if (_photo) _program.PhotorealBaseH3Template = _input.Text;
-                else _program.BaseH3Template = _input.Text;
-                _program.Template = EscapeLiteral(_program.BaseH3Template);
-                _program.PhotorealTemplate = EscapeLiteral(_program.PhotorealBaseH3Template);
-                _program.Enabled = true;
-                _program.AnnotatedH3 = true;
                 _loading = true;
-                try { SetText(_input, _program.TemplateFor(_photo ? "photoreal" : "anime")); }
+                try { selector.SelectedValue = "original"; }
                 finally { _loading = false; }
+                return;
             }
             select(value);
             Publish(null);
@@ -307,20 +288,20 @@ public sealed class VideoPromptAuthoringControl : UserControl
         if (_program.IsDirectionReplaced(_program.OptionFor(token)))
         {
             var restoreMenu = new ContextMenu { Background = Paper, Foreground = Ink };
-            string aspectLabel = _program.OptionFor(token).DirectionAspect switch
-            { "opening" => "冒頭の動き", "arms" => "腕・手の動き", "expression" => "表情", _ => "ムード" };
+            string aspect = VideoPromptProgram.DirectionAspectFor(_program.OptionFor(token));
+            string aspectLabel = aspect switch
+            { "opening" => "冒頭の動き", "arms" => "腕・手の動き", "expression" => "表情", "camera" => "カメラワーク", "capture" => "カメラの撮り方", _ => "ムード" };
             var restore = new MenuItem { Header = aspectLabel + "を元の指示に戻す", Background = Paper, Foreground = Ink };
             restore.Click += (_, _) =>
             {
-                _program.RestoreOriginalDirection(_program.OptionFor(token).DirectionAspect);
+                _program.RestoreOriginalDirection(aspect);
                 Publish(null);
                 _loading = true;
                 try
                 {
                     _openingMotion.SelectedValue = _program.OpeningMotionId;
-                    _armMotion.SelectedValue = _program.ArmMotionId;
-                    _expression.SelectedValue = _program.ExpressionId;
-                    _mood.SelectedValue = _program.MoodId;
+                    _captureMode.SelectedValue = _program.CaptureModeId;
+                    RefreshTimelineControls();
                 }
                 finally { _loading = false; }
                 Render();

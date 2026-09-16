@@ -51,6 +51,11 @@ public sealed record VideoEnrichmentChoice(
     [property: JsonPropertyName("length")] int Length,
     [property: JsonPropertyName("alternatives")] string[] Alternatives);
 
+public sealed record VideoEnrichmentTimingPhase(
+    [property: JsonPropertyName("startMs")] int StartMs,
+    [property: JsonPropertyName("endMs")] int EndMs,
+    [property: JsonPropertyName("anchor")] string Anchor);
+
 public sealed record VideoEnrichmentOptions(
     [property: JsonPropertyName("sourceKind")] string SourceKind,
     [property: JsonPropertyName("referencePrompt")] string ReferencePrompt,
@@ -59,14 +64,17 @@ public sealed record VideoEnrichmentOptions(
     [property: JsonPropertyName("music")] string Music,
     [property: JsonPropertyName("physicalContinuity")] bool PhysicalContinuity,
     [property: JsonPropertyName("actionSamples")] string ActionSamples,
-    [property: JsonPropertyName("choices")] VideoEnrichmentChoice[] Choices)
+    [property: JsonPropertyName("choices")] VideoEnrichmentChoice[] Choices,
+    [property: JsonPropertyName("timeline"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VideoEnrichmentTimingPhase[]? Timeline = null)
 {
     internal static bool IsValid(JsonElement value, string instruction)
     {
         try
         {
-            if (value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != 8
-                || value.EnumerateObject().Select(p => p.Name).Distinct().Count() != 8) return false;
+            if (value.ValueKind != JsonValueKind.Object) return false;
+            int fields = value.TryGetProperty("timeline", out var timeline) ? 9 : 8;
+            if (value.EnumerateObject().Count() != fields || value.EnumerateObject().Select(p => p.Name).Distinct().Count() != fields
+                || fields == 9 && timeline.ValueKind != JsonValueKind.Array) return false;
             var p = value.Deserialize<VideoEnrichmentOptions>();
             if (p is null || p.SourceKind is not ("anime" or "photoreal")
                 || p.Dialogue is not ("preserve" or "off" or "auto") || p.Music is not ("preserve" or "off" or "auto")
@@ -81,6 +89,21 @@ public sealed record VideoEnrichmentOptions(
                     || c.Alternatives.Any(s => !Bounded(s, 1000) || string.IsNullOrWhiteSpace(s))
                     || !c.Alternatives.Contains(instruction.Substring(c.Start, c.Length))) return false;
                 end = c.Start + c.Length;
+            }
+            if (p.Timeline is not null)
+            {
+                if (p.Timeline.Length is < 1 or > 3) return false;
+                int previousEnd = 0, previousAnchorEnd = 0;
+                foreach (var phase in p.Timeline)
+                {
+                    if (phase is null || phase.StartMs != previousEnd || phase.EndMs <= phase.StartMs || phase.EndMs > 15083
+                        || !Bounded(phase.Anchor, 100) || string.IsNullOrWhiteSpace(phase.Anchor)) return false;
+                    int position = instruction.IndexOf(phase.Anchor, previousAnchorEnd, StringComparison.Ordinal);
+                    if (position < 0) return false;
+                    previousAnchorEnd = position + phase.Anchor.Length; previousEnd = phase.EndMs;
+                }
+                if (!timeline.EnumerateArray().All(p => p.ValueKind == JsonValueKind.Object && p.EnumerateObject().Count() == 3
+                    && p.EnumerateObject().Select(k => k.Name).ToHashSet(StringComparer.Ordinal).SetEquals(["startMs", "endMs", "anchor"]))) return false;
             }
             return value.GetProperty("choices").EnumerateArray().All(c => c.ValueKind == JsonValueKind.Object
                 && c.EnumerateObject().Count() == 3

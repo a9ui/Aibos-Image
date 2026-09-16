@@ -551,6 +551,17 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   evidence of absence. Description and LoRA notes never reach the model.
   Only explicit candidate preparation rereads the original PNG metadata, with
   cancellation, a bounded reader, and a source-file change check.
+- Acting can use up to three shared intervals for camera movement, arms,
+  expression and mood. Intermediate end times are editable; relative boundaries
+  scale with the selected clip, while the final boundary uses its actual frame
+  duration. Capture handling is a separate whole-clip choice. These are natural
+  prompt directions, not a frame-accurate control guarantee. A continuous main
+  action appears once; unchanged gestures do not restart at each boundary.
+  Owned original clauses are removed only when their aspect is overridden and
+  restored within intervals that select the original value. Mixed clauses retain
+  their explicit replacement so the main action is not erased. Unknown prose is
+  never silently classified or deleted. Optional AI details and new dialogue use
+  the same app-owned intervals; speech that cannot fit is omitted, not rushed.
 - Original inputs use the style's configurable default (initially anime).
   Proven Photorealized outputs use the photoreal variant; an empty variant
   shares the Original template. A manual source-kind override is transient,

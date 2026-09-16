@@ -199,7 +199,7 @@ public partial class MainWindow
             VideoEnrichmentChoice[] choices = [];
             if (_videoPromptProgram.Enabled && !_videoPromptProgram.TryResolveEnrichment(
                 EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(),
-                out instruction, out choices, out string error))
+                out instruction, out choices, out string error, VideoDirectionDurationMs()))
             {
                 SetVideoGenerationSettingsStatus(error);
                 return false;
@@ -218,7 +218,8 @@ public partial class MainWindow
             var options = new VideoEnrichmentOptions(EffectiveVideoProgramSourceKind(), reference,
                 _videoOverrideAudio ? (_videoDialogue ? "auto" : "off") : "preserve", _videoSpeechAmount,
                 _videoOverrideAudio ? (_videoMusic ? "auto" : "off") : "preserve",
-                _videoPromptProgram.PhysicalContinuity, samples, choices);
+                _videoPromptProgram.PhysicalContinuity, samples, choices,
+                _videoPromptProgram.DirectionPhases.Count > 0 ? VideoDirectionTimeline.Capture(_videoPromptProgram, VideoDirectionDurationMs()) : null);
             // Freeze every reference and choice. Inference belongs to the claimed job.
             return await QueueVideoGenerationAsync(validateSubmission: ValidateAttempt,
                 promptEnhancement: new VideoPromptEnhancement(2, instruction, options));
