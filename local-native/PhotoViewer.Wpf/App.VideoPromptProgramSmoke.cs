@@ -63,6 +63,10 @@ public partial class App
             checks["aiHasBoundedAlternatives"] = program.TryCompile("anime", "", 243, out compiled, out _)
                 && compiled.Contains("Choose exactly one") && compiled.Contains("jump");
             program.ActionPlot = true; program.PhysicalContinuity = true;
+            checks["preservingEnrichmentPinsImageChoicesWithoutRewritingManualText"] = program.TryResolveEnrichment("anime", "", out string pinned, out var alternatives, out _)
+                && alternatives.Length == 1 && alternatives[0].Alternatives.SequenceEqual(new[] { "walk", "run", "jump" })
+                && pinned.Substring(alternatives[0].Start, alternatives[0].Length) == "run"
+                && !pinned.Contains("Choose exactly") && !pinned.Contains("SAMPLE_MUST_NOT_REACH_MODEL");
             checks["plotAndPhysicsIndependent"] = program.TryCompile("photoreal", "", 294, out compiled, out _)
                 && compiled.Contains("12.250") && compiled.Contains("SAMPLE_MUST_NOT_REACH_MODEL")
                 && compiled.Contains("Physical continuity") && compiled.StartsWith(" wave gently")

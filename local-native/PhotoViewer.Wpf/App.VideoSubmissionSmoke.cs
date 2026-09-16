@@ -10,7 +10,8 @@ public partial class App
     private static async Task VerifyVideoSubmissionFlowAsync(MainWindow window, string sourceHash,
         Dictionary<string, bool> checks, Action<string, FrameworkElement> capture)
     {
-        using (var stream = typeof(App).Assembly.GetManifestResourceStream("VideoPromptEnhancementFixtures.json")!)
+        foreach (string fixtureName in new[] { "VideoPromptEnhancementFixtures.json", "VideoPromptEnrichmentFixtures.json" })
+        using (var stream = typeof(App).Assembly.GetManifestResourceStream(fixtureName)!)
         using (var fixtures = JsonDocument.Parse(stream))
             foreach (var item in fixtures.RootElement.GetProperty("cases").EnumerateArray())
                 checks["promptEnhancementProtocol_" + item.GetProperty("name").GetString()] =
@@ -34,7 +35,7 @@ public partial class App
                 if (healthGate is not null) await healthGate.Task.WaitAsync(token);
                 if (staleDuringHealth) { staleDuringHealth = false; window.SetVideoPromptProgramForSmoke(draft); }
                 return new HttpResponseMessage(HttpStatusCode.OK)
-                    { Content = new StringContent(enhancementCapability ? CreateVideoV2HealthJson(true, true, "ready", null) : CreateVideoV2HealthJson(true, true, "ready", null).Replace("videoPromptEnhancementV1", "unsupportedCapability", StringComparison.Ordinal)) };
+                    { Content = new StringContent(enhancementCapability ? CreateVideoV2HealthJson(true, true, "ready", null) : CreateVideoV2HealthJson(true, true, "ready", null).Replace("videoPromptEnhancementV2", "unsupportedCapability", StringComparison.Ordinal)) };
             }
             if (request.Method == HttpMethod.Post && route == "/api/enhance/video-prompts/h3/rewrite")
             {
@@ -97,6 +98,10 @@ public partial class App
         checks["checkedSubmissionImmediatelyEnqueuesDeferredEnhancement"] = await queued && rewrites == 0 && enqueues == 2
             && publishedPrompt == direct && VideoPromptEnhancement.IsValid(lastRequested.GetProperty("promptEnhancement"));
         checks["deferredInstructionIncludesManualSelection"] = lastRequested.GetProperty("promptEnhancement").GetProperty("instruction").GetString()!.Contains("orbit the camera left");
+        checks["preservingEnhancementHasPinnedAudioAndNoMetadataByDefault"] = lastRequested.GetProperty("promptEnhancement").GetProperty("schemaVersion").GetInt32() == 2
+            && lastRequested.GetProperty("promptEnhancement").GetProperty("instruction").GetString() == direct
+            && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("referencePrompt").GetString() == ""
+            && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("dialogue").GetString() == "preserve";
         checks["queuedEnhancementKeepsEditorAndProgramUnchanged"] = window.VideoPromptForSmoke == direct
             && window.VideoPromptProgramSnapshotForSmoke.GetRawText() == draftBefore;
         healthGate = null;
@@ -194,5 +199,17 @@ public partial class App
                 accepted && enqueues == acceptedCount && lastRequested.GetRawText() == acceptedSnapshot && unexpectedPosts == 0;
             publicationGate = null;
         }
+        int beforeOptions = enqueues;
+        window.SetVideoEnhanceAtExecutionForSmoke(true);
+        window.ConfigureVideoEnrichmentForSmoke(true, true, true, 2, false);
+        window.UpdateLayout();
+        window.CaptureVideoVariantForSmoke((_, visual) => capture("video-enrichment-settings", visual));
+        checks["enrichmentControlsArePassive"] = enqueues == beforeOptions && rewrites == 0;
+        checks["enrichmentControlsCapturedWithoutInference"] = await window.SubmitVideoGenerationForSmokeAsync()
+            && enqueues == beforeOptions + 1 && rewrites == 0
+            && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("dialogue").GetString() == "auto"
+            && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("music").GetString() == "off"
+            && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("speechAmount").GetInt32() == 2;
+        window.ConfigureVideoEnrichmentForSmoke(false, false, true, 1, true);
     }
 }

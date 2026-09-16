@@ -1287,7 +1287,7 @@ public partial class MainWindow
         };
 
     private static Func<JsonElement, string?> CreateMiniMaxH3VideoHealthValidator(
-        bool requireDisplayedManagedSource = false, bool requireLoras = false, bool requirePromptEnhancement = false)
+        bool requireDisplayedManagedSource = false, bool requireLoras = false, bool requirePromptEnhancement = false, bool requirePreservingEnhancement = false)
         => payload => !TryParseMiniMaxH3VideoCapability(payload, out _)
             ? "The Aibos Image local AI service cannot prove the exact MiniMax H3 protocol. No job was added."
             : !TryParseMiniMaxH3VideoProfilesCapability(payload)
@@ -1302,7 +1302,7 @@ public partial class MainWindow
                                 DisplayedManagedVideoSourceCapability)
                             ? "The Aibos Image local AI service cannot use the displayed generated image as a video source. Restart the local AI service first; no job was added."
                             : requireLoras && ValidateVideoLoraCapability(payload) is string loraError ? loraError
-                                : requirePromptEnhancement ? VideoPromptEnhancement.ValidateCapability(payload) : null;
+                                : requirePromptEnhancement ? VideoPromptEnhancement.ValidateCapability(payload, requirePreservingEnhancement) : null;
 
     private static bool TryParseMiniMaxH3VideoProfilesCapability(
         JsonElement payload)

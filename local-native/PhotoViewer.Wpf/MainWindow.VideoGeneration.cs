@@ -2774,6 +2774,7 @@ public partial class MainWindow
                 ? CreateMiniMaxH3VideoHealthValidator(
                     requireLoras: settings.Loras is not null,
                     requirePromptEnhancement: settings.PromptEnhancement is not null,
+                    requirePreservingEnhancement: settings.PromptEnhancement?.SchemaVersion == 2,
                     requireDisplayedManagedSource:
                         source.UsesDisplayedFileDirectly)
                 : seed.HasValue

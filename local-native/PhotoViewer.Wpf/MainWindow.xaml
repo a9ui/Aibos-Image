@@ -4013,10 +4013,10 @@
             <Button x:Name="CancelVideoSubmissionButton" Content="追加を取り消す" Visibility="Collapsed"
                     Style="{StaticResource GhostButton}" HorizontalAlignment="Right" Margin="0,6,0,0" Padding="12,6"
                     Click="CancelVideoSubmission_Click" AutomationProperties.Name="追加を取り消す"/>
-            <CheckBox x:Name="VideoEnhanceAtExecutionCheckBox" Content="AIでプロンプトを強化"
+            <CheckBox x:Name="VideoEnhanceAtExecutionCheckBox" Content="AIで動きの細部を補完"
                       Foreground="{StaticResource TextPrimary}" Margin="0,10,0,0"
                       Checked="VideoEnhanceAtExecution_Changed" Unchecked="VideoEnhanceAtExecution_Changed"
-                      ToolTip="キューには先に追加します。順番が来たら、画像と本文をAIで確認して強化し、動画を生成します。外すとAI強化せずに生成します。"
+                      ToolTip="先にキューへ追加します。順番が来たら、元の動作の強さと選択内容を守り、画像に合う動き方・間・収まり方を補います。"
                       AutomationProperties.Name="動画生成の直前にAIでプロンプトを強化"/>
             <Button x:Name="QueueVideoGenerationButton"
                     Style="{StaticResource PrimaryButton}" Content="動画化を実行"
@@ -4385,6 +4385,25 @@
                         ToolTip="LoRAの行を追加" AutomationProperties.Name="LoRAの行を追加" Click="AddVideoLora_Click"/>
                 <TextBlock x:Name="VideoLoraStatus" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                 <TextBlock Text="チェックしたLoRAを上から順に適用します。強度0は適用しません。H3との互換性は生成時に確認します。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+              </StackPanel>
+            </Expander>
+            <Expander x:Name="VideoEnrichmentSettingsExpander" Header="AI補完の設定" Foreground="{StaticResource TextPrimary}" Margin="0,12,0,10">
+              <StackPanel Margin="0,10,0,0">
+                <TextBlock Text="元の動作を大きく・速くせず、画像に合う細部を補います。下の「AIで動きの細部を補完」を選んだ動画に使います。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <CheckBox x:Name="VideoReferenceMetadataCheckBox" Content="PNGの生成プロンプトも参考にする" Foreground="{StaticResource TextPrimary}" Margin="0,0,0,10" Checked="VideoEnrichmentOption_Changed" Unchecked="VideoEnrichmentOption_Changed"
+                          ToolTip="元画像の生成プロンプトだけを参考にします。今回の本文・手動選択・画像を優先し、ネガティブプロンプトや生成ワークフローは送りません。"/>
+                <CheckBox x:Name="VideoOverrideAudioCheckBox" Content="今回のセリフ・BGMを指定する" Foreground="{StaticResource TextPrimary}" Margin="0,0,0,10" Checked="VideoEnrichmentOption_Changed" Unchecked="VideoEnrichmentOption_Changed"
+                          ToolTip="外すと、本文にある音声の指定をそのまま使います。保存済みスタイルは変更しません。"/>
+                <StackPanel x:Name="VideoEnrichmentAudioPanel" IsEnabled="False" Margin="18,0,0,0">
+                  <DockPanel Margin="0,0,0,10">
+                    <CheckBox x:Name="VideoDialogueCheckBox" Content="セリフ" IsChecked="True" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" Checked="VideoEnrichmentOption_Changed" Unchecked="VideoEnrichmentOption_Changed" ToolTip="既存のセリフは保持します。指定がない場合だけ、画像と本文に合う短い日本語のセリフを補います。"/>
+                    <TextBlock Text="少なめ" Foreground="{StaticResource TextSecondary}" Margin="20,0,8,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="VideoSpeechAmountSlider" Width="120" HorizontalAlignment="Left" Minimum="1" Maximum="3" Value="1" TickFrequency="1" IsSnapToTickEnabled="True" SmallChange="1" LargeChange="1" VerticalAlignment="Center" ValueChanged="VideoSpeechAmount_Changed" AutomationProperties.Name="新しく補うセリフの量"/>
+                    <TextBlock Text="多め" Foreground="{StaticResource TextSecondary}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                  </DockPanel>
+                  <CheckBox x:Name="VideoMusicCheckBox" Content="BGM" IsChecked="True" Foreground="{StaticResource TextPrimary}" Margin="0,0,0,8" Checked="VideoEnrichmentOption_Changed" Unchecked="VideoEnrichmentOption_Changed" ToolTip="環境音や動作音とは別に、背景音楽の有無を指定します。"/>
+                  <TextBlock Text="セリフの量は新しく補う分の上限です。短い動画では少なくし、発話の前後に間を残します。口と音声の完全な同期を保証する設定ではありません。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"/>
+                </StackPanel>
               </StackPanel>
             </Expander>
             <Expander x:Name="VideoOutputSettingsExpander" Header="詳細設定" Foreground="{StaticResource TextPrimary}" Margin="0,12,0,10">

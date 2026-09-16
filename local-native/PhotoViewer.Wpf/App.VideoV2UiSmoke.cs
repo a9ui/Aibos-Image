@@ -1076,6 +1076,7 @@ public partial class App
                     },
                 },
                 videoPromptEnhancementV1 = new { contractId = VideoPromptEnhancement.ContractId, protocol = VideoPromptEnhancement.Protocol, execution = "before-generation" },
+                videoPromptEnhancementV2 = new { contractId = VideoPromptEnhancement.ContractIdV2, protocol = VideoPromptEnhancement.ProtocolV2, execution = "before-generation" },
                 videoH3StepsV1 = new
                 {
                     contractId = "PV-ENHANCE-VIDEO-H3-STEPS-001",

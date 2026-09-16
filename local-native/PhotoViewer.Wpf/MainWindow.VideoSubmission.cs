@@ -8,6 +8,27 @@ public partial class MainWindow
 {
     private bool _videoEnhanceAtExecution;
     private bool _videoAutomaticSubmissionPending;
+    private bool _videoReferenceMetadata, _videoOverrideAudio;
+    private bool _videoDialogue = true, _videoMusic = true;
+    private int _videoSpeechAmount = 1;
+
+    private void VideoEnrichmentOption_Changed(object sender, RoutedEventArgs e)
+    {
+        if (VideoEnrichmentAudioPanel is null || VideoMusicCheckBox is null || VideoSpeechAmountSlider is null) return;
+        _videoReferenceMetadata = VideoReferenceMetadataCheckBox.IsChecked == true;
+        _videoOverrideAudio = VideoOverrideAudioCheckBox.IsChecked == true;
+        _videoDialogue = VideoDialogueCheckBox.IsChecked == true;
+        _videoMusic = VideoMusicCheckBox.IsChecked == true;
+        VideoEnrichmentAudioPanel.IsEnabled = _videoOverrideAudio;
+        VideoSpeechAmountSlider.IsEnabled = _videoDialogue;
+        InvalidateAutomaticVideoSubmission();
+    }
+
+    private void VideoSpeechAmount_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        _videoSpeechAmount = Math.Clamp((int)e.NewValue, 1, 3);
+        InvalidateAutomaticVideoSubmission();
+    }
     private bool VideoPromptPreparationPending => _videoH3RewritePending || _videoProgramMetadataPending;
 
     private bool HasCurrentVideoProgramCandidate()
@@ -128,6 +149,8 @@ public partial class MainWindow
             Source = VideoProgramSourceKey(), Mode = _videoH3RewriteMode,
             Kind = EffectiveVideoProgramSourceKind(),
             Enhance = _videoEnhanceAtExecution, ValidSteps = _videoStepsInputValid,
+            ReferenceMetadata = _videoReferenceMetadata, OverrideAudio = _videoOverrideAudio,
+            Dialogue = _videoDialogue, Music = _videoMusic, SpeechAmount = _videoSpeechAmount,
         });
 
     private void InvalidateAutomaticVideoSubmission()
@@ -165,22 +188,40 @@ public partial class MainWindow
         {
             if (!_videoEnhanceAtExecution)
                 return await QueueVideoGenerationAsync(validateSubmission: ValidateAttempt);
+            if (_videoReferenceMetadata || _videoPromptProgram.SourceRules)
+            {
+                if (!await ReadVideoProgramMetadataForExplicitRewriteAsync() || ValidateAttempt() is not null)
+                { SetVideoGenerationSettingsStatus("画像情報の確認中に内容が変わりました。もう一度追加してください。"); return false; }
+                ApplyDirectVideoSourceVariant();
+                input = VideoSubmissionInput();
+            }
             string instruction = _videoPrompt;
-            if (_videoPromptProgram.Enabled && !_videoPromptProgram.TryCompile(
-                EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(), MiniMaxH3FrameCountForDuration(_videoDurationSeconds),
-                out instruction, out string error))
+            VideoEnrichmentChoice[] choices = [];
+            if (_videoPromptProgram.Enabled && !_videoPromptProgram.TryResolveEnrichment(
+                EffectiveVideoProgramSourceKind(), VideoProgramSourcePrompt(),
+                out instruction, out choices, out string error))
             {
                 SetVideoGenerationSettingsStatus(error);
                 return false;
             }
-            if (!TryBuildVideoH3RewriteRequestPrompt(instruction, _videoH3RewriteMode, out instruction))
+            if (instruction.Length > 8000)
             {
                 SetVideoGenerationSettingsStatus("AI強化用の指示が長すぎます。8,000文字以内にしてください。");
                 return false;
             }
-            // Freeze only the instruction. Inference belongs to the claimed job.
+            string reference = _videoReferenceMetadata ? VideoProgramSourcePrompt() ?? "" : "";
+            if (reference.Length > 2000) reference = reference[..2000];
+            if (reference.Length > 0 && char.IsHighSurrogate(reference[^1])) reference = reference[..^1];
+            string samples = _videoPromptProgram.ActionPlot ? _videoPromptProgram.ActionSamples : "";
+            if (samples.Length > 1000) samples = samples[..1000];
+            if (samples.Length > 0 && char.IsHighSurrogate(samples[^1])) samples = samples[..^1];
+            var options = new VideoEnrichmentOptions(EffectiveVideoProgramSourceKind(), reference,
+                _videoOverrideAudio ? (_videoDialogue ? "auto" : "off") : "preserve", _videoSpeechAmount,
+                _videoOverrideAudio ? (_videoMusic ? "auto" : "off") : "preserve",
+                _videoPromptProgram.PhysicalContinuity, samples, choices);
+            // Freeze every reference and choice. Inference belongs to the claimed job.
             return await QueueVideoGenerationAsync(validateSubmission: ValidateAttempt,
-                promptEnhancement: new VideoPromptEnhancement(1, instruction));
+                promptEnhancement: new VideoPromptEnhancement(2, instruction, options));
         }
         finally
         {
@@ -203,6 +244,16 @@ public partial class MainWindow
     public bool VideoSubmissionCancelVisibleForSmoke => CancelVideoSubmissionButton.Visibility == Visibility.Visible;
 
     public void SetVideoEnhanceAtExecutionForSmoke(bool value) => VideoEnhanceAtExecutionCheckBox.IsChecked = value;
+    public void ConfigureVideoEnrichmentForSmoke(bool metadata, bool audio, bool dialogue, int amount, bool music)
+    {
+        VideoReferenceMetadataCheckBox.IsChecked = metadata;
+        VideoOverrideAudioCheckBox.IsChecked = audio;
+        VideoDialogueCheckBox.IsChecked = dialogue;
+        VideoSpeechAmountSlider.Value = amount;
+        VideoMusicCheckBox.IsChecked = music;
+        VideoEnrichmentSettingsExpander.IsExpanded = true;
+        VideoEnrichmentSettingsExpander.BringIntoView();
+    }
     public Task<bool> SubmitVideoGenerationForSmokeAsync() => SubmitVideoGenerationAsync();
     public Task<bool> PrepareVideoPromptForSubmissionForSmokeAsync() => PrepareVideoPromptForSubmissionAsync();
     public void OpenVideoPromptPreparationForSmoke() => OpenVideoPromptPreparation();

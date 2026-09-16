@@ -22,6 +22,7 @@ It is not a second product contract.
 | Startup, passive reads, enqueue, Jobs, or output flow | [`architecture/critical-flows.md`](architecture/critical-flows.md) |
 | Video Tools design context | [`video-studio-design.md`](video-studio-design.md), after the applicable contract |
 | Writing or editing video style JSON, including handoff to another AI | [`video-style-authoring.ja.md`](video-style-authoring.ja.md), a standalone Japanese authoring reference |
+| Image-specific video prompt enrichment, dialogue and music controls | [`video-prompt-enrichment.ja.md`](video-prompt-enrichment.ja.md) and the version 2 enhancement contract |
 
 ## Classification
 

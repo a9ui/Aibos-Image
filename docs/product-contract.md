@@ -604,20 +604,50 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   preparing enqueue fails before durable publication. Jobs retain the resolved
   prompt, plus an optional immutable AI instruction for deferred enhancement;
   raw authoring syntax is never sent to the video model.
+- Version 2 deferred prompt enhancement (`PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002`)
+  preserves the locally resolved source body and selected directions. It adds
+  image-specific onset, transition, reaction and settling details, never an
+  automatic increase in amplitude, speed, distance, repetitions or emotional
+  intensity. It adds no unselected camera motion. A compatible empty addition
+  is valid. Natural-language compliance is not a physical or semantic guarantee.
+  Pinned brace alternatives are exact source spans plus immutable candidate
+  arrays; AI returns only indices. The compiler owns the first-frame binding,
+  ordered H3 fields and generated Japanese speech tags. Version 1 rows retain
+  their existing execution path; they are not silently upgraded.
+  The separate AI settings capture optional positive PNG prompt context, source
+  variant, physics guidance, optional action samples, dialogue and BGM policies
+  and new-speech amount. Metadata OFF supplies no reference prompt; ON reads only
+  on explicit submission, with bounded local I/O and source-change validation.
+  Notes, negative prompts and workflows are excluded. Audio defaults to the
+  original body. An explicit per-generation audio override exposes dialogue,
+  a three-step new-dialogue amount, and BGM switches. Existing authored speech
+  and speaker IDs stay intact when enabled; unclassified prose speech or silence
+  prevents automatic extra speech. Turning speech off edits only recognized
+  speech syntax and diagnoses ambiguous mixed prose without erasing actions.
+  BGM off preserves physical sound. Generated speech has bounded line counts,
+  duration, pauses and Japanese character budgets, with visible articulation
+  directions; exact acoustic lip sync is not guaranteed. These limits do not
+  authorize shortening existing lines. All settings are immutable job input,
+  not authority to rewrite the editor, saved styles or submitted snapshot.
 - The video board keeps its enqueue button in a fixed footer, with one purpose
-  and action. An unchecked-by-default `AIでプロンプトを強化` checkbox sits directly
+  and action. An unchecked-by-default `AIで動きの細部を補完` checkbox sits directly
   above it. Off resolves manual and default alternatives locally, without AI
   action planning or rewriting; plain directions receive the pinned H3 envelope
   with N/A sound/music defaults. Existing H3 sections and literal content survive.
-  On saves an immutable `requested.promptEnhancement` instruction under
-  `PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001` and enqueues immediately without
+  On saves an immutable `requested.promptEnhancement` instruction and options under
+  `PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002` and enqueues immediately without
   waiting for AI. After the worker claims that Job in FIFO order, it enhances
   the pinned image and captured instructions, validates H3 conformance and
   stops the local rewrite runtime before starting video inference. The candidate
   changes only the execution copy; it never rewrites the submitted snapshot,
   editor, literal variant bases, saved style, or notes. The attempt receipt keeps
-  the generated prompt and source hash in Job diagnostics. Failure and cancellation
-  settle the Job without silently generating an unenhanced fallback. Retry uses
+  the generated prompt and source hash in Job diagnostics. Invalid generated
+  output gets one correction attempt, then continues with the frozen original
+  prompt and a recorded warning. Cancellation and source/runtime/cleanup failures
+  still stop the Job. An unsupported authoring format skips optional enrichment
+  and uses the direct prompt when no explicit audio-OFF request would be ignored.
+  An unusable model-selected alternative is an optional output failure, not a
+  fatal source error. Retry uses
   the same request and creates a fresh enhancement attempt. Off never requires
   AI or H3 conformance to enqueue; invalid option syntax, stale source identity,
   and resource bounds still fail before publication. Existing H3 text remains

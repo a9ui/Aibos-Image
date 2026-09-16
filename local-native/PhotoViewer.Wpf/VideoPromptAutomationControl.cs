@@ -10,7 +10,7 @@ public sealed class VideoPromptAutomationControl : StackPanel
     private bool _loading;
     private readonly CheckBox _rules = Check("元画像のプロンプトで条件を判定");
     private readonly CheckBox _choices = Check("画像から｛候補｝を選ぶ");
-    private readonly CheckBox _plot = Check("秒数に合わせて動作プランを補う");
+    private readonly CheckBox _plot = Check("動作例を補完の参考にする");
     private readonly CheckBox _physics = Check("重力・接触・動きのつながりを補う");
     private readonly TextBlock _help = new() { Foreground = Ink, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
     private readonly TextBox _samples = new() { MaxLength = 4000, MinHeight = 80, MaxHeight = 180,
@@ -52,11 +52,11 @@ public sealed class VideoPromptAutomationControl : StackPanel
             _plot.IsChecked = program.ActionPlot; _physics.IsChecked = program.PhysicalContinuity;
             if (_samples.Text != program.ActionSamples) _samples.Text = program.ActionSamples;
             _original.SelectedIndex = program.OriginalDefault == "photoreal" ? 1 : 0;
-            foreach (var check in new[] { _rules, _choices, _plot, _physics }) check.IsEnabled = program.Enabled;
-            _samples.IsEnabled = program.Enabled;
-            _help.Text = !program.Enabled ? "本文を選択式にすると、条件判定とAIの補助設定を使えます。"
-                : enhance ? "以下は、キュー追加時のAI強化に使います。手動で選んだ項目を優先します。"
-                : "以下のAI補助は、下部の「AIでプロンプトを強化」を選ぶと使います。";
+            foreach (var check in new[] { _rules, _choices }) check.IsEnabled = program.Enabled;
+            _samples.IsEnabled = true;
+            _help.Text = !program.Enabled ? "条件判定と｛候補｝の選択は、本文を選択式にすると使えます。動作例・物理的なつながりの補完は、通常の本文でも使えます。"
+                : enhance ? "条件は登録時に判定します。画像による候補選択と細部の補完は、キューの順番が来てから実行します。手動選択を優先します。"
+                : "AIの補助は、下部の「AIで動きの細部を補完」を選ぶと使います。";
         }
         finally { _loading = false; }
     }

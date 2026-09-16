@@ -320,6 +320,50 @@ public sealed class VideoPromptProgram
             ? "元画像プロンプトが未取得のため、条件は各オプションの既定値を使います。" : "";
         return true;
     }
+
+    // Pin exact source spans for image-selected alternatives. Unique markers
+    // pass through the existing local resolver, including acting replacements;
+    // no substring guessing against the user's prose or dialogue is involved.
+    public bool TryResolveEnrichment(string kind, string? sourcePrompt, out string prompt,
+        out VideoEnrichmentChoice[] choices, out string error)
+    {
+        choices = [];
+        if (!TryResolveH3(kind, sourcePrompt, out prompt, out error)) return false;
+        if (!ImageChoices) return true;
+        if (!VideoPromptLanguage.TryParse(TemplateFor(kind), out var tokens, out error)) return false;
+        var shadow = Clone();
+        var text = new StringBuilder();
+        var slots = new List<(string Marker, string[] Values, int Selected)>();
+        foreach (var token in tokens)
+        {
+            var option = OptionFor(token);
+            if (token.Kind == '{' && option.Mode == "auto" && !IsDirectionReplaced(option))
+            {
+                if (slots.Count >= 16) { error = "画像で選ぶ候補は16組以内にしてください。"; return false; }
+                string marker = "AIBOSCHOICE" + Guid.NewGuid().ToString("N");
+                slots.Add((marker, token.Choices.ToArray(), option.ChoiceIndex));
+                text.Append(marker);
+            }
+            else if (token.Kind == 't') text.Append(VideoPromptAuthoringControl.EscapeLiteral(token.Text));
+            else text.Append(token.Key);
+        }
+        if (slots.Count == 0) return true;
+        if (kind == "photoreal" && !string.IsNullOrWhiteSpace(PhotorealTemplate)) shadow.PhotorealTemplate = text.ToString();
+        else shadow.Template = text.ToString();
+        if (!shadow.TryResolveH3(kind, sourcePrompt, out string marked, out error)) return false;
+        var captured = new List<VideoEnrichmentChoice>();
+        foreach (var slot in slots)
+        {
+            int start = marked.IndexOf(slot.Marker, StringComparison.Ordinal);
+            if (start < 0) { error = "自動候補の位置を確定できません。"; return false; }
+            string selected = slot.Values[slot.Selected];
+            marked = marked.Remove(start, slot.Marker.Length).Insert(start, selected);
+            captured.Add(new(start, selected.Length, slot.Values));
+        }
+        if (marked != prompt) { error = "候補の解決結果が一致しません。本文は変更していません。"; return false; }
+        choices = captured.ToArray();
+        return true;
+    }
 }
 
 public sealed class VideoPromptOption

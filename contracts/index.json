@@ -144,6 +144,11 @@
       "contractId": "PV-ENHANCE-VIDEO-LORA-001",
       "path": "contracts/enhancement-video-lora-v1.json",
       "scope": "Optional ordered video LoRA selections"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002",
+      "path": "contracts/enhancement-video-prompt-enhancement-v2.json",
+      "scope": "Preserving image-specific motion enrichment after FIFO claim"
     }
   ],
   "fixtures": [
@@ -198,6 +203,11 @@
       "fixtureId": "PV-ENHANCE-VIDEO-LORA-001-FIXTURES",
       "forContractId": "PV-ENHANCE-VIDEO-LORA-001",
       "path": "contracts/fixtures/enhancement-video-lora-v1.json"
+    },
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002-FIXTURE",
+      "forContractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002",
+      "path": "contracts/fixtures/enhancement-video-prompt-enhancement-v2.json"
     }
   ],
   "verificationBundles": [
