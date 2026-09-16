@@ -134,9 +134,29 @@
       "contractId": "PV-ENHANCE-VIDEO-H3-CANVAS-TIERS-001",
       "path": "contracts/enhancement-video-h3-canvas-tiers-v1.json",
       "scope": "H3 canvas tiers"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001",
+      "path": "contracts/enhancement-video-prompt-enhancement-v1.json",
+      "scope": "Optional prompt enhancement after FIFO claim, immediately before generation"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-LORA-001",
+      "path": "contracts/enhancement-video-lora-v1.json",
+      "scope": "Optional ordered video LoRA selections"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002",
+      "path": "contracts/enhancement-video-prompt-enhancement-v2.json",
+      "scope": "Preserving image-specific motion enrichment after FIFO claim"
     }
   ],
   "fixtures": [
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001-FIXTURE",
+      "forContractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001",
+      "path": "contracts/fixtures/enhancement-video-prompt-enhancement-v1.json"
+    },
     {
       "fixtureId": "PV-ENHANCE-HEALTH-001-WORKING-FIXTURE",
       "forContractId": "PV-ENHANCE-HEALTH-001",
@@ -178,6 +198,16 @@
       "forContractId": "PV-ENHANCE-VIDEO-TRIM-001",
       "path": "contracts/fixtures/enhancement-video-trim-v1-reader-v1.json",
       "sha256": "65d74368293fff2a65d730ad1fa1d2cd3f32a200179ab0eaa6db738991582ec8"
+    },
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-LORA-001-FIXTURES",
+      "forContractId": "PV-ENHANCE-VIDEO-LORA-001",
+      "path": "contracts/fixtures/enhancement-video-lora-v1.json"
+    },
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002-FIXTURE",
+      "forContractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002",
+      "path": "contracts/fixtures/enhancement-video-prompt-enhancement-v2.json"
     }
   ],
   "verificationBundles": [

@@ -18,8 +18,11 @@ It is not a second product contract.
 | Durable state or Enhancement protocol | The matching entry in [`contracts/index.json`](../contracts/index.json), then only its named contract or fixture |
 | Code or responsibility ownership | [`architecture/project-map.md`](architecture/project-map.md) |
 | Cross-feature state | [`architecture/state-ownership.md`](architecture/state-ownership.md) |
+| Storage placement, retention, or directory maintenance | [`architecture/storage-layout.md`](architecture/storage-layout.md) |
 | Startup, passive reads, enqueue, Jobs, or output flow | [`architecture/critical-flows.md`](architecture/critical-flows.md) |
 | Video Tools design context | [`video-studio-design.md`](video-studio-design.md), after the applicable contract |
+| Writing or editing video style JSON, including handoff to another AI | [`video-style-authoring.ja.md`](video-style-authoring.ja.md), a standalone Japanese authoring reference |
+| Image-specific video prompt enrichment, dialogue and music controls | [`video-prompt-enrichment.ja.md`](video-prompt-enrichment.ja.md) and the version 2 enhancement contract |
 
 ## Classification
 
@@ -28,6 +31,7 @@ It is not a second product contract.
 | Product and protocol authority | [`product-contract.md`](product-contract.md), [`contracts/index.json`](../contracts/index.json), and the selected versioned contract | Stable meaning and exact protocol shape. A conflict must be resolved in the same patch. |
 | Repository and trust authority | [`AGENTS.md`](../AGENTS.md), [`README.md`](../README.md), [`SECURITY.md`](../SECURITY.md), [`publication-boundary.md`](publication-boundary.md) | Working, launch, security, and publication rules. These do not redefine product protocol fields. |
 | Maintainer reference | Files under [`architecture/`](architecture/) and [`video-studio-design.md`](video-studio-design.md) | Navigation and design context. They point to authority rather than copying it. |
+| Authoring reference | [`video-style-authoring.ja.md`](video-style-authoring.ja.md) | Revision-bound style-file fields, inline syntax, neutral examples, and editing guidance. It does not redefine wire protocols. |
 | Review evidence | [`review-packets/`](review-packets/) | Revision-bound review material. It does not override current code or contracts. |
 | Generated historical inventory | [`legacy-ledger/`](legacy-ledger/) and [`legacy-disposition/`](legacy-disposition/) | Generated inventories for retired assets and their disposition. They are not active product scope. |
 

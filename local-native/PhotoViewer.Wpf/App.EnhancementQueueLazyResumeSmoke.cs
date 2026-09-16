@@ -268,7 +268,7 @@ public partial class App
                         starterCalls == 0
                         && transportCalls == 0
                         && before.QueuePauseEnabled
-                        && before.QueuePauseLabel == "接続して再開";
+                        && before.QueuePauseLabel == "復旧して再開";
 
                     bool resumed = await window
                         .SetEnhancementQueuePausedForSmokeAsync(paused: false);
@@ -343,6 +343,15 @@ public partial class App
                     bool apiOnlyUnavailableHealth;
                     try { apiOnlyUnavailableHealth = await unavailableFixture.ApiOnlyUnavailableHealthForSmokeAsync(); }
                     finally { unavailableFixture.Close(); }
+                    var recoveryFixture = HiddenWindow();
+                    bool recoveryControls;
+                    try
+                    {
+                        recoveryControls = await recoveryFixture.CompanionRecoveryControlsForSmokeAsync(
+                            JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)),
+                            Path.ChangeExtension(resultFullPath, ".png"));
+                    }
+                    finally { recoveryFixture.Close(); }
                     bool integrityParsers = window.EnhancementIntegrityParsersForSmoke(
                         JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)));
                     bool h3NumericIntegrity = window.H3NumericIntegrityForSmoke(
@@ -356,6 +365,7 @@ public partial class App
                     bool i2iV3RetryGate = window.I2iV3RetryGateForSmoke(
                         retryReady.RootElement, retryUnavailable.RootElement);
                     ok = passiveDidNotStart
+                        && recoveryControls
                         && integrityParsers && h3NumericIntegrity && idempotentEpoch && i2iV3RetryGate
                         && apiOnlyStartExact && apiOnlyUnavailableHealth
                         && authenticatedStopExact
@@ -368,6 +378,7 @@ public partial class App
                     result = new
                     {
                         ok,
+                        recoveryControls,
                         integrityParsers,
                         idempotentEpoch,
                         i2iV3RetryGate,

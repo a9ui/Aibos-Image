@@ -82,6 +82,25 @@ WPF `state.json` is not part of the public durable protocol wholesale.
 The exact locator document, validation, leases, and cases are defined by
 `PV-ROOT-001`.
 
+### Storage placement and maintenance
+
+- Resolve executable locations from the explicit launcher/deployment selection,
+  and durable locations from their existing locator or store owner. Changing a
+  checkout or rebuilding an executable does not authorize moving durable data.
+- A directory name such as `.cache`, an ignore rule, or an old checkout date is
+  not evidence that its contents are disposable. A checkout containing the
+  shared root remains a durable-data container until an explicit, verified
+  migration changes that relationship.
+- Maintenance must identify active readers, writers, accepted requests, runtime
+  references, and recovery requirements before removing a generated artifact.
+  Age, an idle queue, and an unmounted runtime image alone are insufficient.
+- User media, local settings and Styles, shared state, accepted enqueue
+  envelopes, Jobs, outputs, and recovery records stay outside automatic cleanup.
+  Maintenance does not silently reset state, choose a new empty root, or resume
+  a paused queue.
+- Report logical bytes separately from storage actually recovered. Hard links,
+  mounted images, and same-volume renames must not be counted as freed storage.
+
 ### Safe reads and writes
 
 - Writers read the latest on-disk state while holding the required lease.
@@ -283,6 +302,16 @@ The executable cases for these meanings are routed by
   identity proof for the same server epoch, including a reused server. They
   preserve Jobs records and never signal an unverified listener. Restart starts only the API; queue
   recovery and resume remain separate actions.
+- An offline Restart can attempt authenticated API startup without signalling
+  a process. Expired owned-process identity is retired before reconnecting;
+  identity reads have a five-second bound and Jobs API startup has a cancellable
+  45-second bound. An authenticated unavailable queue snapshot is shown as a
+  connected server awaiting queue recovery, with an explicit recovery/resume
+  control. It must not be presented as successful queue execution.
+- Companion startup prefers an optional dedicated `Aibos Image/CompanionRuntime/node.exe`
+  installation under the canonical Windows Program Files root, then the
+  existing `nodejs/node.exe` installation. Neither PATH nor a user-writable
+  runtime directory is a launch authority.
 
 The exact capability storage, identity proof, tunnel, request, response, and
 startup rules are in `contracts/enhancement-companion-auth-v2.json`.
@@ -385,7 +414,14 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - The durable `progress` field is the companion-owned percentage of completed
   adapter execution stages. A queued row retains lifecycle value `0` but shows
   only its waiting order and no progress bar. A running row alone shows a
-  determinate value from `1` through `99`; `99` means final publication or
+  determinate value from `1` through `99`. A compatible MiniMax H3 generation
+  row below `5` instead shows preparation text and an indeterminate bar: source
+  preparation, optional AI prompt enhancement, and engine startup do not yet
+  provide measurable progress. Cancel requests take precedence over that
+  presentation. Once health or inventory reports `5` or greater, the same row
+  returns to measured progress and hides the preparation detail. This changes
+  presentation only; the durable progress value stays untouched.
+  `99` means final publication or
   verification is in progress, not an ETA or a remaining-time estimate.
   Succeeded and deleted rows retain lifecycle value `100` but show their
   terminal label without a decorative full bar. WPF clamps presentation to
@@ -453,6 +489,12 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - Video rows are typed media and are never decoded or mutated as still-image
   versions. Wan-compatible version 1 rows remain readable under
   `PV-ENHANCE-VIDEO-001`.
+- Optional video LoRA selection follows `PV-ENHANCE-VIDEO-LORA-001`. The video menu
+  lists one explicitly selected local folder and permits an ordered set with
+  per-entry strength and enabled state. Folder reads remain passive. Explicit
+  enqueue captures content hashes; every selected adapter must apply completely
+  or generation fails. Reuse core model storage and clean only owned staging
+  after confirmed runtime exit. Existing requests without LoRAs are unchanged.
 - MiniMax H3 requests use the additive version 2 contract. Profile, step, and
   canvas selections are separate versioned capabilities; clients require exact
   readiness before durable publication.
@@ -461,12 +503,235 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   style, or mode context disable Apply without repairing the candidate. The
   guide revision and diagnostic evidence are defined by
   `PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001`.
-- Motion Director is a deterministic, WPF-local planning surface for MiniMax
-  H3. It compiles bounded action, camera, and frame-timeline choices into a
-  transient prompt candidate. Opening it, changing its controls, or building a
-  candidate creates no Job and publishes no durable reservation. Only the
-  existing explicit Apply action changes the video prompt; video generation
-  still requires its separate explicit enqueue action.
+- Motion Director's standalone controls are retired from the visible H3 board.
+  Its deterministic planner remains an isolated regression seam. Gaze,
+  expression, action, and camera choices now belong to inline square-bracket
+  options in the unified instruction editor. Camera choices include orbit,
+  tracking, push/pull, pan, restrained handheld, and first-person head motion.
+  Candidate generation and Apply remain distinct from explicit video enqueue.
+- Video instruction programs are optional WPF-local style authoring data,
+  stored separately from the resolved H3 generation prompt. Version 1 supports
+  manual square-bracket options, source-prompt conditions, brace alternatives,
+  independent image-assisted selection and action planning, editable description,
+  action examples, and conservative physical-continuity instructions. Opening
+  the editor or changing an option never invokes inference or queues work.
+  Existing H3 style text can be copied into separate Original and photoreal
+  base fields, which are not parsed as bracket options. Option settings are
+  shared by identical bracket text. Compatible unknown members are preserved;
+  malformed or future programs fail style validation without rewriting storage.
+- The native video menu and default settings share one style library containing
+  built-in motion templates and saved user styles. Built-ins retain their exact
+  H3 text, replace the current instruction program, and can be saved under a new
+  name. Selecting or editing one never enqueues work. User style counts have no
+  fixed 32-item cap; existing document-size and validation bounds still apply.
+  The inline input uses one pressed-state Edit toggle: notation while editing,
+  colored clickable phrases while selecting, and reversible strike-through for
+  disabled phrases. Converting a selected literal phrase escapes the surrounding
+  H3 reference syntax before enabling the authoring program. Japanese notes are
+  a separate editable field. A recognized legacy notes delimiter is split in
+  the current draft with the original text retained as compatible extension
+  data; the saved style is only replaced by an explicit style save.
+- Offline legacy-style note preparation is available through
+  `scripts/prepare-video-style-notes.py`. It writes a new private directory
+  outside the repository containing the exact original bytes, a prepared
+  style-document copy, and a content-free verification report. It never
+  replaces live settings. Only an explicit, recognized Japanese-translation
+  separator splits the original prompt into the unchanged H3 body, separator,
+  and editable description. Their concatenation must exactly reconstruct the
+  original string. A compatible `OriginalStyleText` program extension retains
+  that source text and its SHA-256; unknown settings and numeric values remain
+  unchanged. Existing programs are preserved. Ambiguous separators, duplicate
+  members, unsupported versions, and bounds violations refuse preparation
+  without truncation. Preparation does not infer options, merge named styles,
+  or enable inference. Synthetic coverage is in
+  `scripts/verify-video-style-notes.py`.
+- Manual options take priority over automatic rules. Conditions use bounded,
+  case-insensitive literal matching, not executable code or regular expressions.
+  Unavailable source metadata uses the option's explicit fallback; it is not
+  evidence of absence. Description and LoRA notes never reach the model.
+  Only explicit candidate preparation rereads the original PNG metadata, with
+  cancellation, a bounded reader, and a source-file change check.
+- Acting can use up to three shared intervals for camera movement, subject
+  positioning, arms, gaze, expression and mood. Intermediate end times are editable; relative boundaries
+  scale with the selected clip, while the final boundary uses its actual frame
+  duration. Capture handling is a separate whole-clip choice. These are natural
+  prompt directions, not a frame-accurate control guarantee. A continuous main
+  action appears once; unchanged gestures do not restart at each boundary.
+  Owned original clauses are removed only when their aspect is overridden and
+  restored within intervals that select the original value. Mixed clauses retain
+  their explicit replacement so the main action is not erased. Unknown prose is
+  never silently classified or deleted. Optional AI details and new dialogue use
+  the same app-owned intervals; speech that cannot fit is omitted, not rushed.
+- Original inputs use the style's configurable default (initially anime).
+  Proven Photorealized outputs use the photoreal variant; an empty variant
+  shares the Original template. A manual source-kind override is transient,
+  scoped to the captured source and cleared after successful enqueue. It is
+  never written to the source image or remembered as an image classification.
+- A paired style may set `UseSourceVariants` without enabling the instruction
+  language. Its Original and photoreal base prompts remain literal H3 text;
+  changing the captured source or the transient source-kind selection chooses
+  the matching body and description without inference. Editing one variant
+  preserves the other, and saving the style retains both. Converting a literal
+  variant to inline options escapes both bodies before enabling the instruction
+  program. Direct variants also participate in enqueue-context validation, so a
+  source-kind change during preparation cannot publish the earlier selection.
+  `prepare-video-style-notes.py --merge-source-variants` mechanically pairs
+  matching `Anime-` and `Photo-` names with identical settings. It removes the
+  source-kind word from the shared name, retains each exact original style in
+  compatible extension data, and keeps separate descriptions. Existing authored
+  programs and differing settings are kept separate; name collisions fail before
+  output. Prepared files are separate copies, never automatic live replacements.
+- Reviewed complete H3 bodies may use `AnnotatedH3`. Their base fields retain
+  the exact originals for comparison, while the templates add only escaped
+  literal text and inline options. When all resolved text is identical to the
+  matching original and automation is off, the original can be used directly.
+  Changed manual selections resolve locally into a validated H3 prompt without
+  requiring AI rewriting. The archived base is not appended to that prompt. Reverting to the
+  original choices restores the exact original body. Applying a reviewed H3
+  candidate is not overwritten by a subsequent passive control refresh.
+- Built-ins include the shared basic camera choices in their existing camera
+  clause, retaining its original wording as the default. A built-in without an
+  explicit camera clause offers an initially disabled option at the beginning
+  of the integrated description. The camera catalog has Japanese labels for
+  fixed framing, push/pull, left/right orbit, moving to the front, tracking,
+  restrained handheld movement, and first-person head sway and gaze shifts.
+  Labels and categories are authoring metadata, never generation text. Reviewed
+  expression, viewpoint, or ending groups may be mutually exclusive: selecting
+  one manually disables other group members in the active variant. Import never
+  silently resolves conflicting original defaults. Disabled text remains in
+  the editor and can be re-enabled.
+- `scripts/prepare-video-style-options.py` applies a private reviewed manifest
+  of body hashes and character spans to a separate style copy. It retains exact
+  original bodies, descriptions, unknown settings, and the original file bytes.
+  Stale hashes, overlapping or ambiguous spans, missing paired variants, authored
+  programs, and native bounds violations refuse preparation. It does not infer
+  new actions, enable image inference, or replace live settings. Synthetic
+  preservation and refusal coverage is in `verify-video-style-options.py`.
+- The explicit H3 candidate action expands a program before calling the
+  existing authenticated rewrite route. Authoring syntax is distinct from H3
+  reference syntax: unescaped H3 reference labels in authoring text are errors.
+  The candidate must pass the existing H3 checks and match the program, source,
+  source metadata, model, and duration before Apply and enqueue. A change while
+  preparing enqueue fails before durable publication. Jobs retain the resolved
+  prompt, plus an optional immutable AI instruction for deferred enhancement;
+  raw authoring syntax is never sent to the video model.
+- Version 2 deferred prompt enhancement (`PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002`)
+  preserves the locally resolved source body and selected directions. It adds
+  image-specific onset, transition, reaction and settling details, never an
+  automatic increase in amplitude, speed, distance, repetitions or emotional
+  intensity. It adds no unselected camera motion. A compatible empty addition
+  is valid. Natural-language compliance is not a physical or semantic guarantee.
+  Pinned brace alternatives are exact source spans plus immutable candidate
+  arrays; AI returns only indices. The compiler owns the first-frame binding,
+  ordered H3 fields and generated Japanese speech tags. Version 1 rows retain
+  their existing execution path; they are not silently upgraded.
+  The separate AI settings capture optional positive PNG prompt context, source
+  variant, physics guidance, optional action samples, dialogue and BGM policies
+  and new-speech amount. Metadata OFF supplies no reference prompt; ON reads only
+  on explicit submission, with bounded local I/O and source-change validation.
+  Notes, negative prompts and workflows are excluded. Audio defaults to the
+  original body. An explicit per-generation audio override exposes dialogue,
+  a three-step new-dialogue amount, and BGM switches. Existing authored speech
+  and speaker IDs stay intact when enabled; unclassified prose speech or silence
+  prevents automatic extra speech. Turning speech off edits only recognized
+  speech syntax and diagnoses ambiguous mixed prose without erasing actions.
+  BGM off preserves physical sound. Generated speech has bounded line counts,
+  duration, pauses and Japanese character budgets, with visible articulation
+  directions; exact acoustic lip sync is not guaranteed. These limits do not
+  authorize shortening existing lines. All settings are immutable job input,
+  not authority to rewrite the editor, saved styles or submitted snapshot.
+- The video board keeps its enqueue button in a fixed footer, with one purpose
+  and action. An unchecked-by-default `AIで動きの細部を補完` checkbox sits directly
+  above it. Off resolves manual and default alternatives locally, without AI
+  action planning or rewriting; plain directions receive the pinned H3 envelope
+  with N/A sound/music defaults. Existing H3 sections and literal content survive.
+  On saves an immutable `requested.promptEnhancement` instruction and options under
+  `PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002` and enqueues immediately without
+  waiting for AI. After the worker claims that Job in FIFO order, it enhances
+  the pinned image and captured instructions, validates H3 conformance and
+  stops the local rewrite runtime before starting video inference. The candidate
+  changes only the execution copy; it never rewrites the submitted snapshot,
+  editor, literal variant bases, saved style, or notes. The attempt receipt keeps
+  the generated prompt and source hash in Job diagnostics. Invalid generated
+  output gets one correction attempt, then continues with the frozen original
+  prompt and a recorded warning. Cancellation and source/runtime/cleanup failures
+  still stop the Job. An unsupported authoring format skips optional enrichment
+  and uses the direct prompt when no explicit audio-OFF request would be ignored.
+  An unusable model-selected alternative is an optional output failure, not a
+  fatal source error. Retry uses
+  the same request and creates a fresh enhancement attempt. Off never requires
+  AI or H3 conformance to enqueue; invalid option syntax, stale source identity,
+  and resource bounds still fail before publication. Existing H3 text remains
+  literal. Duplicate submissions and changes before publication remain guarded.
+  After durable publication, the existing inbox and request identity own delivery
+  recovery independently of the editor lifetime. Preview remains passive and
+  identifies its displayed text as the pre-enhancement request.
+  The captured image and its transient source-kind selector appear first,
+  followed by the unified style selector and inline prompt. Duration and quality
+  are visible below the editor. Style save/delete controls open in a separate
+  management window. Japanese notes, AI options and technical settings, and the
+  read-only generation preview expand only when requested. There is no candidate
+  preparation/apply panel in the normal generation flow. The footer shows progress,
+  cancellation, the enhancement checkbox, and one enqueue action. The primary editor retains inline
+  options and reversible editing; hiding detail panels does not reset values.
+  Reading mode retains the complete H3 first-frame binding and original section
+  keys, including soundscape and music. Only inline options change presentation;
+  literal prompt text is never hidden or relabeled. Japanese descriptions remain
+  separate, and Japanese dialogue within the prompt is preserved verbatim.
+  The board expands up to 860 DIPs wide and fills the available window height
+  below the toolbar, retaining a small bottom margin rather than a fixed height cap.
+  Reading mode uses the menu's single scroll surface. Editable text fields keep
+  their own scrolling and hand wheel input to the menu at either end. Closed
+  selectors do not change values on wheel input, and the fixed footer remains
+  visible while scrolling. These layout operations do not prepare or enqueue.
+  Pending metadata reads or rewrites block duplicate preparation and enqueue.
+  Preparation failures expose their reason and leave the current prompt intact.
+- Every video style, including legacy literal styles and both source variants,
+  exposes optional shared acting selectors above its editor. `OpeningMotionId`
+  selects movement immediately after the reference frame within the first one
+  to two seconds; `ArmMotionId` selects an initial arm pose or subtle hand gesture;
+  `ExpressionId` controls facial direction throughout the clip;
+  `MoodId` controls the overall manner of performing the existing action.
+  `PositionId` controls the subject's distance, place or body orientation;
+  `GazeId` controls the subject's eye direction. Both can also be selected per
+  interval. Camera movement is movement of the observer, including in POV,
+  and never implicitly changes the subject's movement. Continuous approach or
+  retreat stops at the available space rather than looping or accelerating.
+  Explicit gaze takes priority over incidental gaze in expression or mood;
+  known catalog phrases with conflicting lowered or unfocused eyes use their
+  facial-only equivalent in the generated copy. An explicit first-interval
+  position replaces only an overlapping built-in opening travel, lean or turn
+  preset; the editor explains this precedence and keeps the saved opening choice.
+  These optional version-1 program fields default to `original`, which adds
+  nothing and retains the original body. Catalog choices are defined in
+  `VideoSubjectDirection.cs` and `VideoSpatialDirection.cs`; unknown IDs protect the stored style. Explicit
+  choices append scoped directions to the generation copy, including deferred
+  AI instructions, while keeping camera, main action, dialogue and sound fields.
+  Literal styles convert losslessly only when a user chooses an acting preset.
+  The selectors are independent and saved with the style; loading an old
+  style never rewrites its text or user state. Resetting all to `original`
+  removes the added acting directions. Arm choices control only arms and hands;
+  the opening choice controls body travel. Required main-action hand movement,
+  contacts, held objects and weight-bearing supports required by that action take
+  priority over decorative gestures. Unneeded initial contact may be released
+  when explicitly requested by the selected arm direction; no release, hand-off
+  or dropped object is invented. Facial selections take priority over mood for expression.
+  Reviewed option clauses may bind `DirectionAspect` to `opening`, `arms`,
+  `expression`, `mood`, `position` or `gaze`. A changed shared selector replaces only its bound
+  clause, using optional `DirectionReplacement` for surrounding sentence
+  continuity. The original option, mode and text remain recoverable; the editor
+  strikes the replaced clause and shows its replacement. No arbitrary user text
+  is classified automatically. Built-in bindings are explicit reviewed phrases.
+  Acting directions enter the visual section outside dialogue and quotations.
+  Ambiguous section boundaries fail with an editing diagnostic, without forcing
+  AI enhancement; `original` preserves the untouched body.
+  These are scoped prompt directions, not a guarantee of model compliance.
+- Physical continuity is optional prompt guidance, not a physics simulation or
+  a quality guarantee. It preserves support and attachment constraints, adds no
+  unrequested release, and does not infer velocity from an ambiguous still.
+  Style LoRA IDs are notes only until a separately verified runtime capability
+  and versioned protocol support application. Automatic translation is not
+  connected; the separate description remains manually editable.
 - Video Tools version 1 keeps `operation=video` and selects one succeeded,
   exact managed video by producer Job id. A client path is never source
   authority. Retake accepts a half-open frame selection on an exact 24 fps H3

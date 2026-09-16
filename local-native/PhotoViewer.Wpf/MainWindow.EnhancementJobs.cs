@@ -542,8 +542,8 @@ public partial class MainWindow
             .Select(static property => property.Name)
             .ToArray();
         string[] allowedNames =
-            ["profileId", "prompt", "steps", "maximumPixelArea"];
-        if (names.Length is < 1 or > 4
+            ["profileId", "prompt", "steps", "maximumPixelArea", "loras", "promptEnhancement"];
+        if (names.Length is < 1 or > 6
             || names.Distinct(StringComparer.Ordinal).Count() != names.Length
             || !names.Contains("prompt", StringComparer.Ordinal)
             || names.Any(name => !allowedNames.Contains(
@@ -553,7 +553,9 @@ public partial class MainWindow
             return false;
         }
 
+        if (requested.TryGetProperty("promptEnhancement", out JsonElement enhancement) && !VideoPromptEnhancement.IsValid(enhancement)) return false;
         string? profileId = MiniMaxH3VideoDefaultProfileId;
+        if (requested.TryGetProperty("loras", out JsonElement loras) && !VideoLoraSelection.TryReadList(loras, out _)) return false;
         if (names.Contains("profileId", StringComparer.Ordinal)
             && !TryGetStringProperty(requested, "profileId", out profileId))
             return false;
@@ -612,7 +614,8 @@ public partial class MainWindow
             || !TryGetExactStringProperty(
                 video,
                 "workflowRevision",
-                MiniMaxH3VideoWorkflowRevision)
+                video.TryGetProperty("requested", out JsonElement workflowRequest) && workflowRequest.ValueKind == JsonValueKind.Object
+                    && workflowRequest.TryGetProperty("loras", out _) ? VideoLoraSelection.Workflow : MiniMaxH3VideoWorkflowRevision)
             || !TryGetExactStringProperty(
                 video,
                 "presetId",
@@ -947,7 +950,9 @@ public partial class MainWindow
             nominalDurationSeconds,
             maximumPixelArea,
             steps,
-            prompt!);
+            prompt!,
+            requested.TryGetProperty("loras", out JsonElement loraArray) && VideoLoraSelection.TryReadList(loraArray, out var selectedLoras) ? selectedLoras : null,
+            requested.TryGetProperty("promptEnhancement", out var enhancement) ? JsonSerializer.Deserialize<VideoPromptEnhancement>(enhancement.GetRawText()) : null);
         return true;
     }
 
@@ -2016,6 +2021,7 @@ public partial class MainWindow
         CancellationToken actionEpoch = CaptureEnhancementCompanionOperationToken();
         if (_enhancementWorkspaceMutationPending
             || _enhancementWorkspaceRefreshPending
+            || _companionControlPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
         {
             return false;
@@ -2591,8 +2597,16 @@ public partial class MainWindow
         _enhancementWorkspaceHealthEndpointSupported = true;
         if (!response.Ok || response.Payload is not JsonElement payload)
         {
+            if (response.InnerStatusAuthoritative
+                && EnhancementApiErrorCode(response) == "QUEUE_HEALTH_UNAVAILABLE")
+            {
+                ApplyCompanionQueueRecoveryRequired();
+                return null;
+            }
             ApplyEnhancementQueueHealthUnavailable(
                 "処理待ち列の状態を取得できません。Jobsは引き続き確認できます。");
+            if (!_companionControlPending)
+                CompanionControlStatusText.Text = "サーバーの状態を確認できません";
             return null;
         }
 
@@ -3141,6 +3155,8 @@ public partial class MainWindow
 
     private void ApplyEnhancementQueueHealth(EnhancementQueueHealthView health)
     {
+        if (!_companionControlPending)
+            CompanionControlStatusText.Text = "サーバー接続済み";
         _enhancementWorkspaceHealthInventoryRevisionSupported =
             health.InventoryRevision is not null;
         _enhancementWorkspaceLastHealthInventoryRevision =
@@ -3283,12 +3299,13 @@ public partial class MainWindow
             _enhancementWorkspaceQueuePaused is null
             && _usingDefaultModalEnhancementSender;
         EnhancementJobsPauseResumeButton.Content = connectToResume
-            ? "接続して再開"
+            ? "復旧して再開"
             : resume
-                ? "再開"
+                ? _enhancementWorkspaceQueueRecoveryRequired ? "復旧して再開" : "再開"
                 : "一時停止";
         EnhancementJobsPauseResumeButton.IsEnabled =
             (_enhancementWorkspaceQueuePaused.HasValue || connectToResume)
+            && !_companionControlPending
             && !_enhancementWorkspaceMutationPending
             && !_enhancementWorkspaceRefreshPending;
         AutomationProperties.SetName(
@@ -7859,7 +7876,8 @@ public partial class MainWindow
             MiniMaxH3VideoPlaybackFps,
             snapshot.MaximumPixelArea,
             snapshot.Steps,
-            snapshot.Prompt);
+            snapshot.Prompt,
+            snapshot.Loras, snapshot.PromptEnhancement);
 
     private async Task<string?>
         ValidateMiniMaxH3VideoRerunSourceBeforePublishAsync(
@@ -7941,6 +7959,8 @@ public partial class MainWindow
                     seed: null),
                 includeQueuePlacementInBody: false,
                 healthValidator: CreateMiniMaxH3VideoHealthValidator(
+                    requireLoras: settings.Loras is not null,
+                    requirePromptEnhancement: settings.PromptEnhancement is not null,
                     requireDisplayedManagedSource:
                         source.UsesDisplayedFileDirectly),
                 requireExactHealthValidation: true,
@@ -12107,10 +12127,15 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             AdapterId,
             "comfyui-flux2-i2i-v2",
             StringComparison.Ordinal);
-    // Durable jobs carry a bounded 0..100 lifecycle value. Only running rows
-    // expose that value as determinate progress; queued and terminal rows use
-    // their status as the clearer authority and do not render a decorative bar.
-    public bool IsProgressIndeterminate => false;
+    // H3 keeps progress below 5 until source/prompt preparation and engine
+    // startup finish. That value cannot measure preparation progress.
+    private bool IsH3Preparation => Status == "running"
+        && !CancelRequested
+        && IsVideoOperation
+        && VideoMutationSafe
+        && AdapterId == "minimax-h3-local-v1"
+        && Progress < 5;
+    public bool IsProgressIndeterminate => IsH3Preparation;
     public bool ShowProgressBar => Status == "running";
     public int DisplayProgress => Status switch
     {
@@ -12127,6 +12152,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             "queued" when QueuePosition > 0 && QueueCount > 0 =>
                 $"待機中 · {QueuePosition} / {QueueCount}",
             "queued" => "待機中",
+            "running" when IsH3Preparation => "動画生成の準備中",
             "running" when DisplayProgress >= 99 => "最終処理中 99%",
             "running" => $"処理中 {DisplayProgress}%",
             "succeeded" => "完了",
@@ -12161,6 +12187,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : IsVideoOperation
             ? !VideoMutationSafe
                 ? "この動画履歴は不完全または非互換のため、変更操作から保護しています。"
+                : IsH3Preparation
+                    ? "画像の確認と生成エンジンの準備を行っています。AIプロンプト強化を選んだ場合は、この段階で実行します。"
                 : ""
             : Operation == "i2i"
                 ? !I2iMutationSafe
@@ -12366,9 +12394,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             || queueMutationScopeChanged)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
-            if (statusChanged)
+            if (statusChanged || progressChanged || cancelRequestedChanged)
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsProgressIndeterminate)));
+            }
+            if (statusChanged)
+            {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowProgressBar)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
             }
@@ -12410,6 +12441,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         }
         if (statusChanged
             || cancelRequestedChanged
+            || progressChanged
             || outputChanged
             || errorChanged)
         {
@@ -12448,8 +12480,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsProgressIndeterminate)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowDetailText)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
         }
         if (updatedChanged)
@@ -12607,7 +12641,9 @@ public sealed record MiniMaxH3VideoWorkspaceSnapshot(
     int NominalDurationSeconds,
     int MaximumPixelArea,
     int Steps,
-    string Prompt);
+    string Prompt,
+    VideoLoraSelection[]? Loras = null,
+    VideoPromptEnhancement? PromptEnhancement = null);
 
 internal sealed record EnhancementVideoMutationProbe(
     string EnvelopeSha256,

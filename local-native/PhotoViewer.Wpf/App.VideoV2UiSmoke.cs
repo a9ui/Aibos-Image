@@ -32,6 +32,13 @@ public partial class App
                 .Single(job => job.GetProperty("id").GetString()
                     == "valid-h3-video")
                 .GetProperty("video");
+            var enhancedNode = JsonNode.Parse(canonicalValidVideo.GetRawText())!;
+            enhancedNode["requested"]!["promptEnhancement"] = JsonSerializer.SerializeToNode(new VideoPromptEnhancement(1, "The adult presenter waves."));
+            using var enhancedVideo = JsonDocument.Parse(enhancedNode.ToJsonString());
+            bool deferredPromptAccepted = PhotoViewer.Wpf.MainWindow.IsExactMiniMaxH3VideoSnapshotForSmoke(enhancedVideo.RootElement);
+            enhancedNode["requested"]!["promptEnhancement"]!["schemaVersion"] = 2;
+            using var futureEnhancedVideo = JsonDocument.Parse(enhancedNode.ToJsonString());
+            deferredPromptAccepted &= !PhotoViewer.Wpf.MainWindow.IsExactMiniMaxH3VideoSnapshotForSmoke(futureEnhancedVideo.RootElement);
             string adjacentDurationVideoJson = canonicalValidVideo
                 .GetRawText()
                 .Replace(
@@ -879,6 +886,7 @@ public partial class App
                 && invalidSealReasonVisible
                 && h3ReadySafe
                 && legacyWanMigratedToH3
+                && deferredPromptAccepted
                 && durationExact
                 && canvasPolicyExact
                 && h3StepsSnapshotExact
@@ -926,6 +934,7 @@ public partial class App
                 h3ReadyRunnable,
                 h3ReadySurfaceIssues,
                 legacyWanMigratedToH3,
+                deferredPromptAccepted,
                 durationExact,
                 canvasPolicyExact,
                 h3StepsSnapshotExact,
@@ -1066,6 +1075,8 @@ public partial class App
                         },
                     },
                 },
+                videoPromptEnhancementV1 = new { contractId = VideoPromptEnhancement.ContractId, protocol = VideoPromptEnhancement.Protocol, execution = "before-generation" },
+                videoPromptEnhancementV2 = new { contractId = VideoPromptEnhancement.ContractIdV2, protocol = VideoPromptEnhancement.ProtocolV2, execution = "before-generation" },
                 videoH3StepsV1 = new
                 {
                     contractId = "PV-ENHANCE-VIDEO-H3-STEPS-001",
