@@ -31,6 +31,8 @@ public sealed class VideoPromptProgram
     public string ArmMotionId { get; set; } = "original";
     public string ExpressionId { get; set; } = "original";
     public string MoodId { get; set; } = "original";
+    public string PositionId { get; set; } = "original";
+    public string GazeId { get; set; } = "original";
     public string CameraMotionId { get; set; } = "original";
     public string CaptureModeId { get; set; } = "original";
     public List<VideoDirectionPhase> DirectionPhases { get; set; } = [];
@@ -92,7 +94,7 @@ public sealed class VideoPromptProgram
                 || !Bounded(option.DirectionAspect, 16)
                 || !Bounded(option.DirectionReplacement, 1000)
                 || (option.DirectionAspect.Length == 0 && option.DirectionReplacement.Length > 0)
-                || option.DirectionAspect is not ("" or "opening" or "arms" or "expression" or "mood" or "camera" or "capture")
+                || option.DirectionAspect is not ("" or "opening" or "arms" or "expression" or "mood" or "camera" or "capture" or "position" or "gaze")
                 || option.Category is not ("" or "camera" or "action" or "expression" or "viewpoint" or "ending" or "sound" or "detail")
                 || option.ChoiceLabels is null || option.ChoiceLabels.Count > 16
                 || option.ChoiceLabels.Any(label => !Bounded(label, 120)))
@@ -164,7 +166,7 @@ public sealed class VideoPromptProgram
         {
             "opening" => OpeningMotionId != "original",
             "capture" => CaptureModeId != "original",
-            "camera" or "arms" or "expression" or "mood" => VideoDirectionTimeline.Overrides(this, DirectionAspectFor(option)),
+            "camera" or "arms" or "expression" or "mood" or "position" or "gaze" => VideoDirectionTimeline.Overrides(this, DirectionAspectFor(option)),
             _ => false,
         };
 
@@ -179,6 +181,8 @@ public sealed class VideoPromptProgram
             case "mood": MoodId = "original"; break;
             case "camera": CameraMotionId = "original"; break;
             case "capture": CaptureModeId = "original"; break;
+            case "position": PositionId = "original"; break;
+            case "gaze": GazeId = "original"; break;
         }
     }
 

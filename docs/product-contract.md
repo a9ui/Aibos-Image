@@ -551,8 +551,8 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   evidence of absence. Description and LoRA notes never reach the model.
   Only explicit candidate preparation rereads the original PNG metadata, with
   cancellation, a bounded reader, and a source-file change check.
-- Acting can use up to three shared intervals for camera movement, arms,
-  expression and mood. Intermediate end times are editable; relative boundaries
+- Acting can use up to three shared intervals for camera movement, subject
+  positioning, arms, gaze, expression and mood. Intermediate end times are editable; relative boundaries
   scale with the selected clip, while the final boundary uses its actual frame
   duration. Capture handling is a separate whole-clip choice. These are natural
   prompt directions, not a frame-accurate control guarantee. A continuous main
@@ -692,14 +692,24 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   to two seconds; `ArmMotionId` selects an initial arm pose or subtle hand gesture;
   `ExpressionId` controls facial direction throughout the clip;
   `MoodId` controls the overall manner of performing the existing action.
+  `PositionId` controls the subject's distance, place or body orientation;
+  `GazeId` controls the subject's eye direction. Both can also be selected per
+  interval. Camera movement is movement of the observer, including in POV,
+  and never implicitly changes the subject's movement. Continuous approach or
+  retreat stops at the available space rather than looping or accelerating.
+  Explicit gaze takes priority over incidental gaze in expression or mood;
+  known catalog phrases with conflicting lowered or unfocused eyes use their
+  facial-only equivalent in the generated copy. An explicit first-interval
+  position replaces only an overlapping built-in opening travel, lean or turn
+  preset; the editor explains this precedence and keeps the saved opening choice.
   These optional version-1 program fields default to `original`, which adds
   nothing and retains the original body. Catalog choices are defined in
-  `VideoSubjectDirection.cs`; unknown IDs protect the stored style. Explicit
+  `VideoSubjectDirection.cs` and `VideoSpatialDirection.cs`; unknown IDs protect the stored style. Explicit
   choices append scoped directions to the generation copy, including deferred
   AI instructions, while keeping camera, main action, dialogue and sound fields.
   Literal styles convert losslessly only when a user chooses an acting preset.
-  The four selectors are independent and saved with the style; loading an old
-  style never rewrites its text or user state. Resetting all four to `original`
+  The selectors are independent and saved with the style; loading an old
+  style never rewrites its text or user state. Resetting all to `original`
   removes the added acting directions. Arm choices control only arms and hands;
   the opening choice controls body travel. Required main-action hand movement,
   contacts, held objects and weight-bearing supports required by that action take
@@ -707,7 +717,7 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   when explicitly requested by the selected arm direction; no release, hand-off
   or dropped object is invented. Facial selections take priority over mood for expression.
   Reviewed option clauses may bind `DirectionAspect` to `opening`, `arms`,
-  `expression` or `mood`. A changed shared selector replaces only its bound
+  `expression`, `mood`, `position` or `gaze`. A changed shared selector replaces only its bound
   clause, using optional `DirectionReplacement` for surrounding sentence
   continuity. The original option, mode and text remain recoverable; the editor
   strikes the replaced clause and shows its replacement. No arbitrary user text

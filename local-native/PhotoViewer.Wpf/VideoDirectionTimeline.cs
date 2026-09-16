@@ -13,15 +13,19 @@ public sealed class VideoDirectionPhase
     public string ArmsId { get; set; } = "original";
     public string ExpressionId { get; set; } = "original";
     public string MoodId { get; set; } = "original";
+    public string PositionId { get; set; } = "original";
+    public string GazeId { get; set; } = "original";
     [JsonExtensionData] public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 
     public string For(string aspect) => aspect switch
-    { "camera" => CameraId, "arms" => ArmsId, "expression" => ExpressionId, "mood" => MoodId, _ => "original" };
+    { "camera" => CameraId, "arms" => ArmsId, "expression" => ExpressionId, "mood" => MoodId,
+      "position" => PositionId, "gaze" => GazeId, _ => "original" };
     public void Set(string aspect, string id)
     {
         switch (aspect)
         { case "camera": CameraId = id; break; case "arms": ArmsId = id; break;
-          case "expression": ExpressionId = id; break; case "mood": MoodId = id; break; }
+          case "expression": ExpressionId = id; break; case "mood": MoodId = id; break;
+          case "position": PositionId = id; break; case "gaze": GazeId = id; break; }
     }
     public VideoDirectionPhase Copy() => JsonSerializer.Deserialize<VideoDirectionPhase>(JsonSerializer.Serialize(this))!;
 }
@@ -43,8 +47,10 @@ public static class VideoDirectionTimeline
     [
         new("original", "元のカメラ指示", ""),
         new("fixed", "構図を保つ", "Hold the current camera position and framing, without a pan, zoom or travelling move."),
-        new("push", "ゆっくり寄る", "The camera slowly moves closer to the subject with small amplitude."),
-        new("pull", "ゆっくり引く", "The camera slowly moves back from the subject with small amplitude."),
+        new("push", "見る側がゆっくり寄る", "The camera slowly moves closer to the subject with small amplitude."),
+        new("pull", "見る側がゆっくり引く", "The camera slowly moves back from the subject with small amplitude."),
+        new("push-continuous", "見る側が寄り続ける", "The camera observer continues slowly moving toward the subject through this interval, without restarting or accelerating. Stop before running out of space; do not make the subject approach to substitute for the camera movement."),
+        new("pull-continuous", "見る側が引き続ける", "The camera observer continues slowly moving away from the subject through this interval, without restarting or accelerating. Stop at the available space; do not make the subject retreat to substitute for the camera movement."),
         new("arc-left", "左へ回り込む", "The camera slowly arcs left around the subject, preserving continuous spatial relationships."),
         new("arc-right", "右へ回り込む", "The camera slowly arcs right around the subject, preserving continuous spatial relationships."),
         new("front", "正面へ回り込む", "The camera moves smoothly toward a frontal view of the subject from its current angle."),
@@ -54,8 +60,8 @@ public static class VideoDirectionTimeline
         new("pan-right", "右へパン", "The camera pans slowly to the right with small amplitude while its position stays unchanged."),
         new("truck-left", "左へ平行移動", "The camera translates a short distance left, maintaining its viewing direction."),
         new("truck-right", "右へ平行移動", "The camera translates a short distance right, maintaining its viewing direction."),
-        new("tilt-up", "上へ視線を移す", "The camera tilts upward slowly from its current composition."),
-        new("tilt-down", "下へ視線を移す", "The camera tilts downward slowly from its current composition."),
+        new("tilt-up", "カメラを上へ向ける", "The camera tilts upward slowly from its current composition."),
+        new("tilt-down", "カメラを下へ向ける", "The camera tilts downward slowly from its current composition."),
         new("eye-level", "目線の高さへ移る", "The camera moves gradually toward the subject's eye level, without a cut."),
         new("low-angle", "低い位置から見上げる", "The camera gradually lowers into a modest low angle looking toward the subject."),
         new("high-angle", "高い位置から見下ろす", "The camera gradually rises into a modest high angle looking toward the subject."),
@@ -66,17 +72,29 @@ public static class VideoDirectionTimeline
         new("zoom-in", "その場からズームイン", "The lens slowly zooms in with small amplitude while the camera position remains unchanged."),
         new("zoom-out", "その場からズームアウト", "The lens slowly zooms out with small amplitude while the camera position remains unchanged."),
     ];
-    public static readonly string[] Aspects = ["camera", "arms", "expression", "mood"];
+    public static readonly string[] Aspects = ["camera", "position", "arms", "gaze", "expression", "mood"];
     public static VideoSubjectDirection.Choice[] Choices(string aspect) => aspect switch
-    { "camera" => Cameras, "arms" => VideoSubjectDirection.Arms, "expression" => VideoSubjectDirection.Expressions, _ => VideoSubjectDirection.Moods };
+    { "camera" => Cameras, "arms" => VideoSubjectDirection.Arms, "expression" => VideoSubjectDirection.Expressions,
+      "position" => VideoSpatialDirection.Positions, "gaze" => VideoSpatialDirection.Gazes, _ => VideoSubjectDirection.Moods };
     public static string Global(VideoPromptProgram p, string aspect) => aspect switch
-    { "camera" => p.CameraMotionId, "arms" => p.ArmMotionId, "expression" => p.ExpressionId, "mood" => p.MoodId, _ => "original" };
+    { "camera" => p.CameraMotionId, "arms" => p.ArmMotionId, "expression" => p.ExpressionId, "mood" => p.MoodId,
+      "position" => p.PositionId, "gaze" => p.GazeId, _ => "original" };
+    public static void SetGlobal(VideoPromptProgram p, string aspect, string id)
+    {
+        switch (aspect)
+        {
+            case "camera": p.CameraMotionId = id; break; case "arms": p.ArmMotionId = id; break;
+            case "expression": p.ExpressionId = id; break; case "mood": p.MoodId = id; break;
+            case "position": p.PositionId = id; break; case "gaze": p.GazeId = id; break;
+        }
+    }
     public static bool Overrides(VideoPromptProgram p, string aspect)
         => p.DirectionPhases.Count > 0 ? p.DirectionPhases.Any(s => s.For(aspect) != "original") : Global(p, aspect) != "original";
     public static bool IsValid(VideoPromptProgram p)
     {
         if (p.DirectionPhases is null || p.DirectionPhases.Count > 3
-            || !CaptureModes.Any(c => c.Id == p.CaptureModeId) || !Cameras.Any(c => c.Id == p.CameraMotionId)) return false;
+            || !CaptureModes.Any(c => c.Id == p.CaptureModeId)
+            || Aspects.Any(a => !Choices(a).Any(c => c.Id == Global(p, a)))) return false;
         int end = 0;
         foreach (var phase in p.DirectionPhases)
         {
@@ -102,7 +120,8 @@ public static class VideoDirectionTimeline
         }).ToArray();
     }
     public static VideoDirectionPhase FromGlobal(VideoPromptProgram p) => new()
-    { CameraId = p.CameraMotionId, ArmsId = p.ArmMotionId, ExpressionId = p.ExpressionId, MoodId = p.MoodId };
+    { CameraId = p.CameraMotionId, ArmsId = p.ArmMotionId, ExpressionId = p.ExpressionId, MoodId = p.MoodId,
+      PositionId = p.PositionId, GazeId = p.GazeId };
 
     public static string ApplyCaptureOverride(string text, VideoPromptProgram p)
     {
@@ -123,15 +142,21 @@ public static class VideoDirectionTimeline
         var parts = new List<string>();
         var legacy = p.Clone();
         legacy.DirectionPhases.Clear(); legacy.CaptureModeId = legacy.CameraMotionId = "original";
+        legacy.PositionId = legacy.GazeId = "original";
+        if (VideoSpatialDirection.ReplacesOpening(p)) legacy.OpeningMotionId = "original";
         if (p.DirectionPhases.Count > 0) legacy.ArmMotionId = legacy.ExpressionId = legacy.MoodId = "original";
-        string opening = VideoSubjectDirection.Instruction(legacy);
+        string opening = VideoSubjectDirection.Instruction(legacy, p.DirectionPhases.Count == 0 && p.GazeId != "original");
         if (p.CaptureModeId != "original" || Overrides(p, "camera"))
             opening = opening.Replace("existing people, camera, setting", "existing people, setting", StringComparison.Ordinal);
         if (opening.Length > 0) parts.Add(opening);
         if (p.CaptureModeId != "original") parts.Add("Camera handling throughout the same shot: " + CaptureModes.Single(c => c.Id == p.CaptureModeId).Text);
+        string spatialBoundaries = VideoSpatialDirection.Boundaries(p);
+        if (spatialBoundaries.Length > 0) parts.Add(spatialBoundaries);
         if (p.DirectionPhases.Count == 0)
         {
             if (p.CameraMotionId != "original") parts.Add("Camera movement: " + Cameras.Single(c => c.Id == p.CameraMotionId).Text);
+            if (p.PositionId != "original") parts.Add("Subject positioning: " + VideoSpatialDirection.Positions.Single(c => c.Id == p.PositionId).Text);
+            if (p.GazeId != "original") parts.Add("Gaze: " + VideoSpatialDirection.Gazes.Single(c => c.Id == p.GazeId).Text);
             return string.Join("\n", parts);
         }
         parts.Add("These intervals refine the same ongoing main action above, without introducing repetitions or cuts. Preserve any explicitly authored shots. Start from the actual reference pose and expression, developing toward the first interval naturally. At each boundary, continue the action and camera from their current state. An unchanged direction continues without restarting; perform a one-off hand gesture only once. Respect held objects, required contact, available hands and weight-bearing support. Explicit facial direction takes precedence over mood. Existing vocal content continues across interval boundaries without replay or interruption; other selected details still apply.");
@@ -143,18 +168,24 @@ public static class VideoDirectionTimeline
             foreach (string aspect in Aspects)
             {
                 string id = phase.For(aspect);
-                if (i > 0 && p.DirectionPhases[i - 1].For(aspect) == id) continue;
+                bool gazeSelected = phase.GazeId != "original";
+                if (i > 0 && p.DirectionPhases[i - 1].For(aspect) == id
+                    && (aspect != "expression" || VideoSpatialDirection.ExpressionText(id, gazeSelected)
+                        == VideoSpatialDirection.ExpressionText(id, p.DirectionPhases[i - 1].GazeId != "original"))) continue;
                 string text = id == "original"
                     ? Overrides(p, aspect) && originals?.TryGetValue(aspect, out string? saved) == true ? saved : ""
-                    : Choices(aspect).Single(c => c.Id == id).Text;
+                    : aspect == "expression" ? VideoSpatialDirection.ExpressionText(id, gazeSelected) : Choices(aspect).Single(c => c.Id == id).Text;
                 if (text.Length == 0 && i > 0 && id == "original") text = aspect switch
                 {
                     "camera" => "Resume camera framing appropriate to the source scene, without restarting its initial position.",
                     "arms" => "Let the arms follow the main action naturally, without repeating the preceding gesture.",
                     "expression" => "Let the expression follow the original scene and ongoing action naturally.",
+                    "position" => "Let the subject's position follow the original scene and ongoing action, continuing from the current location without restarting a previous move.",
+                    "gaze" => "Let the gaze follow the original scene and ongoing action naturally.",
                     _ => "Return to the manner of the original scene and main action.",
                 };
-                if (text.Length > 0) directions.Add(aspect switch { "camera" => "Camera: ", "arms" => "Hands and arms: ", "expression" => "Expression: ", _ => "Mood: " } + text);
+                if (text.Length > 0) directions.Add(aspect switch { "camera" => "Camera: ", "arms" => "Hands and arms: ", "expression" => "Expression: ",
+                    "position" => "Subject positioning: ", "gaze" => "Gaze: ", _ => "Mood: " } + text);
             }
             parts.Add(clock[i].Anchor + " " + (directions.Count > 0 ? string.Join(" ", directions) : "Continue the ongoing action and current directions naturally."));
         }

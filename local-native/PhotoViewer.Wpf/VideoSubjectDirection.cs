@@ -195,16 +195,18 @@ public static class VideoSubjectDirection
 
     public static bool IsSelected(VideoPromptProgram program)
         => program.OpeningMotionId != "original" || program.ArmMotionId != "original" || program.ExpressionId != "original" || program.MoodId != "original"
-            || program.CaptureModeId != "original" || program.CameraMotionId != "original" || program.DirectionPhases.Count > 0;
+            || program.CaptureModeId != "original" || program.CameraMotionId != "original" || program.DirectionPhases.Count > 0
+            || program.PositionId != "original" || program.GazeId != "original";
 
-    public static string Instruction(VideoPromptProgram program)
+    public static string Instruction(VideoPromptProgram program, bool gazeSelected = false)
     {
-        if (program.DirectionPhases.Count > 0 || program.CaptureModeId != "original" || program.CameraMotionId != "original")
+        if (program.DirectionPhases.Count > 0 || program.CaptureModeId != "original" || program.CameraMotionId != "original"
+            || program.PositionId != "original" || program.GazeId != "original")
             return VideoDirectionTimeline.Instruction(program, 15083, null);
         var parts = new List<string>();
         string opening = Opening.Single(c => c.Id == program.OpeningMotionId).Text;
         string arms = Arms.Single(c => c.Id == program.ArmMotionId).Text;
-        string expression = Expressions.Single(c => c.Id == program.ExpressionId).Text;
+        string expression = VideoSpatialDirection.ExpressionText(program.ExpressionId, gazeSelected);
         string mood = Moods.Single(c => c.Id == program.MoodId).Text;
         if (opening.Length > 0) parts.Add("Opening movement, immediately after the reference frame during the first one to two seconds: " + opening
             + " Continue smoothly from the exact reference pose; respect visible supports and available space. Do not teleport or turn this into repeated movement throughout the clip.");

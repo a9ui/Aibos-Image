@@ -172,7 +172,7 @@ public sealed partial class VideoPromptAuthoringControl : UserControl
         selector.SetResourceReference(StyleProperty, "PhotorealSettingsComboBox");
         AutomationProperties.SetName(selector, title);
         selector.ToolTip = help + "。元の指示を使う場合は追加しません。"
-            + (selector == _armMotion ? " 移動は冒頭の動きで指定します。本文の主動作・物を持つ手・身体を支える手を優先します。" : "");
+            + (selector == _armMotion ? " 移動は冒頭の動き・距離と立ち位置で指定します。本文の主動作・物を持つ手・身体を支える手を優先します。" : "");
         selector.SelectionChanged += (_, _) =>
         {
             if (_loading || selector.SelectedValue is not string value) return;
@@ -184,6 +184,7 @@ public sealed partial class VideoPromptAuthoringControl : UserControl
                 return;
             }
             select(value);
+            RefreshPositionHint();
             Publish(null);
             Render();
         };
@@ -290,7 +291,8 @@ public sealed partial class VideoPromptAuthoringControl : UserControl
             var restoreMenu = new ContextMenu { Background = Paper, Foreground = Ink };
             string aspect = VideoPromptProgram.DirectionAspectFor(_program.OptionFor(token));
             string aspectLabel = aspect switch
-            { "opening" => "冒頭の動き", "arms" => "腕・手の動き", "expression" => "表情", "camera" => "カメラワーク", "capture" => "カメラの撮り方", _ => "ムード" };
+            { "opening" => "冒頭の動き", "arms" => "腕・手の動き", "expression" => "表情", "camera" => "カメラワーク", "capture" => "カメラの撮り方",
+                "position" => "距離・立ち位置", "gaze" => "視線", _ => "ムード" };
             var restore = new MenuItem { Header = aspectLabel + "を元の指示に戻す", Background = Paper, Foreground = Ink };
             restore.Click += (_, _) =>
             {

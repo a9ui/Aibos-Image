@@ -213,14 +213,15 @@ public partial class App
         window.ConfigureVideoEnrichmentForSmoke(false, false, true, 1, true);
         var timed = draft.Clone();
         timed.CaptureModeId = "pov";
-        timed.DirectionPhases = [new() { EndMillionths = 333333, ExpressionId = "surprised", CameraId = "front" },
-            new() { EndMillionths = 666667, ExpressionId = "suspicious", CameraId = "upper-body" },
-            new() { ExpressionId = "calm", CameraId = "face" }];
+        timed.DirectionPhases = [new() { EndMillionths = 333333, ExpressionId = "surprised", CameraId = "front", PositionId = "approach-stop", GazeId = "viewer" },
+            new() { EndMillionths = 666667, ExpressionId = "suspicious", CameraId = "upper-body", PositionId = "stay", GazeId = "downcast" },
+            new() { ExpressionId = "calm", CameraId = "face", PositionId = "stay", GazeId = "down-then-viewer" }];
         window.SetVideoPromptProgramForSmoke(timed);
         checks["sharedTimelineEnqueuesWithoutWaitingForAiAndKeepsActualDuration"] = await window.SubmitVideoGenerationForSmokeAsync()
             && rewrites == 0 && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("timeline").GetArrayLength() == 3
             && lastRequested.GetProperty("promptEnhancement").GetProperty("options").GetProperty("timeline")[2].GetProperty("endMs").GetInt32() == 5166
-            && publishedPrompt.Contains("From 3.44 to 5.17 seconds:") && publishedPrompt.Contains("same observer's first-person viewpoint");
+            && publishedPrompt.Contains("From 3.44 to 5.17 seconds:") && publishedPrompt.Contains("same observer's first-person viewpoint")
+            && publishedPrompt.Contains("subject moves a short distance toward the viewer") && publishedPrompt.Contains("subject lowers the gaze");
         window.RevealVideoTimelineForSmoke(); window.UpdateLayout();
         window.CaptureVideoVariantForSmoke((_, visual) => capture("video-timeline-settings", visual));
         window.SetVideoPromptProgramForSmoke(draft);

@@ -13,6 +13,7 @@ public sealed partial class VideoPromptAuthoringControl
     private readonly ComboBox _captureMode = new() { MinHeight = 32, MaxDropDownHeight = 340 };
     private readonly List<(Border Card, TextBlock Title, TextBlock Start, TextBox End, ComboBox[] Selectors)> _phaseControls = [];
     private readonly Button _addPhase = new() { Content = "＋ 区間を追加", Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 2, 0, 8) };
+    private readonly TextBlock _positionHint = Label("", false);
 
     private bool EnsureDirectionProgram()
     {
@@ -35,7 +36,8 @@ public sealed partial class VideoPromptAuthoringControl
     private void BuildTimelineControls(Panel parent)
     {
         parent.Children.Add(Label("演出の流れ", true));
-        parent.Children.Add(Label("区間を追加すると、カメラ・腕・表情・ムードを順に変えられます。最大3区間。", false));
+        parent.Children.Add(Label("カメラ・距離・腕・視線・表情・ムードを、最大3区間で変えられます。", false));
+        parent.Children.Add(_positionHint);
         for (int index = 0; index < 3; index++)
         {
             int slot = index;
@@ -71,8 +73,8 @@ public sealed partial class VideoPromptAuthoringControl
                     if (_program.DirectionPhases.Count == 1)
                     {
                         var remaining = _program.DirectionPhases[0];
-                        _program.CameraMotionId = remaining.CameraId; _program.ArmMotionId = remaining.ArmsId;
-                        _program.ExpressionId = remaining.ExpressionId; _program.MoodId = remaining.MoodId;
+                        foreach (string aspect in VideoDirectionTimeline.Aspects)
+                            VideoDirectionTimeline.SetGlobal(_program, aspect, remaining.For(aspect));
                         _program.DirectionPhases.Clear();
                     }
                     RefreshTimelineControls(); Publish(null); Render();
@@ -84,20 +86,21 @@ public sealed partial class VideoPromptAuthoringControl
             header.Children.Add(title); header.Children.Add(time); content.Children.Add(header);
             var grid = new UniformGrid { Columns = 2 };
             ComboBox[] selectors = slot == 0
-                ? [new() { MinHeight = 32, MaxDropDownHeight = 340 }, _armMotion, _expression, _mood]
-                : Enumerable.Range(0, 4).Select(_ => new ComboBox { MinHeight = 32, MaxDropDownHeight = 340 }).ToArray();
-            string[] titles = ["カメラワーク", "腕・手の動き", "表情", "ムード"];
-            string[] colors = ["#6EE7D0", "#93C5FD", "#F0ABFC", "#FDE68A"];
-            for (int a = 0; a < 4; a++)
+                ? [new() { MinHeight = 32, MaxDropDownHeight = 340 }, new() { MinHeight = 32, MaxDropDownHeight = 340 },
+                    _armMotion, new() { MinHeight = 32, MaxDropDownHeight = 340 }, _expression, _mood]
+                : Enumerable.Range(0, VideoDirectionTimeline.Aspects.Length).Select(_ => new ComboBox { MinHeight = 32, MaxDropDownHeight = 340 }).ToArray();
+            string[] titles = ["カメラワーク", "距離・立ち位置", "腕・手の動き", "視線", "表情", "ムード"];
+            string[] colors = ["#6EE7D0", "#FDBA74", "#93C5FD", "#C4B5FD", "#F0ABFC", "#FDE68A"];
+            for (int a = 0; a < VideoDirectionTimeline.Aspects.Length; a++)
             {
                 string aspect = VideoDirectionTimeline.Aspects[a];
                 AddActingChoice(grid, selectors[a], titles[a], "この区間", colors[a], VideoDirectionTimeline.Choices(aspect), value =>
                 {
                     if (_program.DirectionPhases.Count > 0) _program.DirectionPhases[slot].Set(aspect, value);
-                    else switch (aspect)
-                    { case "camera": _program.CameraMotionId = value; break; case "arms": _program.ArmMotionId = value; break;
-                      case "expression": _program.ExpressionId = value; break; case "mood": _program.MoodId = value; break; }
+                    else VideoDirectionTimeline.SetGlobal(_program, aspect, value);
                 });
+                if (aspect == "position") selectors[a].ToolTip = "被写体の移動・身体の向き。見る側の移動はカメラワークで指定します。冒頭の動きと同じ部分を指定した場合は、この区間の指定を優先します。";
+                if (aspect == "gaze") selectors[a].ToolTip = "被写体の目線。表情に含まれる目線より、この区間の視線を優先します。カメラの向きは変えません。";
             }
             content.Children.Add(grid);
             var card = new Border { Child = content, Padding = new Thickness(10), Margin = new Thickness(0, 5, 0, 3),
@@ -139,12 +142,20 @@ public sealed partial class VideoPromptAuthoringControl
                 c.End.Text = (end / 1000d).ToString("0.##", CultureInfo.CurrentCulture);
                 c.End.IsReadOnly = i == count - 1;
                 c.End.ToolTip = i == count - 1 ? "動画の終わりまで。長さに合わせて変わります。" : "区間の終了秒。Enterで確定します。";
-                for (int a = 0; a < 4; a++) c.Selectors[a].SelectedValue = phase.For(VideoDirectionTimeline.Aspects[a]);
+                for (int a = 0; a < VideoDirectionTimeline.Aspects.Length; a++) c.Selectors[a].SelectedValue = phase.For(VideoDirectionTimeline.Aspects[a]);
                 start = end;
             }
             _addPhase.Visibility = count < 3 ? Visibility.Visible : Visibility.Collapsed;
+            RefreshPositionHint();
         }
         finally { _loading = previous; }
+    }
+
+    private void RefreshPositionHint()
+    {
+        bool replaced = VideoSpatialDirection.ReplacesOpening(_program);
+        _positionHint.Text = replaced ? "冒頭の移動・向きは「距離・立ち位置」の指定を使います。" : "";
+        _positionHint.Visibility = replaced ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public void AddTimelinePhaseForSmoke() => AddTimelinePhase();

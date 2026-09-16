@@ -58,6 +58,46 @@ public partial class App
         p.DirectionPhases.Clear(); p.CaptureModeId = "original";
         checks["resetTimelineRestoresSourceExactly"] = p.TryResolveH3("anime", null, out string reset, out _) && reset == original;
 
+        var spatial = new VideoPromptProgram
+        {
+            Enabled = true, AnnotatedH3 = true,
+            Template = "The subject gives one small wave. [She looks past the lens.] [She remains at the original spot.]",
+            OpeningMotionId = "step-back", ExpressionId = "flustered", PositionId = "approach-continuous", GazeId = "viewer",
+            CameraMotionId = "fixed",
+            Options = new()
+            {
+                ["[She looks past the lens.]"] = new() { DirectionAspect = "gaze" },
+                ["[She remains at the original spot.]"] = new() { DirectionAspect = "position" },
+            },
+        };
+        string savedSpatialTemplate = spatial.Template;
+        checks["positionAndGazeResolveWithoutAiOrConflictingOpening"] = spatial.TryResolveH3("anime", null, out string spatialPrompt, out _)
+            && spatialPrompt.Contains("subject continues approaching") && spatialPrompt.Contains("Hold the current camera position")
+            && spatialPrompt.Contains("looks toward the viewer's eyes") && !spatialPrompt.Contains("small step backward")
+            && !spatialPrompt.Contains("briefly lowered eyes") && !spatialPrompt.Contains("She looks past the lens")
+            && spatial.Template == savedSpatialTemplate;
+        spatial.DirectionPhases =
+        [
+            new() { EndMillionths = 333333, PositionId = "approach-continuous", GazeId = "viewer", ExpressionId = "flustered" },
+            new() { EndMillionths = 666667, PositionId = "approach-continuous", GazeId = "downcast", ExpressionId = "flustered" },
+            new() { PositionId = "original", GazeId = "original", ExpressionId = "flustered" },
+        ];
+        checks["spatialIntervalsRestoreOwnedSourceAndDoNotLoopApproach"] = spatial.TryResolveH3("anime", null, out spatialPrompt, out _, 15000)
+            && spatialPrompt.Split("subject continues approaching").Length == 2
+            && spatialPrompt.Contains("From 10.00 to 15.00 seconds:")
+            && spatialPrompt.IndexOf("She looks past the lens", StringComparison.Ordinal) > spatialPrompt.IndexOf("From 10.00", StringComparison.Ordinal)
+            && spatialPrompt.IndexOf("She remains at the original spot", StringComparison.Ordinal) > spatialPrompt.IndexOf("From 10.00", StringComparison.Ordinal)
+            && spatialPrompt.Split("The subject gives one small wave").Length == 2
+            && spatial.TryResolveEnrichment("anime", null, out string enrichedInput, out _, out _, 15000) && enrichedInput == spatialPrompt;
+        var spatialRoundTrip = spatial.Snapshot();
+        checks["spatialChoicesPersistAndOldStylesStayUnchanged"] = VideoPromptProgram.TryRead(spatialRoundTrip, out var spatialRead)
+            && spatialRead.PositionId == "approach-continuous" && spatialRead.GazeId == "viewer"
+            && spatialRead.DirectionPhases[1].GazeId == "downcast"
+            && VideoPromptProgram.TryRead(JsonDocument.Parse("{\"Version\":1,\"Template\":\"Untouched source\"}").RootElement, out var oldStyle)
+            && oldStyle.PositionId == "original" && oldStyle.GazeId == "original" && !VideoSubjectDirection.IsSelected(oldStyle);
+        spatial.PositionId = "future-position";
+        checks["unknownSpatialChoiceProtectsStoredStyle"] = !VideoPromptProgram.TryRead(spatial.Snapshot(), out _);
+
         var editor = new VideoPromptAuthoringControl();
         VideoPromptProgram? changed = null;
         editor.Changed += (_, value, _) => changed = value;
@@ -66,7 +106,14 @@ public partial class App
         editor.SelectTimelineForSmoke(0, "expression", "surprised");
         editor.SelectTimelineForSmoke(1, "expression", "suspicious");
         editor.SelectTimelineForSmoke(2, "expression", "calm");
+        editor.SelectTimelineForSmoke(0, "position", "approach-stop");
+        editor.SelectTimelineForSmoke(1, "position", "stay");
+        editor.SelectTimelineForSmoke(0, "gaze", "viewer");
+        editor.SelectTimelineForSmoke(1, "gaze", "downcast");
+        editor.SelectTimelineForSmoke(2, "gaze", "down-then-viewer");
         checks["timelineUiAddsAtMostThreeIndependentSelections"] = editor.TimelinePhaseCountForSmoke == 3
-            && changed?.DirectionPhases.Select(x => x.ExpressionId).SequenceEqual(["surprised", "suspicious", "calm"]) == true;
+            && changed?.DirectionPhases.Select(x => x.ExpressionId).SequenceEqual(["surprised", "suspicious", "calm"]) == true
+            && changed.DirectionPhases.Select(x => x.GazeId).SequenceEqual(["viewer", "downcast", "down-then-viewer"])
+            && changed.DirectionPhases.Select(x => x.PositionId).SequenceEqual(["approach-stop", "stay", "original"]);
     }
 }
