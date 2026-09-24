@@ -890,7 +890,10 @@ public partial class MainWindow
     private async void QueueI2iV2Edit_Click(object sender, RoutedEventArgs e)
         => await QueueI2iV2EditAsync();
 
-    private async Task<bool> QueueI2iV2EditAsync()
+    private Task<bool> QueueI2iV2EditAsync()
+        => CompleteDurableEnqueueUiActionAsync(() => QueueI2iV2EditCoreAsync());
+
+    private async Task<bool> QueueI2iV2EditCoreAsync()
     {
         if (_i2iV2RequestPending
             || _i2iV2EditSource is not I2iEditSource source)

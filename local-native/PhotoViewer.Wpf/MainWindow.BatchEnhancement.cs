@@ -309,7 +309,12 @@ public partial class MainWindow
         await RunBatchEnhancementAsync(failed, retry: true);
     }
 
-    private async Task RunBatchEnhancementAsync(
+    private Task RunBatchEnhancementAsync(
+        IReadOnlyList<BatchEnhancementItemView> items,
+        bool retry)
+        => CompleteDurableEnqueueUiActionAsync(() => RunBatchEnhancementCoreAsync(items, retry));
+
+    private async Task RunBatchEnhancementCoreAsync(
         IReadOnlyList<BatchEnhancementItemView> items,
         bool retry)
     {

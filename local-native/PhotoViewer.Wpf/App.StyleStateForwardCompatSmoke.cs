@@ -99,7 +99,7 @@ public partial class App
                 statePath,
                 JsonSerializer.Serialize(legacy, new JsonSerializerOptions { WriteIndented = true }));
 
-            window = new MainWindow();
+            window = HiddenWindow();
             AiStyleDocument migratedStyles = ReadAiStyleFixture(stylePath);
             FavoriteActivityStoreReadResult migratedActivity = FavoriteActivityStore.Read(
                 activityStorePath,
@@ -180,6 +180,56 @@ public partial class App
                     ?.TryGetValue("ConcurrentVideoScalar", out JsonElement videoScalar) == true
                 && videoScalar.GetBoolean();
 
+            window.Show();
+            window.SetCloseWithoutSavingConfirmationForSmoke(() => false);
+            string beforeRefusal = Fingerprint(stylePath);
+            bool failedStyleSaveReported;
+            bool refusedStyleCloseKeptUsable;
+            using (var owner = new FileStream(stylePath + ".lock", FileMode.OpenOrCreate,
+                       FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.DeleteOnClose))
+            {
+                failedStyleSaveReported = !window.SaveVideoStyleForSmoke("Pending video")
+                    && !window.SavePhotorealStyleForSmoke("Pending photo")
+                    && window.AiStylesPendingSaveForSmoke
+                    && window.AiStylesUnsavedStatusForSmoke
+                    && Fingerprint(stylePath) == beforeRefusal;
+                window.Close();
+                MainWindow.SearchFilterCompletion interactive =
+                    await window.SetSearchInputForSmokeAsync("style-refusal-still-usable");
+                refusedStyleCloseKeptUsable = window.IsVisible
+                    && window.ShutdownPersistenceFlushCountForSmoke == 0
+                    && !interactive.Discarded;
+            }
+            // A different lane must not reload the disk baseline over pending edits,
+            // even after the original write obstacle has gone away.
+            bool crossLaneKeptPending = !window.SaveVideoEditV2StyleForSmoke(
+                    "Must wait for pending changes", "preserve subject", "preserve",
+                    "balanced", "high", 24, "source-faithful")
+                && window.VideoStyleNamesForSmoke.Contains("Pending video")
+                && Fingerprint(stylePath) == beforeRefusal;
+            bool styleRetryCommitted = window.RetryAiStyleSaveForSmoke()
+                && !window.AiStylesPendingSaveForSmoke
+                && !window.AiStylesUnsavedStatusForSmoke
+                && ReadAiStyleFixture(stylePath).VideoStyles!.Any(style => style.Name == "Pending video")
+                && ReadAiStyleFixture(stylePath).PhotorealStyles!.Any(style => style.Name == "Pending photo");
+            _ = window.SelectVideoStyleForSmoke("Pending video");
+            bool failedDeleteReported;
+            using (var owner = new FileStream(stylePath + ".lock", FileMode.OpenOrCreate,
+                       FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.DeleteOnClose))
+            {
+                failedDeleteReported = !window.DeleteSelectedVideoStyleForSmoke()
+                    && window.AiStylesPendingSaveForSmoke
+                    && window.AiStylesUnsavedStatusForSmoke
+                    && ReadAiStyleFixture(stylePath).VideoStyles!.Any(style => style.Name == "Pending video");
+            }
+            var styleClosed = new TaskCompletionSource<bool>();
+            window.Closed += (_, _) => styleClosed.TrySetResult(true);
+            window.Close();
+            await styleClosed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            bool pendingDeleteSavedOnClose = window.ShutdownPersistenceFlushCountForSmoke == 1
+                && !ReadAiStyleFixture(stylePath).VideoStyles!.Any(style => style.Name == "Pending video");
+            window = HiddenWindow();
+
             AiStyleDocument externallyEdited = ReadAiStyleFixture(stylePath);
             externallyEdited.VideoStyles![0].Prompt = "externally edited prompt";
             VideoStyleState externallyAdded = JsonSerializer.Deserialize<VideoStyleState>(
@@ -222,7 +272,10 @@ public partial class App
                 && afterExternalKnownConflict.SelectedI2iEditStyleName is null;
             bool externalKnownEditProtected = externalKnownFileUnchanged
                 && externalKnownConflictDetected
-                && externalKnownContentsExact;
+                && externalKnownContentsExact
+                && !localStaleStyleAccepted
+                && window.AiStylesPendingSaveForSmoke
+                && window.AiStylesUnsavedStatusForSmoke;
 
             AiStyleDocument futureStyles = ReadAiStyleFixture(stylePath);
             futureStyles.Version = 2;
@@ -242,7 +295,7 @@ public partial class App
 
             File.WriteAllText(stylePath, "{ malformed-style-document");
             string malformedStyleBefore = Fingerprint(stylePath);
-            window = new MainWindow();
+            window = HiddenWindow();
             _ = window.SaveVideoStyleForSmoke("Malformed must stay protected");
             bool malformedStyleProtected = string.Equals(
                 malformedStyleBefore,
@@ -254,7 +307,7 @@ public partial class App
 
             File.WriteAllBytes(stylePath, new byte[4 * 1024 * 1024 + 1]);
             string oversizedStyleBefore = Fingerprint(stylePath);
-            window = new MainWindow();
+            window = HiddenWindow();
             _ = window.SaveVideoStyleForSmoke("Oversized must stay protected");
             bool oversizedStyleProtected = string.Equals(
                 oversizedStyleBefore,
@@ -266,7 +319,7 @@ public partial class App
 
             SetSqliteUserVersion(activityPath, 2);
             string futureActivityBefore = Fingerprint(activityPath);
-            window = new MainWindow();
+            window = HiddenWindow();
             bool fallbackActivityCompleted = await window.PersistFavoriteActivityForSmokeAsync(
                 Path.Combine(storageRoot, "future-fallback.png"),
                 thirdTime.AddMinutes(1),
@@ -288,6 +341,12 @@ public partial class App
                 && incrementalActivityWrite
                 && idempotentReplay
                 && concurrentLatestUnknownFieldsPreserved
+                && failedStyleSaveReported
+                && refusedStyleCloseKeptUsable
+                && crossLaneKeptPending
+                && styleRetryCommitted
+                && failedDeleteReported
+                && pendingDeleteSavedOnClose
                 && externalKnownEditProtected
                 && unsupportedFutureStyleProtected
                 && malformedStyleProtected
@@ -304,6 +363,12 @@ public partial class App
                 incrementalActivityWrite,
                 idempotentReplay,
                 concurrentLatestUnknownFieldsPreserved,
+                failedStyleSaveReported,
+                refusedStyleCloseKeptUsable,
+                crossLaneKeptPending,
+                styleRetryCommitted,
+                failedDeleteReported,
+                pendingDeleteSavedOnClose,
                 externalKnownEditProtected,
                 externalKnownEvidence = new
                 {

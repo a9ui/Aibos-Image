@@ -43,7 +43,7 @@ public partial class App
             byte[] jobs = File.ReadAllBytes(Path.Combine(root, "enhance/jobs.json"));
 
             VerifySubjectDirections(checks);
-            VerifyDirectionTimeline(checks);
+            VerifyDirectionTimeline(checks, Path.Combine(Path.GetDirectoryName(resultPath)!, "timeline-clock.json"));
             var program = new VideoPromptProgram
             {
                 Enabled = true, Template = "[look toward the camera] smile {walk / run / jump}",

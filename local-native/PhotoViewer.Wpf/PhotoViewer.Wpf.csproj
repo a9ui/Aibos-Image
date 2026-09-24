@@ -39,5 +39,6 @@
     <EmbeddedResource Include="../../contracts/fixtures/enhancement-video-prompt-enhancement-v1.json" LogicalName="VideoPromptEnhancementFixtures.json" />
     <EmbeddedResource Include="../../contracts/fixtures/enhancement-video-prompt-enhancement-v2.json" LogicalName="VideoPromptEnrichmentFixtures.json" />
     <EmbeddedResource Include="../../contracts/fixtures/enhancement-video-lora-v1.json" LogicalName="VideoLoraFixtures.json" />
+    <EmbeddedResource Include="../../contracts/fixtures/enhancement-terminal-retry-receipts-v1.json" LogicalName="TerminalRetryReceiptFixtures.json" />
   </ItemGroup>
 </Project>

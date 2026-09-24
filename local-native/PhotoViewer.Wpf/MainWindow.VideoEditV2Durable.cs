@@ -175,7 +175,11 @@ public partial class MainWindow
         => await StartModalVideoEditV2Async(
             skipReviewAuthorization: false);
 
-    private async Task<bool> StartModalVideoEditV2Async(
+    private Task<bool> StartModalVideoEditV2Async(
+        bool skipReviewAuthorization = false)
+        => CompleteDurableEnqueueUiActionAsync(() => StartModalVideoEditV2CoreAsync(skipReviewAuthorization));
+
+    private async Task<bool> StartModalVideoEditV2CoreAsync(
         bool skipReviewAuthorization = false)
     {
         _videoEditV2StartAttemptCount++;

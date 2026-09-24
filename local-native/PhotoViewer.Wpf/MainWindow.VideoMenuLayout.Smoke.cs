@@ -36,8 +36,14 @@ public partial class MainWindow
             editor.Load(new(), longPrompt, "auto", "anime", null);
             FrameworkElement reading = editor.ReadingSurfaceForSmoke;
             Layout(); outer.ScrollToTop(); UpdateLayout();
-            checks["videoMenuUsesAvailableWidthAndHeight"] = ModalVideoGenerationBoardBorder.ActualWidth > 800
-                && ModalVideoGenerationBoardBorder.ActualHeight > 680 && Fits();
+            // Native screen/DPI constraints can limit the offscreen fixture's
+            // client area. Require the intended size only where space exists.
+            Thickness boardMargin = ModalVideoGenerationBoardBorder.Margin;
+            double availableWidth = ModalVideoGenerationPopup.ActualWidth - boardMargin.Left - boardMargin.Right;
+            double availableHeight = ModalVideoGenerationPopup.ActualHeight - boardMargin.Top - boardMargin.Bottom;
+            checks["videoMenuUsesAvailableWidthAndHeight"] = availableWidth > 0 && availableHeight > 0
+                && ModalVideoGenerationBoardBorder.ActualWidth >= Math.Min(800, availableWidth) - 1
+                && ModalVideoGenerationBoardBorder.ActualHeight >= Math.Min(680, availableHeight) - 1 && Fits();
             checks["videoMenuExtendsToWindowBottom"] = Math.Abs(ModalVideoGenerationBoardBorder.ActualHeight
                 + ModalVideoGenerationBoardBorder.Margin.Top + ModalVideoGenerationBoardBorder.Margin.Bottom
                 - ModalVideoGenerationPopup.ActualHeight) <= 1;

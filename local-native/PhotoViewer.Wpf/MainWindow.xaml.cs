@@ -1392,11 +1392,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        FlushViewerStateForCloseOnce();
+        if (!FlushViewerStateForCloseOnce())
+        {
+            e.Cancel = true;
+            // New edits are possible after a refused close. Recheck all shared
+            // writers on the next attempt rather than reusing a previous drain.
+            _allowCloseAfterSharedDrain = false;
+        }
     }
 
     private bool HasPendingSharedWrites()
-        => _favoriteWriter?.HasPendingOrInFlight == true
+        => _durableEnqueueOperations != 0
+            || _favoriteWriter?.HasPendingOrInFlight == true
             || _seenWriter?.HasPendingOrInFlight == true
             || HasPendingFavoritePresentationWrites();
 
@@ -1424,8 +1431,9 @@ public partial class MainWindow : Window
     private async Task DrainThenCloseAsync()
     {
         _closingDrainInProgress = true;
+        _durableEnqueueCloseSaveFailed = false;
         _sharedActionsDisabled = true;
-        SetStatusToast("Saving Favorite, Seen, and local filter changes before closing...");
+        SetStatusToast("Saving queue reservations, Favorite, Seen, and local filter changes before closing...");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2.5));
         try
         {
@@ -1437,10 +1445,13 @@ public partial class MainWindow : Window
                 : Task.FromResult(SharedWriteStatus.Succeeded);
             Task<SharedWriteStatus> presentation =
                 DrainFavoritePresentationStateWriterAsync(timeout.Token);
+            Task<SharedWriteStatus> reservations =
+                DrainDurableEnqueueOperationsAsync(timeout.Token);
             SharedWriteStatus[] statuses = await Task.WhenAll(
                 favorite,
                 seen,
-                presentation);
+                presentation,
+                reservations);
             if (statuses.All(static status => status == SharedWriteStatus.Succeeded) && !HasPendingSharedWrites())
             {
                 _allowCloseAfterSharedDrain = true;
@@ -1450,17 +1461,20 @@ public partial class MainWindow : Window
                 return;
             }
 
-            SetStatusToast("Favorite, Seen, or local filter changes could not finish saving. The window stayed open; use Retry after fixing the local store.",
-                RetryFailedSharedBatches);
+            if (_durableEnqueueCloseSaveFailed)
+                SetStatusToast("Queue reservation saving or result presentation did not finish. Saved reservations are retained; review the result before closing again.");
+            else
+                SetStatusToast("Pending changes could not finish saving. The window stayed open; use Retry after fixing the local store.",
+                    RetryFailedSharedBatches);
         }
         catch (OperationCanceledException)
         {
-            SetStatusToast("Favorite, Seen, or local filter changes are still saving. The window stayed open; close again after the save finishes.");
+            SetStatusToast("Queue reservations or other changes are still saving. The window stayed open; close again after the save finishes.");
         }
         catch (Exception)
         {
             SetStatusToast(
-                "Favorite, Seen, or local filter changes could not finish saving. The window stayed open; use Retry after fixing the local store.",
+                "Pending changes could not finish saving. The window stayed open; use Retry after fixing the local store.",
                 RetryFailedSharedBatches);
         }
         finally
@@ -1503,10 +1517,31 @@ public partial class MainWindow : Window
         }
     }
 
-    private void FlushViewerStateForCloseOnce()
+    private Func<bool>? _confirmCloseWithoutViewerStateForSmoke;
+
+    private bool FlushViewerStateForCloseOnce()
     {
         if (_shutdownPersistenceFlushed)
-            return;
+            return true;
+
+        // Decide whether closing is allowed while timers, decode and navigation
+        // still work. Refusing a close must not leave a half-shut-down window.
+        if (!ForceSaveStateForClose())
+        {
+            bool discard = _confirmCloseWithoutViewerStateForSmoke?.Invoke()
+                ?? MessageBox.Show(
+                    this,
+                    "Viewer settings or Style changes could not be saved. Close without saving the latest changes?\nChoose No to keep the window open and retry after fixing the local store.",
+                    "Unsaved settings or Styles",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning,
+                    MessageBoxResult.No) == MessageBoxResult.Yes;
+            if (!discard)
+            {
+                SetStatusToast("Settings or Style changes are not saved. The window stayed open; use Retry to save and close.", Close);
+                return false;
+            }
+        }
 
         _shutdownPersistenceFlushed = true;
         _shutdownPersistenceFlushCount++;
@@ -1538,13 +1573,10 @@ public partial class MainWindow : Window
         // catalog selection during the forced shutdown save.
         RestoreExternalFileDropSession();
 
-        // Closing flushes only the viewer state. Folder recents, favorites,
-        // seen data, enhancement jobs, and source files are separate stores
-        // and must not be rewritten merely because the window is closing.
-        ForceSaveStateForClose();
+        return true;
     }
 
-    private void ForceSaveStateForClose()
+    private bool ForceSaveStateForClose()
     {
         // Catalog publication suppresses incidental state writes while it
         // builds a replacement snapshot. Closing can interleave only at its
@@ -1554,7 +1586,17 @@ public partial class MainWindow : Window
         _suppressStateSave = false;
         try
         {
-            SaveState();
+            // Retry only failed local Style writes. Unchanged Styles need no
+            // extra write, and shared stores keep their normal mutation owners.
+            bool viewerSaved = TrySaveState();
+            bool stylesSaved = !_aiStylesPendingSave;
+            if (!stylesSaved)
+            {
+                stylesSaved = _aiStyleStoreReady ? TrySaveAiStyles() : viewerSaved;
+                if (stylesSaved)
+                    CompleteAiStyleSave(retrying: true);
+            }
+            return viewerSaved && stylesSaved;
         }
         finally
         {
@@ -10475,7 +10517,15 @@ public partial class MainWindow : Window
             OpenModal();
     }
 
-    private async Task StartGalleryContextEnhancementAsync(
+    private Task StartGalleryContextEnhancementAsync(
+        string operation,
+        bool enqueueNext = false,
+        bool requirePhotorealSource = false,
+        bool useModalDisplayedVersion = false,
+        Tile? pinnedSourceTile = null)
+        => CompleteDurableEnqueueUiActionAsync(() => StartGalleryContextEnhancementCoreAsync(operation, enqueueNext, requirePhotorealSource, useModalDisplayedVersion, pinnedSourceTile));
+
+    private async Task StartGalleryContextEnhancementCoreAsync(
         string operation,
         bool enqueueNext = false,
         bool requirePhotorealSource = false,
@@ -20732,7 +20782,12 @@ public partial class MainWindow : Window
     private async void StartModalEnhancement_Click(object sender, RoutedEventArgs e)
         => await StartModalEnhancementOperationAsync("upscale");
 
-    private async Task StartModalEnhancementOperationAsync(
+    private Task StartModalEnhancementOperationAsync(
+        string requestedOperation,
+        bool requirePhotorealSource = false)
+        => CompleteDurableEnqueueUiActionAsync(() => StartModalEnhancementOperationCoreAsync(requestedOperation, requirePhotorealSource));
+
+    private async Task StartModalEnhancementOperationCoreAsync(
         string requestedOperation,
         bool requirePhotorealSource = false)
     {
@@ -25206,18 +25261,25 @@ public partial class MainWindow : Window
     }
 
     private void SaveState()
+        => _ = TrySaveState();
+
+    private bool TrySaveState()
     {
-        if (_initializing || _suppressStateSave) return;
+        if (_initializing || _suppressStateSave) return false;
         if (_stateWriteBlocked)
         {
             ReportPersistenceRefusal("Viewer settings", ResolvedStatePath, protectedFile: true);
-            return;
+            return false;
         }
 
         try
         {
             string path = ResolvedStatePath;
-            var selectedPath = SelectedTile() is { IsRealFile: true } selected ? selected.Path : null;
+            // A FileDrop session is presentation-only. Project its prior
+            // selection without ending that session until closing is accepted.
+            var selectedPath = _externalFileDropSessionCaptured
+                ? _externalFileDropPreviousPrimaryPath
+                : SelectedTile() is { IsRealFile: true } selected ? selected.Path : null;
             _restoredSelectedPath = selectedPath;
             List<string> previewTabPaths = _previewTabsPersistenceReady
                 ? NormalizePreviewTabPaths(_previewTabs.Select(static tab => tab.Path), MaxPersistedPreviewTabs)
@@ -25414,7 +25476,7 @@ public partial class MainWindow : Window
                 if (malformed)
                     _stateWriteBlocked = true;
                 ReportPersistenceRefusal("Viewer settings", path, malformed, malformed ? null : SaveState);
-                return;
+                return false;
             }
             _stateExtensionData = CloneExtensionData(state.ExtensionData);
             _enhancementNotificationStateExtensionData = CloneExtensionData(
@@ -25424,10 +25486,12 @@ public partial class MainWindow : Window
             if (!_aiStyleStoreReady)
                 ApplySavedStyleExtensionData(state);
             _localPersistenceCompactionPending = false;
+            return true;
         }
         catch
         {
             ReportPersistenceRefusal("Viewer settings", ResolvedStatePath, retryAction: SaveState);
+            return false;
         }
     }
 
@@ -27773,6 +27837,8 @@ public partial class MainWindow : Window
             await LoadFolderSetAsync(_currentFolderSet, commitRecent: false);
     }
     public int ShutdownPersistenceFlushCountForSmoke => _shutdownPersistenceFlushCount;
+    public void SetCloseWithoutSavingConfirmationForSmoke(Func<bool> confirm)
+        => _confirmCloseWithoutViewerStateForSmoke = confirm;
     public bool RequestDeleteSelectedForSmoke() => RequestDeleteSelected();
     public bool RequestBulkDeleteSelectedForSmoke() => RequestBulkDeleteSelected();
     public bool ExecuteSelectedDeleteForSmoke(bool favoriteConfirmed)

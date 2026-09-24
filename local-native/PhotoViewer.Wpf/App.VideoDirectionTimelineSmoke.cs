@@ -4,7 +4,7 @@ namespace PhotoViewer.Wpf;
 
 public partial class App
 {
-    private static void VerifyDirectionTimeline(Dictionary<string, bool> checks)
+    private static void VerifyDirectionTimeline(Dictionary<string, bool> checks, string clockFixturePath)
     {
         var p = new VideoPromptProgram
         {
@@ -34,7 +34,7 @@ public partial class App
             && result.Split("The presenter walks along the path").Length == 2
             && result.Split("<d>[Japanese]こんにちは。</d>").Length == 2
             && result.Contains("From 0.00 to 3.00 seconds:") && result.Contains("From 3.00 to 9.00 seconds:")
-            && result.Contains("From 9.00 to 15.08 seconds:") && !result.Contains("[Shot 2]");
+            && result.Contains("From 9.00 to 15.083 seconds:") && !result.Contains("[Shot 2]");
         int first = result.IndexOf("From 0.00", StringComparison.Ordinal), second = result.IndexOf("From 3.00", StringComparison.Ordinal), last = result.IndexOf("From 9.00", StringComparison.Ordinal);
         checks["originalAspectBelongsOnlyToItsUnchangedInterval"] = first > 0 && second > first && last > second
             && !result[..first].Contains("stern") && result[first..second].Contains("stern") && !result[second..].Contains("stern")
@@ -46,7 +46,51 @@ public partial class App
         checks["durationChangeUsesOneSharedAppClock"] = clock[0].StartMs == 0 && clock[^1].EndMs == 5166
             && clock.Zip(clock.Skip(1)).All(pair => pair.First.EndMs == pair.Second.StartMs)
             && p.TryResolveH3("anime", null, out string shortPrompt, out _, 5166) && clock.All(c => shortPrompt.Contains(c.Anchor))
-            && !shortPrompt.Contains("15.08 seconds");
+            && !shortPrompt.Contains("15.083 seconds");
+        bool collapsedRejected = true;
+        foreach (int[] ends in new[] { new[] { 1, 500000, 1000000 }, new[] { 500000, 500001, 1000000 }, new[] { 500000, 999999, 1000000 } })
+        {
+            var narrow = p.Clone();
+            for (int i = 0; i < ends.Length; i++) narrow.DirectionPhases[i].EndMillionths = ends[i];
+            string saved = narrow.Snapshot().GetRawText();
+            collapsedRejected &= VideoPromptProgram.TryRead(narrow.Snapshot(), out var imported)
+                && imported.Validate(out _)
+                && !imported.TryResolveH3("anime", null, out string rejected, out string reason, 5166)
+                && rejected.Length == 0 && reason.Contains("区間が短すぎます")
+                && !imported.TryCompile("anime", null, 124, out string rejectedInstruction, out reason)
+                && rejectedInstruction.Length == 0 && reason.Contains("区間が短すぎます")
+                && imported.Snapshot().GetRawText() == saved;
+        }
+        checks["roundedZeroIntervalsRefuseBothCompilersWithoutChangingImportedStyle"] = collapsedRejected;
+        var narrowValid = p.Clone();
+        narrowValid.DirectionPhases = [new() { EndMillionths = 100, CameraId = "fixed" }, new() { CameraId = "push" }];
+        checks["durationSpecificClockRejectsOnlyCollapsedIntervals"] = !narrowValid.TryResolveH3("anime", null, out _, out _, 4000)
+            && narrowValid.TryResolveH3("anime", null, out string millisecondPrompt, out _, 10000)
+            && millisecondPrompt.Contains("From 0.00 to 0.001 seconds:") && millisecondPrompt.Contains("From 0.001 to 10.00 seconds:")
+            && narrowValid.TryCompile("anime", null, 243, out string millisecondInstruction, out _)
+            && millisecondInstruction.Contains("From 0.00 to 0.001 seconds:")
+            && !narrowValid.TryResolveH3("anime", null, out _, out _, 0);
+        checks["promptAnchorsKeepExactSharedMillisecondBoundaries"] = clock.All(c =>
+        {
+            var times = System.Text.RegularExpressions.Regex.Match(c.Anchor, @"^From ([0-9.]+) to ([0-9.]+) seconds:$");
+            return times.Success
+                && decimal.Parse(times.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 1000 == c.StartMs
+                && decimal.Parse(times.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 1000 == c.EndMs;
+        });
+        narrowValid.TryResolveH3("anime", null, out string sharedInstruction, out _, 10000);
+        var sharedTimeline = VideoDirectionTimeline.Capture(narrowValid, 10000);
+        var validPayload = new VideoPromptEnhancement(2, sharedInstruction, new VideoEnrichmentOptions(
+            "anime", "", "preserve", 1, "preserve", false, "", [], sharedTimeline));
+        var invalidPayload = validPayload with { Options = validPayload.Options! with
+            { Timeline = [new(0, 0, sharedTimeline[0].Anchor), new(0, 10000, sharedTimeline[1].Anchor)] } };
+        var clockCases = new[]
+        {
+            new { name = "exact-one-millisecond-anchor", accepted = true, value = validPayload },
+            new { name = "collapsed-clock-refused", accepted = false, value = invalidPayload },
+        };
+        checks["nativeReaderAcceptsExactClockAndRejectsCollapsedClock"] = clockCases.All(item =>
+            VideoPromptEnhancement.IsValid(JsonSerializer.SerializeToElement(item.value)) == item.accepted);
+        System.IO.File.WriteAllText(clockFixturePath, JsonSerializer.Serialize(new { cases = clockCases }));
         p.DirectionPhases[0].ExtensionData = new() { ["FutureNote"] = JsonSerializer.SerializeToElement("kept") };
         checks["timelineRoundTripsAndKeepsCompatibleUnknownData"] = VideoPromptProgram.TryRead(p.Snapshot(), out var read)
             && read.DirectionPhases[0].ExtensionData!["FutureNote"].GetString() == "kept" && read.CaptureModeId == "stabilized";

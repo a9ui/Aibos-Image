@@ -1,4 +1,5 @@
 param(
+    [string]$AssemblyPath = '',
     [string]$Configuration = "Release",
     [string]$OutputPath = (Join-Path $env:TEMP "photoviewer-wpf-modal-interaction.json"),
     [string]$DotnetPath = "dotnet",
@@ -8,6 +9,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($AssemblyPath -and $TargetFrameworkOverride) {
+    throw 'AssemblyPath uses an existing build; TargetFrameworkOverride requires a new build.'
+}
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
@@ -23,16 +27,20 @@ if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)
 
 try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
-    $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
-    }
-    else {
-        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
-    }
-    if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+            & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+        }
+        else {
+            & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+        }
+        if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
 
-    $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+        $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+    } else {
+        $dll = (Resolve-Path -LiteralPath $AssemblyPath -ErrorAction Stop).Path
+    }
     if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
         throw "WPF assembly was not found: $dll"
     }

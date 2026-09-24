@@ -2,6 +2,8 @@ param(
     [string]$Configuration = "Release",
     [string]$OutputPath = (Join-Path $env:TEMP "aibos-wpf-style-state-forward-compat.json"),
     [string]$DotnetPath = "dotnet",
+    [switch]$SkipBuild,
+    [string]$ExecutablePath,
     [switch]$NoRestore,
     [ValidateRange(1, 180)]
     [int]$OverallTimeoutSeconds = 60
@@ -22,33 +24,44 @@ if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
 try {
-    New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
-    $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    $buildArguments = @(
-        'build',
-        $project,
-        '-c',
-        $Configuration,
-        "-p:OutputPath=$buildOutput",
-        '--nologo',
-        '-v:minimal'
-    )
-    if ($NoRestore) { $buildArguments += '--no-restore' }
-    & $DotnetPath @buildArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "WPF build failed with exit code $LASTEXITCODE."
+    if (-not $SkipBuild) {
+        New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+        $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        $buildArguments = @(
+            'build',
+            $project,
+            '-c',
+            $Configuration,
+            "-p:OutputPath=$buildOutput",
+            '--nologo',
+            '-v:minimal'
+        )
+        if ($NoRestore) { $buildArguments += '--no-restore' }
+        & $DotnetPath @buildArguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "WPF build failed with exit code $LASTEXITCODE."
+        }
     }
 
     $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
-    if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
+    if ($SkipBuild -and -not $ExecutablePath) {
+        throw "SkipBuild requires ExecutablePath for the already verified build."
+    }
+    if (-not $ExecutablePath -and -not (Test-Path -LiteralPath $dll -PathType Leaf)) {
         throw "WPF assembly was not found: $dll"
     }
     if (Test-Path -LiteralPath $fullOutputPath) {
         Remove-Item -LiteralPath $fullOutputPath -Force
     }
 
-    $process = Start-Process -FilePath $DotnetPath `
-        -ArgumentList @(('"{0}"' -f $dll), '--style-state-forward-compat-smoke', ('"{0}"' -f $fullOutputPath)) `
+    $launchPath = $DotnetPath
+    $launchArguments = @(('"{0}"' -f $dll), '--style-state-forward-compat-smoke', ('"{0}"' -f $fullOutputPath))
+    if ($ExecutablePath) {
+        $launchPath = [IO.Path]::GetFullPath($ExecutablePath)
+        $launchArguments = @('--style-state-forward-compat-smoke', ('"{0}"' -f $fullOutputPath))
+    }
+    $process = Start-Process -FilePath $launchPath `
+        -ArgumentList $launchArguments `
         -WindowStyle Hidden `
         -PassThru
     if (-not $process.WaitForExit($OverallTimeoutSeconds * 1000)) {
@@ -73,6 +86,12 @@ try {
         'incrementalActivityWrite',
         'idempotentReplay',
         'concurrentLatestUnknownFieldsPreserved',
+        'failedStyleSaveReported',
+        'refusedStyleCloseKeptUsable',
+        'crossLaneKeptPending',
+        'styleRetryCommitted',
+        'failedDeleteReported',
+        'pendingDeleteSavedOnClose',
         'externalKnownEditProtected',
         'unsupportedFutureStyleProtected',
         'malformedStyleProtected',

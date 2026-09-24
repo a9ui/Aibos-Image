@@ -153,6 +153,11 @@
   ],
   "fixtures": [
     {
+      "fixtureId": "PV-ENHANCE-JOBS-SQLITE-001-TERMINAL-RETRY-FIXTURES",
+      "forContractId": "PV-ENHANCE-JOBS-SQLITE-001",
+      "path": "contracts/fixtures/enhancement-terminal-retry-receipts-v1.json"
+    },
+    {
       "fixtureId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001-FIXTURE",
       "forContractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001",
       "path": "contracts/fixtures/enhancement-video-prompt-enhancement-v1.json"

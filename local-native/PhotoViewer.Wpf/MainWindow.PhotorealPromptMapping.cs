@@ -829,6 +829,8 @@ public partial class MainWindow
         string sourcePath,
         CancellationToken token = default)
     {
+        if (_beforePhotorealSettingsResolutionForSmoke is { } beforeResolution)
+            await beforeResolution();
         PhotorealPromptMappingState[] mappings = _photorealPromptMappings
             .Where(static row => row.Enabled)
             .Select(static row => row.Clone())

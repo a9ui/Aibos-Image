@@ -27,7 +27,10 @@ processing-minimize verifiers.
 explicit UI action
   -> capture and validate current source/settings
   -> prove or start the exact authenticated Companion when required
-  -> publish the bounded durable Inbox envelope
+  -> capture immutable wire items and the destination
+  -> serialize, wait for the shared lock and commit off the UI thread
+     (revalidate context and install source-pin overlays on UI before commit)
+  -> acknowledge the saved Inbox envelope and durable-work lifetime
   -> send an authenticated bodyless wake
   -> observe delivery and Jobs through read-only projections
 ```
@@ -38,6 +41,11 @@ health, hydration, or Jobs display cannot enter this flow. Entry points:
 feature partial -> `MainWindow.EnhancementCompanion.cs` ->
 `EnhancementEnqueueInboxStore.cs`. Tests: durable-enqueue, selected-batch,
 Companion lifetime/auth, and feature-specific start verifiers.
+
+Within one operation, capability validation reuses the authenticated health
+response obtained during API preparation. It is not a cache across actions or
+process epochs; Stop/Restart invalidation and request authentication still
+apply before publication and delivery.
 
 ## 3. Passive Jobs display
 
@@ -72,6 +80,13 @@ local optimistic state becomes durable authority. Entry points:
 Tests: queue/order, mutation-safety, recovery/connect, retry, and cancellation
 verifiers.
 
+Connect establishes the authenticated API and reads status without recovering
+or starting the queue. An explicit Resume can proceed after authenticated
+identity even when queue health is unavailable: it sends one queue mutation
+and lets the Companion own recovery, reservation intake, and unpausing. WPF
+does not send a preparatory recovery mutation or infer success from health.
+The confirmed mutation response determines whether Resume succeeded.
+
 ## 5. Managed output open, reuse, and deletion
 
 ```text
@@ -99,6 +114,16 @@ validated Jobs snapshot
 Missing, duplicate, malformed, unknown, and future members do not gain a
 fallback execution meaning. Entry points: matching `MainWindow.*Reader.cs` or
 `*Contract.cs`. Tests: the matching contract/reader verifier and smoke runner.
+
+## 7. Local settings and Style save
+
+Local persistence returns its commit result to the caller before the UI reports
+success or begins shutdown. A failed Style save retains the current edits and
+blocks collection reload from another Style editor. Closing retries only
+pending Style writes alongside viewer settings; a failed save leaves the
+window usable unless the user explicitly chooses to discard unsaved changes.
+Latest-file conflict checks and compatible unknown fields remain with each
+existing store owner. Tests: shutdown-state and style-state-forward-compat.
 
 ## Flow-change rule
 

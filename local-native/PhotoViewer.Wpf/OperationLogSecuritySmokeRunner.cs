@@ -45,6 +45,9 @@ internal static class OperationLogSecuritySmokeRunner
                 fixtureRoot,
                 DateTime.UtcNow,
                 batch);
+            if (expectation == "accept"
+                && !AibosOperationLog.VerifyFailedDrainRecoveryForSecuritySmoke(fixtureRoot))
+                return 4;
             return wrote == string.Equals(
                 expectation,
                 "accept",

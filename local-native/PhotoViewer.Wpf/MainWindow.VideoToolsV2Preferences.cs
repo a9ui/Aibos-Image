@@ -490,7 +490,7 @@ public partial class MainWindow
         out string? error)
     {
         error = null;
-        if (!_aiStyleStoreReady || _aiStyleWriteBlocked)
+        if (!_aiStyleStoreReady || _aiStyleWriteBlocked || _aiStylesPendingSave)
         {
             error = "protected";
             return false;

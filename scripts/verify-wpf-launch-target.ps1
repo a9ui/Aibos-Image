@@ -12,7 +12,11 @@ New-Item -ItemType Directory -Path $targetRoot, $fixtureScripts -Force | Out-Nul
 $checker = Join-Path $fixtureScripts 'check-wpf-launch-target.ps1'
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'check-wpf-launch-target.ps1') -Destination $checker
 $utf8 = [Text.UTF8Encoding]::new($false)
-[IO.File]::WriteAllText((Join-Path $projectRoot 'PhotoViewer.Wpf.csproj'), '<Project />', $utf8)
+[IO.File]::WriteAllText((Join-Path $projectRoot 'PhotoViewer.Wpf.csproj'), '<Project><PropertyGroup><ApplicationIcon>brand.ico</ApplicationIcon></PropertyGroup><ItemGroup><EmbeddedResource Include="choices.json" /><EmbeddedResource Include="../../contracts/linked.json" /><Resource Include="brand.png" /></ItemGroup></Project>', $utf8)
+New-Item -ItemType Directory -Path (Join-Path $runRoot 'contracts') -Force | Out-Null
+$resourceInputs = @((Join-Path $projectRoot 'choices.json'), (Join-Path $runRoot 'contracts/linked.json'),
+    (Join-Path $projectRoot 'brand.png'), (Join-Path $projectRoot 'brand.ico'))
+foreach ($resourceInput in $resourceInputs) { [IO.File]::WriteAllText($resourceInput, 'synthetic resource', $utf8) }
 $sourcePath = Join-Path $projectRoot 'App.cs'
 [IO.File]::WriteAllText($sourcePath, '// synthetic source', $utf8)
 $artifactNames = @('PhotoViewer.Wpf.exe', 'PhotoViewer.Wpf.dll', 'PhotoViewer.Wpf.deps.json', 'PhotoViewer.Wpf.runtimeconfig.json')
@@ -42,6 +46,16 @@ function Invoke-Check([int]$ExpectedExit, [string]$ExpectedReason, [switch]$Reco
 
 Invoke-Check 0 'build-provenance-written' -Record
 Invoke-Check 0 'provenance-match'
+foreach ($resourceInput in $resourceInputs) {
+    $bytes = [IO.File]::ReadAllBytes($resourceInput)
+    $timestamp = [IO.File]::GetLastWriteTimeUtc($resourceInput)
+    try {
+        [IO.File]::WriteAllText($resourceInput, 'changed resource', $utf8)
+        [IO.File]::SetLastWriteTimeUtc($resourceInput, $timestamp)
+        Invoke-Check 10 'source-content-mismatch'
+    }
+    finally { [IO.File]::WriteAllBytes($resourceInput, $bytes) }
+}
 foreach ($name in $artifactNames) {
     $path = Join-Path $targetRoot $name
     $bytes = [IO.File]::ReadAllBytes($path)

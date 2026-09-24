@@ -2061,12 +2061,12 @@ public partial class MainWindow
         _selectedVideoStyleName = style.Name;
         VideoH3PromptRewriteContextChanged();
         RefreshVideoStyleControls(updateNameFields: true);
+        if (!TrySaveAiStyles())
+            return;
         SetVideoStyleStatus(
             existingIndex >= 0
                 ? $"「{style.Name}」を現在の設定で上書きしました。"
                 : $"「{style.Name}」を保存しました。");
-        if (!_initializing)
-            SaveAiStyles();
     }
 
     private void DeleteVideoStyle_Click(object sender, RoutedEventArgs e)
@@ -2082,9 +2082,9 @@ public partial class MainWindow
         _selectedVideoStyleName = null;
         VideoH3PromptRewriteContextChanged();
         RefreshVideoStyleControls(updateNameFields: true);
+        if (!TrySaveAiStyles())
+            return;
         SetVideoStyleStatus($"「{style.Name}」を削除しました。現在の設定値はそのまま残ります。");
-        if (!_initializing)
-            SaveAiStyles();
     }
 
     private void OpenVideoStylesFile_Click(object sender, RoutedEventArgs e)
@@ -2104,7 +2104,8 @@ public partial class MainWindow
                 return false;
             }
 
-            SaveAiStyles();
+            if (!TrySaveAiStyles())
+                return false;
             if (!File.Exists(path))
             {
                 SetVideoStyleStatus("Style保存ファイルを作成できませんでした。保存エラーを確認してください。");
@@ -2689,7 +2690,10 @@ public partial class MainWindow
     private async void QueueVideoGeneration_Click(object sender, RoutedEventArgs e)
         => await SubmitVideoGenerationAsync();
 
-    private async Task<bool> QueueVideoGenerationAsync(string? preparedPrompt = null, Func<string?>? validateSubmission = null, VideoPromptEnhancement? promptEnhancement = null)
+    private Task<bool> QueueVideoGenerationAsync(string? preparedPrompt = null, Func<string?>? validateSubmission = null, VideoPromptEnhancement? promptEnhancement = null)
+        => CompleteDurableEnqueueUiActionAsync(() => QueueVideoGenerationCoreAsync(preparedPrompt, validateSubmission, promptEnhancement));
+
+    private async Task<bool> QueueVideoGenerationCoreAsync(string? preparedPrompt = null, Func<string?>? validateSubmission = null, VideoPromptEnhancement? promptEnhancement = null)
     {
         if (_videoGenerationRequestPending || VideoPromptPreparationPending)
             return false;
@@ -3559,7 +3563,7 @@ public partial class MainWindow
     {
         AppVideoStyleNameTextBox.Text = name;
         SaveVideoStyle_Click(SaveAppVideoStyleButton, new RoutedEventArgs());
-        return FindVideoStyle(name) is not null;
+        return !_aiStylesPendingSave && FindVideoStyle(name) is not null;
     }
 
     public bool SelectVideoStyleForSmoke(string name)
@@ -3579,7 +3583,7 @@ public partial class MainWindow
     {
         string? selectedName = _selectedVideoStyleName;
         DeleteVideoStyle_Click(DeleteAppVideoStyleButton, new RoutedEventArgs());
-        return selectedName is not null && FindVideoStyle(selectedName) is null;
+        return !_aiStylesPendingSave && selectedName is not null && FindVideoStyle(selectedName) is null;
     }
 
     public (string Label, string? ProducerJobId)? VideoSourceForSmoke

@@ -199,37 +199,15 @@ public partial class MainWindow
         string Error);
 
     private IDisposable AcquireEnhancementJobsWriteLeaseForDurablePublish()
-    {
-        string jobsPath = Path.GetFullPath(ResolvedEnhancementJobsPath);
-        string? jobsDirectory = Path.GetDirectoryName(jobsPath);
-        if (string.IsNullOrWhiteSpace(jobsDirectory))
-        {
-            throw new IOException(
-                "The Enhancement Jobs lock target is unavailable.");
-        }
-        // Companion writers deliberately use the legacy JSON pathname as the
-        // stable cross-backend lock target for both JSON and SQLite stores.
-        string lockTarget = Path.Combine(jobsDirectory, "jobs.json");
-        return AlbumStore.TryAcquireSharedDirectoryWriteLease(lockTarget)
-            ?? throw new IOException(
-                "The Enhancement Jobs store is busy; durable publication was not started.");
-    }
+        => EnhancementEnqueueInboxStore.AcquireJobsWriteLease(
+            ResolvedEnhancementJobsPath);
 
     private IDisposable AcquireVideoDurablePublishLease(
         Func<FileStream> pinSource)
     {
-        IDisposable jobsLease =
-            AcquireEnhancementJobsWriteLeaseForDurablePublish();
-        try
-        {
-            FileStream sourceLease = pinSource();
-            return new DurablePublishLease(jobsLease, sourceLease);
-        }
-        catch
-        {
-            jobsLease.Dispose();
-            throw;
-        }
+        // Publish owns the shared Jobs lock before invoking this callback.
+        // Source protection ends before that publication lock is released.
+        return new DurablePublishLease(pinSource());
     }
 
     private async Task<EnhancementApiResponse> EnsureEnhancementCompanionReadyForExplicitActionAsync(
@@ -238,14 +216,14 @@ public partial class MainWindow
         => await EnsureEnhancementCompanionApiReadyAsync(
             sourceIdentity,
             token,
-            recoverQueueBeforeHealth: true);
+            preparation: EnhancementApiPreparation.RecoverThenHealth);
+
+    private enum EnhancementApiPreparation { ConnectionOnly, Health, RecoverThenHealth }
 
     private async Task<EnhancementApiResponse> EnsureEnhancementCompanionApiReadyAsync(
         string? sourceIdentity = null,
         CancellationToken token = default,
-        bool recoverQueueBeforeHealth = false,
-        string? recoveryIdempotencyKey = null,
-        Action<EnhancementApiResponse>? onQueueRecoveryCompleted = null)
+        EnhancementApiPreparation preparation = EnhancementApiPreparation.Health)
     {
         _ = sourceIdentity;
         using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -256,22 +234,25 @@ public partial class MainWindow
         token.ThrowIfCancellationRequested();
         RetireExitedEnhancementCompanion();
         const string readinessRoute = "api/enhance/health";
-        bool queueRecoveryCompleted = !recoverQueueBeforeHealth;
+        bool queueRecoveryCompleted = preparation != EnhancementApiPreparation.RecoverThenHealth;
 
         async Task<EnhancementApiResponse> ReadReadinessAfterRequiredRecoveryAsync(
             CancellationToken requestToken)
         {
+            // Explicit resume owns recovery at the server. Health may be
+            // unavailable until that recovery completes; identity is sufficient
+            // to send the authenticated intent, never to infer queue success.
+            if (preparation == EnhancementApiPreparation.ConnectionOnly)
+                return new EnhancementApiResponse(true, 200, null, "");
             if (!queueRecoveryCompleted)
             {
                 EnhancementApiResponse recovery = await SendEnhancementApiAsync(
                     HttpMethod.Post,
                     EnhancementCompanionQueueRecoveryRoute,
-                    token: requestToken,
-                    idempotencyKey: recoveryIdempotencyKey);
+                    token: requestToken);
                 if (!recovery.Ok)
                     return recovery;
                 queueRecoveryCompleted = true;
-                onQueueRecoveryCompleted?.Invoke(recovery);
             }
 
             EnhancementApiResponse response = await SendEnhancementApiAsync(
@@ -406,7 +387,8 @@ public partial class MainWindow
                         CompleteOwnedEnhancementCompanionAfterBootstrapFailure();
                         return response;
                     }
-                    if (IsReadyEnhancementCompanionResponse(response))
+                    if (preparation == EnhancementApiPreparation.ConnectionOnly
+                        || IsReadyEnhancementCompanionResponse(response))
                     {
                         _enhancementCompanionLaunchError = null;
                         return response;
@@ -652,10 +634,7 @@ public partial class MainWindow
         if (!readiness.Ok)
             return readiness;
 
-        EnhancementApiResponse health = await SendEnhancementApiAsync(
-            HttpMethod.Get,
-            "api/enhance/health",
-            token: token);
+        EnhancementApiResponse health = readiness;
         if (health.Ok
             && health.Payload is JsonElement payload
             && HasEnhancementCapability(payload, capability))
@@ -695,10 +674,7 @@ public partial class MainWindow
             && !requiresPhotorealSeedControl)
             return readiness;
 
-        EnhancementApiResponse health = await SendEnhancementApiAsync(
-            HttpMethod.Get,
-            "api/enhance/health",
-            token: token);
+        EnhancementApiResponse health = readiness;
         bool photorealSupported = !needsPhotorealControls;
         bool enqueueNextSupported = !enqueueNext;
         bool photorealSourceUpscaleSupported =
@@ -1561,10 +1537,12 @@ public partial class MainWindow
         => TryParseMiniMaxH3VideoCanvasTiersCapability(payload);
 
     private async Task<EnhancementEnqueueProbe> ProbeEnhancementEnqueueBackendAsync(
-        CancellationToken token)
+        CancellationToken token,
+        EnhancementApiResponse? authenticatedHealth = null)
     {
+        token.ThrowIfCancellationRequested();
         long deadline = Environment.TickCount64 + DurableEnqueueActionDeadlineMilliseconds;
-        EnhancementApiResponse health = await SendEnhancementApiAsync(
+        EnhancementApiResponse health = authenticatedHealth ?? await SendEnhancementApiAsync(
             HttpMethod.Get,
             "api/enhance/health",
             token: token,
@@ -1646,6 +1624,7 @@ public partial class MainWindow
         string? durableRetryAdapterId = null,
         int? durableRetryPhotorealMaxDimension = null)
     {
+        using DurableEnqueueOperation enqueueOperation = BeginDurableEnqueueOperation();
         CancellationToken actionEpoch = CaptureEnhancementCompanionOperationToken();
         using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(token, actionEpoch);
         token = operationCts.Token;
@@ -1667,21 +1646,21 @@ public partial class MainWindow
                     ? "The adapter identity or photoreal dimension cannot be verified. The reservation was not published."
                     : "The saved adapter identity or photoreal dimension cannot be verified. The retry reservation was not published.");
         }
+        EnhancementApiResponse? readiness = null;
         if (_usingDefaultModalEnhancementSender)
         {
             // Authenticate the API first. Publish before recovering the queue,
             // whose interrupted-runtime preparation can take several minutes.
-            EnhancementApiResponse readiness =
+            readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
                     recoverySourceIdentity,
-                    token,
-                    recoverQueueBeforeHealth: false);
+                    token);
             if (!readiness.Ok)
                 return readiness;
         }
 
         EnhancementEnqueueProbe probe =
-            await ProbeEnhancementEnqueueBackendAsync(token);
+            await ProbeEnhancementEnqueueBackendAsync(token, readiness);
         EnhancementApiResponse? validationFailure =
             ValidateEnhancementEnqueueProbe(
                 probe,
@@ -1714,23 +1693,23 @@ public partial class MainWindow
                     prePublishError);
             }
             token.ThrowIfCancellationRequested();
-            prePublishError = prePublishValidator?.Invoke();
-            if (!string.IsNullOrWhiteSpace(prePublishError))
+            await PublishDurableEnqueueAsync([item], () =>
             {
-                return new EnhancementApiResponse(
-                    false,
-                    409,
-                    null,
-                    prePublishError);
-            }
-            token.ThrowIfCancellationRequested();
-            using (IDisposable? durablePublishLease =
-                   onBeforeDurablePublish?.Invoke(item))
-            {
-                _ = EnhancementEnqueueInboxStore.Publish(
-                    ResolvedEnhancementJobsPath,
-                    [item]);
-            }
+                string? currentError = prePublishValidator?.Invoke();
+                if (!string.IsNullOrWhiteSpace(currentError))
+                    throw new DurableEnqueueValidationException(currentError);
+                token.ThrowIfCancellationRequested();
+                return onBeforeDurablePublish?.Invoke(item);
+            }, token);
+        }
+        catch (DurableEnqueueValidationException ex)
+        {
+            return new EnhancementApiResponse(false, 409, null, ex.Message);
+        }
+        catch (IOException ex) when (ex is EnhancementEnqueueInboxCapacityException
+            or EnhancementEnqueueInboxMaintenanceException)
+        {
+            return new EnhancementApiResponse(false, 409, null, ex.Message);
         }
         catch (VideoRetrySourceUnavailableException)
         {
@@ -1750,6 +1729,12 @@ public partial class MainWindow
                 null,
                 "The AI queue reservation could not be saved locally. Nothing was submitted; try again.");
         }
+
+        KickEnhancementCompanionRecoveryAfterDurablePublish(
+            recoverySourceIdentity, item.RequestId,
+            armSavedDeliveryCatalogAdoption: false,
+            scheduleRecovery: false, actionEpoch: actionEpoch);
+        enqueueOperation.MarkCompleted();
 
         if (!EnhancementEnqueueProbePolicy.AllowsImmediateNudge(probe.Mode))
         {
@@ -1849,6 +1834,7 @@ public partial class MainWindow
             IReadOnlyList<Func<JsonElement, string?>?>? itemHealthValidators = null,
             bool requireExactItemHealthValidation = false)
     {
+        using DurableEnqueueOperation enqueueOperation = BeginDurableEnqueueOperation();
         CancellationToken actionEpoch = CaptureEnhancementCompanionOperationToken();
         using var operationCts = CancellationTokenSource.CreateLinkedTokenSource(token, actionEpoch);
         token = operationCts.Token;
@@ -1861,12 +1847,12 @@ public partial class MainWindow
                 "Item health validators must match the batch item count.",
                 nameof(itemHealthValidators));
         }
+        EnhancementApiResponse? readiness = null;
         if (_usingDefaultModalEnhancementSender)
         {
-            EnhancementApiResponse readiness =
+            readiness =
                 await EnsureEnhancementCompanionApiReadyAsync(
-                    token: token,
-                    recoverQueueBeforeHealth: false);
+                    token: token);
             if (!readiness.Ok)
             {
                 EnhancementApiResponse rejected = new(
@@ -1882,7 +1868,7 @@ public partial class MainWindow
         }
 
         EnhancementEnqueueProbe probe =
-            await ProbeEnhancementEnqueueBackendAsync(token);
+            await ProbeEnhancementEnqueueBackendAsync(token, readiness);
         EnhancementApiResponse? validationFailure =
             ValidateEnhancementEnqueueProbe(
                 probe,
@@ -1949,7 +1935,7 @@ public partial class MainWindow
         bool firstPublishReported = false;
         bool abortRemainingPublishes = false;
 
-        bool PublishRange(int start, int count)
+        async Task<bool> PublishRangeAsync(int start, int count)
         {
             if (!firstPublishReported
                 && shouldStopBeforeFirstPublish?.Invoke() == true)
@@ -1967,30 +1953,12 @@ public partial class MainWindow
                      index >= 0;
                      index--)
                 {
-                    durablePublishLeases[index].Dispose();
+                    try { durablePublishLeases[index].Dispose(); } catch { }
                 }
                 durablePublishLeases.Clear();
             }
             try
             {
-                bool requiresJobsWriteLease = Enumerable.Range(0, count)
-                    .Select(localIndex =>
-                        publishIndices[start + localIndex])
-                    .Any(globalIndex => items[globalIndex]
-                        .DurablePublishLeaseFactory is not null);
-                if (requiresJobsWriteLease)
-                {
-                    durablePublishLeases.Add(
-                        AcquireEnhancementJobsWriteLeaseForDurablePublish());
-                }
-                for (int localIndex = 0; localIndex < count; localIndex++)
-                {
-                    int globalIndex = publishIndices[start + localIndex];
-                    IDisposable? lease = items[globalIndex]
-                        .DurablePublishLeaseFactory?.Invoke();
-                    if (lease is not null)
-                        durablePublishLeases.Add(lease);
-                }
                 EnhancementEnqueueInboxItem[] chunk = Enumerable.Range(0, count)
                     .Select(localIndex =>
                     {
@@ -2007,9 +1975,33 @@ public partial class MainWindow
                             retryJobId: batchItem.RetryJobId);
                     })
                     .ToArray();
-                _ = EnhancementEnqueueInboxStore.Publish(
-                    ResolvedEnhancementJobsPath,
-                    chunk);
+                await PublishDurableEnqueueAsync(
+                    chunk,
+                    () =>
+                    {
+                        if (!firstPublishReported && shouldStopBeforeFirstPublish?.Invoke() == true)
+                            throw new OperationCanceledException("Batch stopped before durable publication.");
+                        token.ThrowIfCancellationRequested();
+                        try
+                        {
+                            for (int localIndex = 0; localIndex < count; localIndex++)
+                            {
+                                int globalIndex = publishIndices[start + localIndex];
+                                IDisposable? lease = items[globalIndex]
+                                    .DurablePublishLeaseFactory?.Invoke();
+                                if (lease is not null)
+                                    durablePublishLeases.Add(lease);
+                            }
+                            var owned = new DurablePublishLease(durablePublishLeases.ToArray());
+                            durablePublishLeases.Clear();
+                            return owned;
+                        }
+                        catch
+                        {
+                            DisposeDurablePublishLeases();
+                            throw;
+                        }
+                    }, token);
                 for (int localIndex = 0; localIndex < chunk.Length; localIndex++)
                 {
                     int globalIndex = publishIndices[start + localIndex];
@@ -2019,20 +2011,24 @@ public partial class MainWindow
                 if (!firstPublishReported)
                 {
                     firstPublishReported = true;
+                    KickEnhancementCompanionRecoveryAfterDurablePublish(
+                        sourceIdentity: null, chunk[0].RequestId,
+                        armSavedDeliveryCatalogAdoption: false,
+                        scheduleRecovery: false, actionEpoch: actionEpoch);
                     onFirstPublish?.Invoke();
                 }
                 return true;
             }
             catch (EnhancementEnqueuePayloadTooLargeException) when (count > 1)
             {
-                // Recursive split publication must reacquire the shared Jobs
-                // lock after this oversized envelope's leases are released.
+                // Size is checked before locking or pinning. Each smaller
+                // envelope gets its own capacity check and publication lease.
                 DisposeDurablePublishLeases();
                 int firstCount = count / 2;
-                bool firstPublished = PublishRange(start, firstCount);
+                bool firstPublished = await PublishRangeAsync(start, firstCount);
                 if (!firstPublished || abortRemainingPublishes)
                     return false;
-                return PublishRange(start + firstCount, count - firstCount);
+                return await PublishRangeAsync(start + firstCount, count - firstCount);
             }
             catch (EnhancementEnqueuePayloadTooLargeException ex)
             {
@@ -2042,6 +2038,22 @@ public partial class MainWindow
                     null,
                     ex.Message);
                 return true;
+            }
+            catch (OperationCanceledException)
+            {
+                for (int index = start; index < publishIndices.Count; index++)
+                    responses[publishIndices[index]] = stoppedResponse;
+                abortRemainingPublishes = true;
+                return false;
+            }
+            catch (IOException ex) when (ex is EnhancementEnqueueInboxCapacityException
+                or EnhancementEnqueueInboxMaintenanceException)
+            {
+                for (int index = start; index < publishIndices.Count; index++)
+                    responses[publishIndices[index]] = new EnhancementApiResponse(
+                        false, 409, null, ex.Message);
+                abortRemainingPublishes = true;
+                return false;
             }
             catch (Exception ex) when (
                 ex is IOException
@@ -2064,9 +2076,12 @@ public partial class MainWindow
         {
             int count = EnhancementEnqueueProbePolicy.NextEnvelopeItemCount(
                 publishIndices.Count - start);
-            if (!PublishRange(start, count))
+            if (!await PublishRangeAsync(start, count))
                 break;
         }
+
+        if (publishedItems.Count == items.Count)
+            enqueueOperation.MarkCompleted();
 
         if (!EnhancementEnqueueProbePolicy.AllowsImmediateNudge(probe.Mode)
             && publishedItems.Count > 0)
@@ -2288,7 +2303,7 @@ public partial class MainWindow
                 await EnsureEnhancementCompanionApiReadyAsync(
                     sourceIdentity,
                     token,
-                    recoverQueueBeforeHealth: false);
+                    preparation: EnhancementApiPreparation.Health);
             if (readiness.Ok
                 && EnhancementEnqueueProbePolicy.Classify(
                     readiness.Ok, readiness.StatusCode, readiness.Payload)

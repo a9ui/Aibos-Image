@@ -29,7 +29,7 @@ public partial class MainWindow
             // Starting the API is not consent to recover, drain, resume or wake Jobs.
             EnhancementApiResponse response = await EnsureEnhancementCompanionApiReadyAsync(
                 token: control.Token,
-                recoverQueueBeforeHealth: false);
+                preparation: EnhancementApiPreparation.Health);
             control.Token.ThrowIfCancellationRequested();
             if (response.Ok && response.Payload is JsonElement payload
                 && TryParseEnhancementQueueHealth(payload, out EnhancementQueueHealthView health))

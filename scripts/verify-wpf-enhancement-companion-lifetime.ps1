@@ -46,8 +46,8 @@ try {
     $controlSource = Get-Content -LiteralPath (Join-Path $repoRoot 'local-native/PhotoViewer.Wpf/MainWindow.CompanionControls.cs') -Raw
     $ordinaryStartupLazy = $ordinaryStartupLazy -and
         $appSource -match 'if \(Environment.GetEnvironmentVariable\("AIBOS_COMPANION_START_ON_LAUNCH"\) == "1"\)\s*_ = mainWindow.StartEnhancementCompanionApiForApplicationLaunchAsync\(\)' -and
-        $controlSource -match 'recoverQueueBeforeHealth: false' -and
-        $controlSource -notmatch 'HttpMethod.Post|recoverQueueBeforeHealth: true|RecoverAndWake'
+        $controlSource -match 'preparation: EnhancementApiPreparation.Health' -and
+        $controlSource -notmatch 'HttpMethod.Post|preparation: EnhancementApiPreparation.RecoverThenHealth|RecoverAndWake'
     $passiveMethod = [regex]::Match(
         $companionSource,
         'private async Task<EnhancementApiResponse\?>\s+EnsureEnhancementCompanionOwnershipForPassiveReadAsync[\s\S]*?private static bool ShouldReverifyEnhancementCompanionAfterAuthenticatedRequest',
@@ -59,11 +59,11 @@ try {
         $companionSource -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync[\s\S]*?EnsureEnhancementCompanionApiReadyAsync' -and
         $companionSource -match 'TryStartOwnedEnhancementCompanion\(out string startError\)'
     $explicitRecoveryBoundaryExact =
-        $companionSource -match 'private async Task RecoverAndWakeDurableEnqueueInboxAsync[\s\S]{0,1800}recoverQueueBeforeHealth:\s*false' -and
+        $companionSource -match 'private async Task RecoverAndWakeDurableEnqueueInboxAsync[\s\S]{0,1800}preparation:\s*EnhancementApiPreparation\.Health' -and
         $companionSource -match 'private async Task RecoverAndWakeDurableEnqueueInboxAsync[\s\S]{0,2200}EnhancementEnqueueBackendMode.Durable' -and
-        $companionSource -notmatch 'SendIdempotentEnhancementMutationAsync[\s\S]{0,3500}recoverQueueBeforeHealth:\s*true' -and
-        $companionSource -notmatch 'SendEnhancementEnqueueAsync\([\s\S]{0,6000}recoverQueueBeforeHealth:\s*true' -and
-        $companionSource -notmatch 'TrySendDurableEnhancementBatchCoreAsync\([\s\S]{0,5000}recoverQueueBeforeHealth:\s*true'
+        $companionSource -notmatch 'SendIdempotentEnhancementMutationAsync[\s\S]{0,3500}preparation:\s*EnhancementApiPreparation\.RecoverThenHealth' -and
+        $companionSource -notmatch 'SendEnhancementEnqueueAsync\([\s\S]{0,6000}preparation:\s*EnhancementApiPreparation\.RecoverThenHealth' -and
+        $companionSource -notmatch 'TrySendDurableEnhancementBatchCoreAsync\([\s\S]{0,5000}preparation:\s*EnhancementApiPreparation\.RecoverThenHealth'
     Assert-True $ordinaryStartupLazy 'Ordinary WPF startup still references Companion auto-start.'
     Assert-True $passiveReadProbeOnly 'A passive Companion read can start a process.'
     Assert-True $explicitActionAutoStartPreserved 'Explicit Enhancement action lost owned Companion auto-start.'
@@ -107,6 +107,7 @@ try {
     Assert-True ($lazyResumeExitCode -eq 0 -and $lazyResumeResult.ok -eq $true) 'Queue lazy Resume smoke failed.'
     Assert-True ($lazyResumeResult.recoveryControls -eq $true) 'Offline Restart, dead-epoch reconnect, WAL recovery controls or cancellable bounded probing failed.'
     Assert-True ($lazyResumeResult.passiveDidNotStart -eq $true) 'Passive queue UI started the Companion.'
+    Assert-True ($lazyResumeResult.authenticatedHealthReused -eq $true) 'Single and batch registration did not reuse one authenticated health response per operation.'
     Assert-True ($lazyResumeResult.explicitResumeExact -eq $true) 'Explicit queue Resume was not exact.'
     Assert-True ($lazyResumeResult.duplicateGuarded -eq $true) 'Duplicate queue Resume was not guarded.'
     Assert-True ($lazyResumeResult.walFixtureValid -eq $true) 'Queue bootstrap smoke did not create a valid TEMP SQLite WAL fixture.'

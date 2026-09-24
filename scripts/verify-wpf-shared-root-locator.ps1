@@ -1,4 +1,5 @@
 param(
+    [string]$AssemblyPath = '',
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [string]$DotnetPath = ''
@@ -66,12 +67,15 @@ function Wait-SmokeSignal {
 
 try {
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
-    & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
-    if ($LASTEXITCODE -ne 0) {
-        throw "WPF build failed with exit $LASTEXITCODE."
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+        if ($LASTEXITCODE -ne 0) {
+            throw "WPF build failed with exit $LASTEXITCODE."
+        }
+        $dll = Join-Path $buildOutput 'PhotoViewer.Wpf.dll'
+    } else {
+        $dll = (Resolve-Path -LiteralPath $AssemblyPath -ErrorAction Stop).Path
     }
-
-    $dll = Join-Path $buildOutput 'PhotoViewer.Wpf.dll'
     & $DotnetPath $dll --shared-root-locator-smoke $resultPath --contract $contract --temp-root $fixtureRoot
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {

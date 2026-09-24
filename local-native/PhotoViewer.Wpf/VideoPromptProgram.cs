@@ -223,7 +223,8 @@ public sealed class VideoPromptProgram
     public bool TryResolveH3(string kind, string? sourcePrompt, out string prompt, out string error, int durationMs = 15083)
     {
         prompt = "";
-        if (!Validate(out error) || !VideoPromptLanguage.TryParse(TemplateFor(kind), out var tokens, out error)) return false;
+        if (!Validate(out error) || !VideoDirectionTimeline.TryValidateClock(this, durationMs, out error)
+            || !VideoPromptLanguage.TryParse(TemplateFor(kind), out var tokens, out error)) return false;
         var resolved = new StringBuilder();
         foreach (VideoPromptToken token in tokens)
         {
@@ -272,6 +273,7 @@ public sealed class VideoPromptProgram
             error = "未対応のH3秒数です。";
             return false;
         }
+        if (!VideoDirectionTimeline.TryValidateClock(this, frameCount * 1000 / 24, out error)) return false;
         if (!VideoPromptLanguage.TryParse(TemplateFor(sourceKind), out var tokens, out error))
             return false;
         var text = new StringBuilder();

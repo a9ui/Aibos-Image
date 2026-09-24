@@ -15,9 +15,14 @@ internal static class EnhancementEnqueueInboxStore
     internal const int MaximumItemsPerEnvelope = 1_000;
     internal const int MaximumBodyJsonBytes = 8 * 1024 * 1024;
     internal const int MaximumEnvelopeBytes = 16 * 1024 * 1024;
+    internal const int MaximumActiveEnvelopes = 128;
+    internal const int MaximumActiveDirectoryEntries = 256;
+    internal const long MaximumActiveEnvelopeBytes = 64L * 1024 * 1024;
+    internal const string MaintenanceMarkerFileName = "maintenance.json";
     internal const uint MoveFileWriteThroughFlagForSmoke = 0x00000008;
     private const string BatchTimestampFormat = "yyyyMMddHHmmssfffffff";
     private static long _lastBatchTimestampTicks;
+    internal static Func<FileSystemInfo, bool>? EntryExistsForSmoke { get; set; }
 
     internal static EnhancementEnqueueInboxItem CreateItem(
         object? body,
@@ -67,8 +72,11 @@ internal static class EnhancementEnqueueInboxStore
         string jobsPath,
         IReadOnlyList<EnhancementEnqueueInboxItem> items,
         string? batchId = null,
-        DateTimeOffset? createdAt = null)
+        DateTimeOffset? createdAt = null,
+        Func<IDisposable?>? beforePublish = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(jobsPath);
         ArgumentNullException.ThrowIfNull(items);
         if (items.Count == 0)
@@ -89,12 +97,21 @@ internal static class EnhancementEnqueueInboxStore
         }
 
         string pendingDirectory = GetPendingDirectory(jobsPath);
+        using IDisposable jobsLease = AcquireJobsWriteLease(jobsPath);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateActiveCapacity(pendingDirectory, payload.Length);
+        // Capacity refusal precedes the source pin and provisional UI overlay.
+        // Source leases are released before the shared Jobs writer lease.
+        cancellationToken.ThrowIfCancellationRequested();
+        using IDisposable? sourceLease = beforePublish?.Invoke();
         Directory.CreateDirectory(pendingDirectory);
+        AssertPlainInboxDirectories(pendingDirectory);
         string destinationPath = Path.Combine(pendingDirectory, resolvedBatchId + ".json");
         string temporaryPath = Path.Combine(
             pendingDirectory,
             resolvedBatchId + "." + Guid.NewGuid().ToString("N") + ".tmp");
 
+        bool ownsTemporaryFile = false;
         try
         {
             using (var stream = new FileStream(
@@ -107,6 +124,7 @@ internal static class EnhancementEnqueueInboxStore
                            Options = FileOptions.WriteThrough,
                        }))
             {
+                ownsTemporaryFile = true;
                 stream.Write(payload);
                 stream.Flush(flushToDisk: true);
             }
@@ -127,9 +145,96 @@ internal static class EnhancementEnqueueInboxStore
         }
         catch
         {
-            TryDeleteTemporaryFile(temporaryPath);
+            if (ownsTemporaryFile)
+                TryDeleteTemporaryFile(temporaryPath);
             throw;
         }
+    }
+
+    internal static IDisposable AcquireJobsWriteLease(string jobsPath)
+    {
+        string? jobsDirectory = Path.GetDirectoryName(Path.GetFullPath(jobsPath));
+        if (string.IsNullOrWhiteSpace(jobsDirectory))
+            throw new IOException("The Enhancement Jobs lock target is unavailable.");
+        _ = AssertPlainDirectoryIfPresent(jobsDirectory);
+        // This is the shared cross-backend target, including SQLite.
+        string lockTarget = Path.Combine(jobsDirectory, "jobs.json");
+        return AlbumStore.TryAcquireSharedDirectoryWriteLease(lockTarget)
+            ?? throw new IOException("The Enhancement Jobs store is busy; durable publication was not started.");
+    }
+
+    private static void ValidateActiveCapacity(string pendingDirectory, int payloadBytes)
+    {
+        AssertPlainInboxDirectories(pendingDirectory);
+        string inboxRoot = Path.GetDirectoryName(pendingDirectory)!;
+        AssertNoMaintenanceMarker(Path.GetDirectoryName(inboxRoot)!);
+        int entries = 0;
+        int envelopes = 0;
+        long bytes = 0;
+        // Current consumers share the writer lock. Pending first is also
+        // conservative for a legacy consumer's one-way claim: a moved entry
+        // may count twice, but cannot disappear between the two phase scans.
+        foreach (string directory in new[] { pendingDirectory, Path.Combine(inboxRoot, "processing") })
+        {
+            if (!AssertPlainDirectoryIfPresent(directory))
+                continue;
+            foreach (FileSystemInfo entry in new DirectoryInfo(directory).EnumerateFileSystemInfos())
+            {
+                if (++entries + 1 > MaximumActiveDirectoryEntries)
+                    throw new EnhancementEnqueueInboxCapacityException();
+                entry.Refresh();
+                if (!(EntryExistsForSmoke?.Invoke(entry) ?? entry.Exists))
+                    throw new IOException("The reservation inbox entry could not be verified.");
+                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new IOException("The reservation inbox contains a linked entry.");
+                if (entry is not FileInfo file || !entry.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (++envelopes + 1 > MaximumActiveEnvelopes)
+                    throw new EnhancementEnqueueInboxCapacityException();
+                long length = file.Length;
+                if (length > MaximumActiveEnvelopeBytes - bytes - payloadBytes)
+                    throw new EnhancementEnqueueInboxCapacityException();
+                bytes += length;
+            }
+        }
+    }
+
+    private static void AssertNoMaintenanceMarker(string inboxDirectory)
+    {
+        try
+        {
+            // Presence is enough to close normal admission. Do not interpret
+            // malformed, future, unreadable or stale repair state as absence.
+            _ = File.GetAttributes(Path.Combine(inboxDirectory, MaintenanceMarkerFileName));
+        }
+        catch (FileNotFoundException) { return; }
+        catch (DirectoryNotFoundException) { return; }
+        throw new EnhancementEnqueueInboxMaintenanceException();
+    }
+
+    private static void AssertPlainInboxDirectories(string pendingDirectory)
+    {
+        string versionDirectory = Path.GetDirectoryName(pendingDirectory)!;
+        string inboxDirectory = Path.GetDirectoryName(versionDirectory)!;
+        string enhanceDirectory = Path.GetDirectoryName(inboxDirectory)!;
+        _ = AssertPlainDirectoryIfPresent(enhanceDirectory);
+        _ = AssertPlainDirectoryIfPresent(inboxDirectory);
+        _ = AssertPlainDirectoryIfPresent(versionDirectory);
+        _ = AssertPlainDirectoryIfPresent(pendingDirectory);
+    }
+
+    private static bool AssertPlainDirectoryIfPresent(string directory)
+    {
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(directory); }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+        if ((attributes & FileAttributes.Directory) == 0
+            || (attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new IOException("The reservation inbox directory is linked or invalid.");
+        }
+        return true;
     }
 
     internal static string GetPendingDirectory(string jobsPath)
@@ -354,3 +459,9 @@ internal sealed record EnhancementEnqueueInboxPublishResult(
 
 internal sealed class EnhancementEnqueuePayloadTooLargeException(string message)
     : ArgumentException(message);
+
+internal sealed class EnhancementEnqueueInboxCapacityException()
+    : IOException("The local AI reservation inbox is full. The remaining reservations were not saved. Existing reservations are kept.");
+
+internal sealed class EnhancementEnqueueInboxMaintenanceException()
+    : IOException("AI reservation repair is pending. The remaining reservations were not saved. Existing reservations are kept.");

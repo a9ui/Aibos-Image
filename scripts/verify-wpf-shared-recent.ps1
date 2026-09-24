@@ -1,4 +1,5 @@
 param(
+    [string]$AssemblyPath = '',
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release'
 )
@@ -16,12 +17,16 @@ $resultPath = Join-Path $runRoot 'result.json'
 
 try {
     New-Item -ItemType Directory -Path $fixture -Force | Out-Null
-    & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
-    if ($LASTEXITCODE -ne 0) {
-        throw "WPF build failed with exit $LASTEXITCODE."
-    }
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+        if ($LASTEXITCODE -ne 0) {
+            throw "WPF build failed with exit $LASTEXITCODE."
+        }
 
-    $dll = Join-Path $buildOutput 'PhotoViewer.Wpf.dll'
+        $dll = Join-Path $buildOutput 'PhotoViewer.Wpf.dll'
+    } else {
+        $dll = (Resolve-Path -LiteralPath $AssemblyPath -ErrorAction Stop).Path
+    }
     & dotnet $dll --shared-recent-smoke $resultPath --folder $fixture
     if ($LASTEXITCODE -ne 0) {
         throw "WPF shared recent smoke failed with exit $LASTEXITCODE."

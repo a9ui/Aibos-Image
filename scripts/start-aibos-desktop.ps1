@@ -1,12 +1,20 @@
 [CmdletBinding()]
 param(
     [string]$CompanionRoot = '',
-    [switch]$AutoStartCompanion
+    [switch]$AutoStartCompanion,
+    [string]$PinnedLaunchManifestSha256 = '',
+    [string]$EnrollmentEnhancementRoot = '',
+    [ValidateSet('jobs.json', 'jobs.sqlite3')][string]$EnrollmentJobsFileName = 'jobs.json'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 trap {
+    if ($PSBoundParameters.ContainsKey('EnrollmentEnhancementRoot') -or $PSBoundParameters.ContainsKey('PinnedLaunchManifestSha256')) {
+        [Console]::Error.WriteLine('Explicit generation startup failed; no enrollment was granted.')
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 2
+    }
     Add-Type -AssemblyName PresentationFramework
     [System.Windows.MessageBox]::Show(
         'Aibos Image could not start. Run start_aibos.bat to see the diagnostic output, or reinstall the desktop launcher.',
@@ -16,6 +24,47 @@ trap {
 }
 . (Join-Path $PSScriptRoot 'lib\DesktopActivation.ps1')
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+if ($PSBoundParameters.ContainsKey('EnrollmentEnhancementRoot')) {
+    if ($PSBoundParameters.ContainsKey('PinnedLaunchManifestSha256')) { throw 'Choose one explicit startup mode.' }
+    if ($AutoStartCompanion -or [string]::IsNullOrWhiteSpace($EnrollmentEnhancementRoot)) {
+        throw 'Enrollment inspection requires an existing Enhancement root and passive startup.'
+    }
+    $startup = [Threading.Mutex]::new($false, ('Local\AibosImage.Wpf.Startup.v1.' + (Get-AibosDesktopIdentitySuffix -Identity $identity)))
+    $locked = $false
+    try {
+        try { $locked = $startup.WaitOne([TimeSpan]::FromSeconds(5)) }
+        catch [Threading.AbandonedMutexException] { $locked = $true }
+        if (-not $locked) { throw 'Another startup is still preparing.' }
+        & (Join-Path $PSScriptRoot 'invoke-aibos-enrollment-handoff.ps1') -EnhancementRoot $EnrollmentEnhancementRoot -JobsFileName $EnrollmentJobsFileName
+        $code = $LASTEXITCODE
+    }
+    finally {
+        if ($locked) { $startup.ReleaseMutex() }
+        $startup.Dispose()
+    }
+    exit $code
+}
+if ($PSBoundParameters.ContainsKey('PinnedLaunchManifestSha256')) {
+    if ($AutoStartCompanion -or $PinnedLaunchManifestSha256.Length -ne 64 -or
+        $PinnedLaunchManifestSha256 -cnotmatch '^[0-9A-F]{64}$' -or
+        $env:PHOTOVIEWER_WPF_DOTNET_RUN -eq '1' -or $env:PHOTOVIEWER_WPF_REBUILD -eq '1') {
+        throw 'Fixed-generation startup requires one recorded Release manifest and passive, non-development startup.'
+    }
+    $startup = [Threading.Mutex]::new($false, ('Local\AibosImage.Wpf.Startup.v1.' + (Get-AibosDesktopIdentitySuffix -Identity $identity)))
+    $locked = $false
+    try {
+        try { $locked = $startup.WaitOne([TimeSpan]::FromSeconds(5)) }
+        catch [Threading.AbandonedMutexException] { $locked = $true }
+        if (-not $locked) { throw 'Another startup is still preparing.' }
+        & (Join-Path $PSScriptRoot 'start-aibos-fixed-generation.ps1') -ManifestSha256 $PinnedLaunchManifestSha256 -CompanionRoot $CompanionRoot
+        $code = $LASTEXITCODE
+    }
+    finally {
+        if ($locked) { $startup.ReleaseMutex() }
+        $startup.Dispose()
+    }
+    exit $code
+}
 if (Send-AibosDesktopActivation -Identity $identity) { exit 0 }
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

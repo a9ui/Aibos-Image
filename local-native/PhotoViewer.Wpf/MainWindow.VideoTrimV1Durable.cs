@@ -78,7 +78,10 @@ public partial class MainWindow
         RoutedEventArgs e)
         => await StartModalVideoTrimV1Async();
 
-    private async Task<bool> StartModalVideoTrimV1Async()
+    private Task<bool> StartModalVideoTrimV1Async()
+        => CompleteDurableEnqueueUiActionAsync(() => StartModalVideoTrimV1CoreAsync());
+
+    private async Task<bool> StartModalVideoTrimV1CoreAsync()
     {
         _videoTrimV1StartAttemptCount++;
         if (!_videoTrimV1WriterReady

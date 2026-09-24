@@ -1,4 +1,5 @@
 param(
+    [string]$AssemblyPath = '',
     [string]$Configuration = 'Release',
     [string]$DotnetPath = 'dotnet',
     [string]$TargetFrameworkOverride = '',
@@ -7,6 +8,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($AssemblyPath -and $TargetFrameworkOverride) {
+    throw 'AssemblyPath uses an existing build; TargetFrameworkOverride requires a new build.'
+}
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -39,28 +43,32 @@ try {
         [IO.File]::WriteAllBytes((Join-Path $fixtureRoot ("source-{0}.png" -f $_)), $pngBytes)
     }
 
-    $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        $buildArgs = @(
-            'build',
-            $project,
-            '-c',
-            $Configuration,
-            '--nologo',
-            '-v:minimal',
-            "-p:OutputPath=$buildOutput"
-        )
-        if ($SkipRestore) {
-            $buildArgs += '--no-restore'
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+            $buildArgs = @(
+                'build',
+                $project,
+                '-c',
+                $Configuration,
+                '--nologo',
+                '-v:minimal',
+                "-p:OutputPath=$buildOutput"
+            )
+            if ($SkipRestore) {
+                $buildArgs += '--no-restore'
+            }
+            & $DotnetPath @buildArgs
         }
-        & $DotnetPath @buildArgs
-    }
-    else {
-        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
-    }
-    Assert-True ($LASTEXITCODE -eq 0) "WPF build failed with exit code $LASTEXITCODE."
+        else {
+            & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+        }
+        Assert-True ($LASTEXITCODE -eq 0) "WPF build failed with exit code $LASTEXITCODE."
 
-    $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+        $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+    } else {
+        $dll = (Resolve-Path -LiteralPath $AssemblyPath -ErrorAction Stop).Path
+    }
     Assert-True (Test-Path -LiteralPath $dll -PathType Leaf) "WPF build output was not found: $dll"
     $appArgs = @(
         $dll,
@@ -92,6 +100,7 @@ try {
         'videoMediaOpened',
         'videoStartsAtZero',
         'videoSeekSurface',
+        'videoSeekLifecycle',
         'videoNaturalDuration',
         'videoPlaybackProgress',
         'videoAutoplay',

@@ -2053,9 +2053,11 @@ public partial class MainWindow
             if (unknownExplicitResume)
             {
                 EnhancementJobsStatusText.Text =
-                    "ローカルAIサービスへ接続し、キュー状態を確認しています…";
+                    "ローカルAIサービスへ接続し、キューを復旧して再開しています…";
                 EnhancementApiResponse readiness =
-                    await EnsureEnhancementCompanionReadyForExplicitActionAsync(token: actionEpoch);
+                    await EnsureEnhancementCompanionApiReadyAsync(
+                        token: actionEpoch,
+                        preparation: EnhancementApiPreparation.ConnectionOnly);
                 if (generation != _enhancementWorkspaceGeneration
                     || EnhancementJobsDialog.Visibility != Visibility.Visible)
                 {
@@ -2067,31 +2069,6 @@ public partial class MainWindow
                     return false;
                 }
 
-                EnhancementQueueHealthView? refreshedHealth =
-                    await RefreshEnhancementQueueHealthAsync(
-                        generation,
-                        isPoll: false);
-                if (refreshedHealth is not EnhancementQueueHealthView health
-                    || health.Paused is not bool observedPaused)
-                {
-                    EnhancementJobsStatusText.Text =
-                        "キュー状態を確認できませんでした。ローカルAIサービスの詳細を確認してください。";
-                    return false;
-                }
-                current = observedPaused;
-                if (current == paused
-                    && !health.QueueRecoveryRequired)
-                {
-                    if (health.State == "確認が必要")
-                    {
-                        EnhancementJobsStatusText.Text =
-                            "サーバーには接続しましたが、キューの確認が必要です。" + health.Detail;
-                        return false;
-                    }
-                    EnhancementJobsStatusText.Text =
-                        "サーバーに接続しました。キューの一時停止は解除済みです。";
-                    return true;
-                }
             }
 
             if (actionEpoch.IsCancellationRequested) return false;
@@ -6295,7 +6272,11 @@ public partial class MainWindow
     private async Task<int> RetryAllCanceledEnhancementJobsAsync()
         => await RetryAllTerminalEnhancementJobsAsync("canceled");
 
-    private async Task<int> RetryAllTerminalEnhancementJobsAsync(
+    private Task<int> RetryAllTerminalEnhancementJobsAsync(
+        string terminalStatus)
+        => CompleteDurableEnqueueUiActionAsync(() => RetryAllTerminalEnhancementJobsCoreAsync(terminalStatus));
+
+    private async Task<int> RetryAllTerminalEnhancementJobsCoreAsync(
         string terminalStatus)
     {
         if (_enhancementWorkspaceTerminalHistoryBatchRetrySupported)
@@ -6518,6 +6499,7 @@ public partial class MainWindow
         string? failure = null;
         int? failureStatus = null;
         int acceptedCount = 0;
+        int retainedAcceptedCount = 0;
         int retriedCount = 0;
         int replayedCount = 0;
         int protectedCount = 0;
@@ -6621,7 +6603,8 @@ public partial class MainWindow
                         out int batchReplayedCount,
                         out int batchProtectedCount,
                         out int batchMissingCount,
-                        out int batchFailedCount))
+                        out int batchFailedCount,
+                        out int batchRetainedAcceptedCount))
                 {
                     unconfirmedCount += ids.Length;
                     failure ??= retry.Ok
@@ -6637,6 +6620,7 @@ public partial class MainWindow
                 missingCount += batchMissingCount;
                 itemFailedCount += batchFailedCount;
                 acceptedCount += batchRetriedCount + batchReplayedCount;
+                retainedAcceptedCount += batchRetainedAcceptedCount;
             }
             unattemptedCount = retryIds.Length - attemptedCount;
 
@@ -6647,9 +6631,12 @@ public partial class MainWindow
                     generation,
                     isPoll: false);
                 string resultSummary = acceptedCount > 0
-                    ? $"{terminalLabel}したJob {acceptedCount:N0}件を保存済み設定で受付し、元履歴を消しました。"
-                    : $"{terminalLabel}したJobを再試行できませんでした。元履歴は残しています。";
+                    ? $"{terminalLabel}したJob {acceptedCount:N0}件の再試行を保存済み設定で受け付けました。"
+                    : $"{terminalLabel}したJobの再試行受付を確認できませんでした。";
                 EnhancementJobsStatusText.Text = resultSummary
+                    + (retainedAcceptedCount > 0
+                        ? $" 受付済みのうち{retainedAcceptedCount:N0}件は元の履歴を残しています。"
+                        : "")
                     + (replayedCount > 0
                         ? $" うち{replayedCount:N0}件は同じ一括要求の確認済み結果です。"
                         : "")
@@ -7028,13 +7015,15 @@ public partial class MainWindow
         out int replayedCount,
         out int protectedCount,
         out int missingCount,
-        out int failedCount)
+        out int failedCount,
+        out int retainedAcceptedCount)
     {
         retriedCount = 0;
         replayedCount = 0;
         protectedCount = 0;
         missingCount = 0;
         failedCount = 0;
+        retainedAcceptedCount = 0;
         if (payload is not JsonElement root
             || root.ValueKind != JsonValueKind.Object
             || !root.TryGetProperty(
@@ -7109,12 +7098,21 @@ public partial class MainWindow
             return false;
         }
 
+        bool hasSourceHistory = root.TryGetProperty(
+            "sourceHistoryVersion", out JsonElement sourceHistoryVersion);
+        if (hasSourceHistory
+            && (sourceHistoryVersion.ValueKind != JsonValueKind.Number
+                || !sourceHistoryVersion.TryGetInt32(out int version)
+                || version != 1))
+            return false;
+
         var requested = expectedIds.ToHashSet(StringComparer.Ordinal);
         if (requested.Count != expectedIds.Count)
             return false;
         var accounted = new HashSet<string>(StringComparer.Ordinal);
         int observedRetriedCount = 0;
         int observedReplayedCount = 0;
+        int observedRetainedAcceptedCount = 0;
         foreach (JsonElement result in resultsElement.EnumerateArray())
         {
             if (result.ValueKind != JsonValueKind.Object
@@ -7138,6 +7136,14 @@ public partial class MainWindow
             {
                 return false;
             }
+            bool hasRetained = result.TryGetProperty(
+                "sourceRetained", out JsonElement sourceRetained);
+            if (hasSourceHistory != hasRetained
+                || hasRetained && sourceRetained.ValueKind is not (
+                    JsonValueKind.True or JsonValueKind.False))
+                return false;
+            if (hasRetained && sourceRetained.GetBoolean())
+                observedRetainedAcceptedCount++;
             if (replayedElement.GetBoolean())
                 observedReplayedCount++;
             else
@@ -7188,12 +7194,14 @@ public partial class MainWindow
             }
         }
 
-        return accounted.Count == requestedCount
+        bool valid = accounted.Count == requestedCount
             && observedRetriedCount == retriedCount
             && observedReplayedCount == replayedCount
             && observedProtectedCount == protectedCount
             && observedMissingCount == missingCount
             && observedFailedCount == failedCount;
+        if (valid) retainedAcceptedCount = observedRetainedAcceptedCount;
+        return valid;
     }
 
     private static bool TryReadNonNegativeBatchCount(
@@ -7262,7 +7270,10 @@ public partial class MainWindow
     private async void RerunPhotorealJobNext_Click(object sender, RoutedEventArgs e)
         => await RerunPhotorealJobAsync(sender, enqueueNext: true);
 
-    private async Task RerunPhotorealJobAsync(object sender, bool enqueueNext)
+    private Task RerunPhotorealJobAsync(object sender, bool enqueueNext)
+        => CompleteDurableEnqueueUiActionAsync(() => RerunPhotorealJobCoreAsync(sender, enqueueNext));
+
+    private async Task RerunPhotorealJobCoreAsync(object sender, bool enqueueNext)
     {
         if (sender is not Button { Tag: EnhancementWorkspaceJobView job }
             || _enhancementWorkspaceMutationPending
@@ -7909,7 +7920,11 @@ public partial class MainWindow
             : "動画化の入力画像が確認中に変わりました。ジョブは追加していません。";
     }
 
-    private async Task RerunMiniMaxH3VideoWithSavedPromptAsync(
+    private Task RerunMiniMaxH3VideoWithSavedPromptAsync(
+        EnhancementWorkspaceJobView job)
+        => CompleteDurableEnqueueUiActionAsync(() => RerunMiniMaxH3VideoWithSavedPromptCoreAsync(job));
+
+    private async Task RerunMiniMaxH3VideoWithSavedPromptCoreAsync(
         EnhancementWorkspaceJobView job)
     {
         if (_enhancementWorkspaceMutationPending
@@ -8218,7 +8233,12 @@ public partial class MainWindow
         }
     }
 
-    private async Task RerunI2iV3JobAsync(
+    private Task RerunI2iV3JobAsync(
+        EnhancementWorkspaceJobView job,
+        bool enqueueNext)
+        => CompleteDurableEnqueueUiActionAsync(() => RerunI2iV3JobCoreAsync(job, enqueueNext));
+
+    private async Task RerunI2iV3JobCoreAsync(
         EnhancementWorkspaceJobView job,
         bool enqueueNext)
     {
@@ -8643,7 +8663,17 @@ public partial class MainWindow
         }
     }
 
-    private async Task<bool> RunEnhancementWorkspaceMutationAsync(
+    private Task<bool> RunEnhancementWorkspaceMutationAsync(
+        EnhancementWorkspaceJobView job,
+        HttpMethod method,
+        string route,
+        string successMessage,
+        object? body = null,
+        bool removeTerminalOriginalAfterSuccess = false,
+        string operationLogName = "job_mutation")
+        => CompleteDurableEnqueueUiActionAsync(() => RunEnhancementWorkspaceMutationCoreAsync(job, method, route, successMessage, body, removeTerminalOriginalAfterSuccess, operationLogName));
+
+    private async Task<bool> RunEnhancementWorkspaceMutationCoreAsync(
         EnhancementWorkspaceJobView job,
         HttpMethod method,
         string route,

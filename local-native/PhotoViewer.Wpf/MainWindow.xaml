@@ -5814,6 +5814,7 @@
                       ValueChanged="ModalVideoSeekSlider_ValueChanged"
                       PreviewMouseLeftButtonDown="ModalVideoSeekSlider_PreviewMouseLeftButtonDown"
                       PreviewMouseLeftButtonUp="ModalVideoSeekSlider_PreviewMouseLeftButtonUp"
+                      LostMouseCapture="ModalVideoSeekSlider_LostMouseCapture"
                       AutomationProperties.Name="Video playback position"
                       AutomationProperties.HelpText="Drag or click to seek within the displayed generated video."/>
               <TextBlock x:Name="ModalVideoSeekTimeText" Grid.Column="1" Text="0:00 / 0:00"

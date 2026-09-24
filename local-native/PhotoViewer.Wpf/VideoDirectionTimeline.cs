@@ -106,8 +106,29 @@ public static class VideoDirectionTimeline
     }
     public static int EndMs(VideoDirectionPhase phase, int durationMs)
         => (int)Math.Round((long)phase.EndMillionths * durationMs / 1_000_000d, MidpointRounding.AwayFromZero);
+    public static bool TryValidateClock(VideoPromptProgram p, int durationMs, out string error)
+    {
+        error = "";
+        if (durationMs <= 0)
+        {
+            error = "動画の長さを選び直してください。";
+            return false;
+        }
+        int start = 0;
+        foreach (var phase in p.DirectionPhases)
+        {
+            int end = EndMs(phase, durationMs);
+            if (end <= start)
+            {
+                error = "この動画の長さでは演出区間が短すぎます。区切りの時刻を広げてください。";
+                return false;
+            }
+            start = end;
+        }
+        return true;
+    }
     public static string Anchor(int startMs, int endMs) => string.Create(CultureInfo.InvariantCulture,
-        $"From {startMs / 1000d:F2} to {endMs / 1000d:F2} seconds:");
+        $"From {startMs / 1000d:0.00#} to {endMs / 1000d:0.00#} seconds:");
     public static VideoEnrichmentTimingPhase[] Capture(VideoPromptProgram p, int durationMs)
     {
         int start = 0;

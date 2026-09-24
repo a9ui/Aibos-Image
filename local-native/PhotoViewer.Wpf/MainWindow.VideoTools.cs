@@ -2344,7 +2344,10 @@ public partial class MainWindow
         return ValidateVideoToolsRetakeActionBeforePublish(context);
     }
 
-    private async Task<bool> StartVideoToolsRetakeAsync()
+    private Task<bool> StartVideoToolsRetakeAsync()
+        => CompleteDurableEnqueueUiActionAsync(() => StartVideoToolsRetakeCoreAsync());
+
+    private async Task<bool> StartVideoToolsRetakeCoreAsync()
     {
         if (_videoToolsRequestPending)
             return false;

@@ -1717,8 +1717,7 @@ public partial class MainWindow
                 {
                     _modalVideoDurationSeconds = ModalVideo.NaturalDuration.TimeSpan.TotalSeconds;
                 }
-                if (!_modalVideoSeekDragging)
-                    UpdateModalVideoTimeline(ModalVideo.Position);
+                UpdateModalVideoTimelineFromPlayback(ModalVideo.Position);
                 if (ModalVideoTrimV1BoardVisible)
                     UpdateModalVideoTrimV1CurrentPosition();
             }
@@ -1730,6 +1729,7 @@ public partial class MainWindow
 
     private void ResetModalVideoTimeline(double durationSeconds, bool show)
     {
+        _modalVideoSeekDragging = false;
         _modalVideoDurationSeconds = double.IsFinite(durationSeconds)
             ? Math.Max(0, durationSeconds)
             : 0;
@@ -1760,6 +1760,12 @@ public partial class MainWindow
             _suppressModalVideoSeek = false;
         }
         ModalVideoSeekTimeText.Text = $"0:00 / {FormatModalVideoTime(_modalVideoDurationSeconds)}";
+    }
+
+    private void UpdateModalVideoTimelineFromPlayback(TimeSpan position)
+    {
+        if (!_modalVideoSeekDragging)
+            UpdateModalVideoTimeline(position);
     }
 
     private void UpdateModalVideoTimeline(TimeSpan position)
@@ -1807,6 +1813,12 @@ public partial class MainWindow
     {
         _modalVideoSeekDragging = false;
         SeekModalVideoToSeconds(ModalVideoSeekSlider.Value);
+    }
+
+    private void ModalVideoSeekSlider_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (!ModalVideoSeekSlider.IsMouseCaptureWithin)
+            _modalVideoSeekDragging = false;
     }
 
     private void ModalVideoSeekSlider_ValueChanged(

@@ -245,10 +245,13 @@ The executable cases for these meanings are routed by
   unsupported result is discarded and the exact saved prompt plus unchanged
   image reference continues without a generated safety or censorship prompt.
 - A successful retry first commits the replacement child job and its durable
-  idempotency receipt. Only then is the failed or canceled source row removed
-  from terminal history. Rejected, pending-delivery, ambiguous, or malformed
-  retry results retain the source row, and retry never removes source or output
-  media.
+  idempotency receipt. Only then may the failed or canceled source row be
+  removed from terminal history. Publication or external execution ownership
+  can require the original row to remain even after retry acceptance. The batch
+  receipt reports accepted source-row presence separately, and the UI never
+  treats acceptance as proof of history deletion. Rejected, pending-delivery,
+  ambiguous, or malformed retry results retain the source row, and retry never
+  removes source or output media.
 - A request that uses a managed producer refers to its durable job identity.
   A video request may instead name the exact managed still currently displayed,
   but only through the advertised displayed-source capability and after both
@@ -411,6 +414,81 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   identity, oversized input is quarantined without dispatch, and the Inbox root
   and phase directories must not be links or reparse redirects. Hitting a scan
   bound or observing identity drift fails closed without Jobs mutation.
+- Before publishing a reservation, the writer holds the shared `jobs.json`
+  lock and checks those same active limits across pending and processing,
+  including the new temporary entry and the actual serialized UTF-8 bytes.
+  Refusal precedes source pinning and provisional UI success. Every publisher
+  holds this lock through atomic publication; source handles close before
+  release. Consumer claim, receipt cleanup and needs-action moves share the
+  same lock for their short filesystem mutations. Dispatch and network waits
+  happen after release. These rules apply to both Jobs backends. Existing
+  overflow remains a fail-closed condition requiring explicit maintenance;
+  refusal does not delete old temporary files or move unresolved reservations
+  outside source-dependency visibility to make space.
+- WPF captures immutable wire items and the destination before running envelope
+  serialization, the shared-lock wait and atomic file publication off the UI
+  thread. After lock acquisition, editable-context validation and source-pin
+  overlays run on the UI thread before commit. Cancellation before admission
+  publishes nothing; once publication has entered its atomic commit, a late
+  cancellation must still report a saved reservation if commit succeeds.
+  Window close waits for active submissions, their durable-work lifetime mark
+  and UI acknowledgement; a bounded close timeout or a submission that fails
+  to save during that wait keeps the window open.
+  Partially committed batches retain their saved items and identify unsaved
+  remaining items separately.
+- A durable `enqueue-inbox/maintenance.json` entry closes normal reservation
+  admission, intake, recovery, queue resume and new worker claims. Normal
+  writers check it inside the shared Jobs lock. Presence, unreadable state and
+  unsupported content preserve the gate; startup and elapsed time never clear
+  it. Viewing and ordinary state reads remain passive. Existing admitted work
+  may finish its receipt and terminal writes. The marker alone does not grant
+  repair authority or prove that running work has ended; an explicit repair
+  must separately establish ownership and its bounded resumable inventory.
+- Long Companion dispatch, interrupted recovery and worker execution hold a
+  Windows reader lease at the actual Enhancement root's
+  `enqueue-inbox/activity.lock`. They acquire it before the short Jobs-lock
+  admission check and retain it through actual completion and terminal writes.
+  WPF publication and short Inbox mutations use their existing Jobs-lock
+  boundary. Explicit path overrides still bind to the actual root. A maintenance
+  refusal stops the worker without failure backoff or automatic resume. An
+  exclusive activity lease excludes cooperating operations only; older writers
+  and detached external work require separate ownership evidence before repair.
+- Repair applies only to a managed launch configuration registered for the same
+  root, with verified artifact, launch-generation and external-work lifetime
+  evidence. Registering a legacy root must establish the end of its prior
+  execution generation and preserve its data and request identities. Parent
+  process death must not release protection while child or delegated work can
+  still affect repair dependencies. A changed root, incompatible managed
+  configuration or unresolved external work invalidates this applicability.
+  Registration is not live execution authority, and deployments without a
+  verified registration provider must keep the repair entry disabled.
+- Where that provider is available, explicit repair uses the existing encrypted
+  Companion tunnel and a caller-chosen operation ID. Retrying a lost start
+  response returns the same operation's phase without resetting progress.
+  Retrying a completed operation validates its stored receipt and plan; it
+  cannot start another repair or consume newer arrivals. Another active
+  operation refuses admission. Each execution rechecks registration and live
+  exclusion, and retains ownership through actual settlement even when the
+  requesting client disconnects. Repair never wakes or resumes the queue.
+- Explicit overflow repair has a separate bounded inventory: at most 4096
+  committed files, 8192 directory entries, 512 MiB of committed envelope bytes
+  and 131072 items. The normal 128-file intake bound is unchanged. Repair must
+  validate the complete ordered set before replay, retain exact request
+  identities and original files, and bind resumable progress to the root,
+  operation and immutable plan. Accepted originals move to an operation archive
+  only after current durable acceptance is checked for every accepted item,
+  including mixed-result envelopes; definitive failures remain
+  in the existing needs-action namespace. Completion records its receipt before
+  clearing the gate, preserves uncommitted files, and leaves the queue paused.
+  These rules do not enable a repair entry without supported-owner evidence.
+- A timed-out Inbox dispatch retains ownership until the route invocation
+  actually ends. The owning process permits only one unfinished invocation per
+  normalized Inbox root, including consumer replacement; abort or a receipt
+  alone is not proof of termination. Unfinished dispatch blocks explicit
+  intake completion and a new interrupted-recovery attempt. Completed response
+  loss remains retryable with the same request identity. Passive intake may
+  wait for the unresolved candidate's existing backoff deadline without
+  rescanning, while explicit intake always validates current state.
 - The durable `progress` field is the companion-owned percentage of completed
   adapter execution stages. A queued row retains lifecycle value `0` but shows
   only its waiting order and no progress bar. A running row alone shows a
@@ -428,11 +506,13 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   these lifecycle bounds without writing queue state, and terminal status
   remains the completion authority.
 - If passive health is unavailable because the default authenticated Companion
-  is not running, the explicit Connect and Resume control may start the exact
-  WPF-owned child, prove identity, perform authenticated recovery, and reread
-  current health before sending `paused=false` only when still required. An
-  already-running queue gets no duplicate mutation; untrusted, malformed,
-  unsupported, ambiguous, or concurrent state fails closed.
+  is not running, the explicit Resume control may start the exact WPF-owned
+  child, prove identity and send one authenticated `paused=false` mutation.
+  The Companion owns recovery, bounded Inbox intake and resume ordering; WPF
+  uses the mutation response as the result. Unavailable queue health does not
+  prevent this authenticated action or count as success. Connect starts only
+  the API and reads status. Untrusted identity, unsupported mutations and stale
+  concurrent operations remain blocked.
 - With the Companion unavailable, Jobs may perform one bounded identity-only
   ownership probe and then render the selected local SQLite snapshot read-only.
   Queued or running records without a current valid health signature do not
@@ -472,6 +552,16 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - A completed output is finalized below its operation's `YYYY-MM-DD` folder.
   The date comes only from that output file's Windows CreationTime in the
   companion's local timezone. Job, source, and EXIF dates do not substitute.
+- Interrupted output publication is recovered only from durable evidence of
+  the current Job, run, request, roots and validated file identity, after all
+  applicable worker lanes are excluded. A matching filename or content hash
+  alone never authorizes adoption or deletion. Cancellation remains authoritative
+  at the final Jobs write. Ambiguous output and its evidence are retained.
+- Unresolved publication protects its original history row and managed source
+  dependencies. Retry can create a separate attempt while retaining that row;
+  history cleanup and output migration cannot discard or reinterpret the evidence.
+  Retiring evidence after durable success is metadata cleanup, and a cleanup
+  failure cannot turn that committed success into a failed Job or remove its file.
 - Output-root changes do not move existing files. Migration is a separate
   paused-and-drained operation defined by `PV-ENHANCE-OUTPUT-001`.
 
@@ -554,7 +644,9 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - Acting can use up to three shared intervals for camera movement, subject
   positioning, arms, gaze, expression and mood. Intermediate end times are editable; relative boundaries
   scale with the selected clip, while the final boundary uses its actual frame
-  duration. Capture handling is a separate whole-clip choice. These are natural
+  duration. Compilation rejects intervals that collapse after millisecond
+  rounding without changing the saved relative boundaries. Prompt anchors keep
+  those same millisecond boundaries. Capture handling is a separate whole-clip choice. These are natural
   prompt directions, not a frame-accurate control guarantee. A continuous main
   action appears once; unchanged gestures do not restart at each boundary.
   Owned original clauses are removed only when their aspect is overridden and

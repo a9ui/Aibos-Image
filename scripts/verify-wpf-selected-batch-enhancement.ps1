@@ -2,6 +2,7 @@ param(
     [string]$Configuration = "Release",
     [string]$OutputPath = (Join-Path $env:TEMP "aibos-wpf-selected-batch-enhancement.json"),
     [string]$DotnetPath = "",
+    [string]$AssemblyPath = "",
     [ValidateRange(1, 300)]
     [int]$OverallTimeoutSeconds = 120,
     [switch]$NoRestore,
@@ -46,7 +47,10 @@ try {
     if ($presentationChecks -contains $false) {
         throw "Batch Enhance presentation checks failed."
     }
-    if ($SkipBuild) {
+    if ($AssemblyPath) {
+        $assembly = [IO.Path]::GetFullPath($AssemblyPath)
+    }
+    elseif ($SkipBuild) {
         $assembly = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.dll"
     }
     else {

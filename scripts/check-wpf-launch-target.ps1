@@ -19,8 +19,74 @@ function Resolve-RepoPath([string]$Path) {
     return [System.IO.Path]::GetFullPath((Join-Path $repoRoot $Path))
 }
 
-function Get-SourceFiles([string]$ProjectRoot) {
-    return @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File |
+function Get-EvaluatedBuildInputs([string]$ProjectPath) {
+    $localSdk = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+    $dotnet = if (Test-Path -LiteralPath $localSdk -PathType Leaf) { $localSdk }
+        else { (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source }
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $dotnet
+    # No targets: evaluate item/property paths without building or restoring.
+    $info.Arguments = 'msbuild "{0}" -nologo -verbosity:quiet -nodeReuse:false -property:Configuration=Release -getItem:Compile,Page,ApplicationDefinition,EmbeddedResource,Resource,Content,None,AdditionalFiles -getProperty:MSBuildAllProjects,DirectoryBuildPropsPath,DirectoryBuildTargetsPath,ApplicationIcon,ApplicationManifest' -f $ProjectPath
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::Start($info)
+    try {
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(15000)) {
+            $process.Kill()
+            [void]$process.WaitForExit(5000)
+            throw 'Build-input evaluation exceeded 15 seconds.'
+        }
+        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), 5000)) {
+            throw 'Build-input evaluation output did not close.'
+        }
+        $raw = $stdout.GetAwaiter().GetResult()
+        $errorText = $stderr.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) { throw 'MSBuild could not evaluate the build inputs.' }
+        if ($raw.Length -gt 4MB -or -not [string]::IsNullOrWhiteSpace($errorText)) {
+            throw 'Build-input evaluation returned an unsupported result.'
+        }
+        $evaluation = $raw | ConvertFrom-Json
+        if ($null -eq $evaluation.Items -or $null -eq $evaluation.Properties) {
+            throw 'Build-input evaluation omitted its item or property results.'
+        }
+        foreach ($name in @('Compile', 'Page', 'ApplicationDefinition', 'EmbeddedResource', 'Resource', 'Content', 'None', 'AdditionalFiles')) {
+            if ($evaluation.Items.PSObject.Properties[$name].Value -isnot [array]) {
+                throw 'Build-input evaluation omitted a requested item group.'
+            }
+        }
+    }
+    finally { $process.Dispose() }
+
+    $paths = [Collections.Generic.List[string]]::new()
+    foreach ($group in $evaluation.Items.PSObject.Properties) {
+        foreach ($item in @($group.Value)) {
+            if ($group.Name -eq 'None' -and
+                [string]$item.CopyToOutputDirectory -notin @('Always', 'PreserveNewest', 'IfDifferent') -and
+                [string]$item.CopyToPublishDirectory -notin @('Always', 'PreserveNewest', 'IfDifferent')) { continue }
+            $paths.Add([string]$item.FullPath)
+            if (-not [string]::IsNullOrWhiteSpace([string]$item.DefiningProjectFullPath)) {
+                $paths.Add([string]$item.DefiningProjectFullPath)
+            }
+            if ($paths.Count -gt 8192) { throw 'Build-input item bound exceeded.' }
+        }
+    }
+    foreach ($name in @('MSBuildAllProjects', 'DirectoryBuildPropsPath', 'DirectoryBuildTargetsPath', 'ApplicationIcon', 'ApplicationManifest')) {
+        foreach ($value in ([string]$evaluation.Properties.$name).Split(';')) {
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                $paths.Add($(if ([IO.Path]::IsPathRooted($value)) { $value }
+                    else { Join-Path (Split-Path -Parent $ProjectPath) $value }))
+            }
+        }
+    }
+    return $paths
+}
+
+function Get-SourceFiles([string]$ProjectRoot, [string]$ProjectPath) {
+    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File |
         Where-Object {
             $relative = $_.FullName.Substring($ProjectRoot.Length).TrimStart([char[]]@('\', '/'))
             $firstSegment = @($relative.Split([char[]]@('\', '/')))[0]
@@ -29,6 +95,13 @@ function Get-SourceFiles([string]$ProjectRoot) {
             $buildExtensions -contains $_.Extension.ToLowerInvariant()
         } |
         Sort-Object FullName)
+    $files += @(foreach ($inputPath in (Get-EvaluatedBuildInputs $ProjectPath)) {
+        if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) { throw 'A declared build input is missing.' }
+        Get-Item -LiteralPath $inputPath -ErrorAction Stop
+    })
+    $files = @($files | Sort-Object FullName -Unique)
+    if ($files.Count -gt 4096) { throw 'Build-input file bound exceeded.' }
+    return $files
 }
 
 function Get-Sha256Hex([string]$LiteralPath) {
@@ -49,7 +122,9 @@ function Get-Sha256Hex([string]$LiteralPath) {
 
 function Get-SourceFingerprint([string]$ProjectRoot, [object[]]$SourceFiles) {
     $lines = foreach ($file in $SourceFiles) {
-        $relative = $file.FullName.Substring($ProjectRoot.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
+        $relative = if ($file.FullName.StartsWith($ProjectRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            $file.FullName.Substring($ProjectRoot.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
+        } else { '@' + $file.FullName.Replace('\', '/') }
         $hash = Get-Sha256Hex $file.FullName
         '{0}|{1}|{2}' -f $relative, $file.Length, $hash
     }
@@ -102,7 +177,7 @@ try {
     }
 
     $projectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $project)).TrimEnd('\', '/')
-    $sourceFiles = @(Get-SourceFiles $projectRoot)
+    $sourceFiles = @(Get-SourceFiles $projectRoot $project)
     $latestInput = $sourceFiles | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
     $sourceFingerprint = Get-SourceFingerprint $projectRoot $sourceFiles
     $sourceRevision = Get-SourceRevision
@@ -136,6 +211,12 @@ try {
     foreach ($file in $launchFiles) {
         $launchFileHashes[[IO.Path]::GetFileName($file)] = Get-Sha256Hex $file
     }
+    $manifestNames = [string[]]@($launchFileHashes.Keys)
+    [Array]::Sort($manifestNames, [StringComparer]::Ordinal)
+    $manifestText = ($manifestNames | ForEach-Object { $_ + '|' + $launchFileHashes[$_].ToUpperInvariant() }) -join "`n"
+    $manifestHasher = [Security.Cryptography.SHA256]::Create()
+    try { $manifestDigest = ([BitConverter]::ToString($manifestHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($manifestText)))).Replace('-', '') }
+    finally { $manifestHasher.Dispose() }
 
     if ($Record) {
         $stamp = [ordered]@{
@@ -235,6 +316,7 @@ try {
         sourceFingerprint = $sourceFingerprint
         targetSha256 = $targetHash
         targetLastWriteUtc = $targetItem.LastWriteTimeUtc.ToString('o')
+        launchManifestSha256 = $manifestDigest
         newestInput = if ($null -ne $latestInput) { $latestInput.FullName } else { $null }
         newestInputLastWriteUtc = if ($null -ne $latestInput) { $latestInput.LastWriteTimeUtc.ToString('o') } else { $null }
     }
