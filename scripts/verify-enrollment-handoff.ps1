@@ -83,7 +83,7 @@ try {
     $env:AIBOS_FIXTURE_HANDOFF_JOBS = Join-Path $runRoot 'fixed-launch'
     $fixed = Invoke-FixtureLauncher -Fixed
     if ($fixed.Code -ne 0) { throw "Fixed-generation fixture launch failed: $($fixed.Error)" }
-    $marker = $env:AIBOS_FIXTURE_HANDOFF_JOBS + '.pinned'
+    $marker = Join-Path $fixtureTarget 'fixed-launch.pinned'
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     while (-not (Test-Path -LiteralPath $marker) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
     if (-not (Test-Path -LiteralPath $marker) -or (Get-Content -LiteralPath $marker -Raw) -cne $recorded.launchManifestSha256) { throw 'Fixed-generation child did not verify its actual artifacts.' }

@@ -35,11 +35,13 @@ public static class AibosCutoverPacketReader {
     $dotnet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.WorkingDirectory = [IO.Path]::GetFullPath($WorkingDirectory)
-    if (Test-Path -LiteralPath $dotnet -PathType Leaf) {
-        $info.FileName = $dotnet
-        $info.Arguments = '"{0}" --maintenance-cutover-intent {1}' -f ([IO.Path]::ChangeExtension($target, '.dll')), $ManifestSha256
+    # The apphost uses registered runtimes, which can differ from the SDK host
+    # installed on a verifier or operator PATH. Use one explicit host in both cases.
+    if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) {
+        $dotnet = (Get-Command dotnet -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     }
-    else { $info.FileName = $target; $info.Arguments = '--maintenance-cutover-intent ' + $ManifestSha256 }
+    $info.FileName = $dotnet
+    $info.Arguments = '"{0}" --maintenance-cutover-intent {1}' -f ([IO.Path]::ChangeExtension($target, '.dll')), $ManifestSha256
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
     $info.RedirectStandardInput = $true; $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
     $process = [Diagnostics.Process]::Start($info)

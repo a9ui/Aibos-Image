@@ -15597,7 +15597,7 @@ public partial class App : Application
     private void CaptureShutdownStateSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string smokeRoot = Path.Combine(Path.GetTempPath(), "photoviewer-wpf-shutdown-state-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = Directory.CreateTempSubdirectory("photoviewer-wpf-shutdown-state-").FullName;
         string folder = Path.Combine(smokeRoot, "images");
         string statePath = Path.Combine(smokeRoot, "state.json");
         string favoritesPath = Path.Combine(smokeRoot, "favorites.json");

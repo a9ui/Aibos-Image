@@ -43,7 +43,7 @@ if (args[0] == "--pinned-launch-manifest")
     if (args.Length != 2 || Environment.GetEnvironmentVariable("AIBOS_COMPANION_START_ON_LAUNCH") != "0")
         return 2;
     using var pinned = MaintenanceEnrollmentHandoff.PinLaunchArtifacts(args[1]);
-    File.WriteAllText(Environment.GetEnvironmentVariable(jobsVariable)! + ".pinned", args[1]);
+    File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "fixed-launch.pinned"), args[1]);
     return 0;
 }
 if (args[0] == MaintenanceEnrollmentHandoff.ProbeArgument)
