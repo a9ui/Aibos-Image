@@ -81,7 +81,9 @@ if (($companionText -notmatch 'AcquireEnhancementJobsWriteLeaseForDurablePublish
 }
 
 $dotnet = if ([string]::IsNullOrWhiteSpace($DotnetPath)) {
-    Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+    $localHost = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+    if (Test-Path -LiteralPath $localHost -PathType Leaf) { $localHost }
+    else { (Get-Command dotnet -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source }
 }
 else {
     [IO.Path]::GetFullPath($DotnetPath)
