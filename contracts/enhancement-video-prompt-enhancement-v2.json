@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002",
+  "protocol": "aibos.enhancement-video-prompt-enhancement/v2",
+  "extends": {
+    "contractId": "PV-ENHANCE-VIDEO-002",
+    "compatibility": "V1 jobs retain their old execution path. Absent enhancement remains direct. Unknown versions are protected, never downgraded."
+  },
+  "healthCapability": {
+    "field": "capabilities.videoPromptEnhancementV2",
+    "shape": {
+      "contractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002",
+      "protocol": "aibos.enhancement-video-prompt-enhancement/v2",
+      "execution": "before-generation"
+    },
+    "requireExactBeforeDurablePublish": true
+  },
+  "request": {
+    "field": "video.requested.promptEnhancement",
+    "exactKeys": [
+      "schemaVersion",
+      "instruction",
+      "options"
+    ],
+    "schemaVersion": 2,
+    "instruction": "Immutable locally resolved generation body, 1..8000 UTF-16 units, well formed; CR/LF/TAB only controls. No authoring policy or model-generated rewrite.",
+    "options": {
+      "exactKeys": [
+        "sourceKind",
+        "referencePrompt",
+        "dialogue",
+        "speechAmount",
+        "music",
+        "physicalContinuity",
+        "actionSamples",
+        "choices"
+      ],
+      "optionalKeys": ["timeline"],
+      "timeline": "Optional 1..3 contiguous app-owned intervals {startMs,endMs,anchor}. Start is zero, ends increase within 15083 ms; each bounded anchor occurs in instruction in order. This is one shared clock for camera, arms, expression, mood and added speech, never separate model-generated clocks.",
+      "sourceKind": [
+        "anime",
+        "photoreal"
+      ],
+      "referencePrompt": "0..2000 UTF-16 units of extracted positive PNG prompt, captured on explicit enqueue only when selected. Empty when OFF or unavailable. No workflow or negative prompt.",
+      "dialogue": [
+        "preserve",
+        "off",
+        "auto"
+      ],
+      "speechAmount": [
+        1,
+        2,
+        3
+      ],
+      "music": [
+        "preserve",
+        "off",
+        "auto"
+      ],
+      "physicalContinuity": "boolean; support-preserving prompt guidance, not simulation",
+      "actionSamples": "0..1000 UTF-16 units of opt-in style examples",
+      "choices": "0..16 ordered nonoverlapping {start,length,alternatives} spans into instruction. The source span equals a member of its 2..16 bounded alternatives; execution selects only a pinned index."
+    },
+    "unknownOrFuture": "Reject without mutation. Preserve the submitted snapshot, preset hash, source image and saved styles."
+  },
+  "execution": {
+    "timing": "Existing FIFO claim and single GPU lease, before H3; 360-second shared deadline and bounded invalid-response retries. Never inference on enqueue or passive reads.",
+    "compiler": "Retain resolved source body and explicit selections. AI supplies short onset, transition, settling and optional physical details, without increasing action scale, speed, distance, repetitions or emotional intensity. No automatic camera move. Compatible no-addition result is valid.",
+    "timeline": "When supplied, AI returns one phaseDetails string per interval and new speech uses a phase index instead of generated timestamps. Details and speech are inserted next to the corresponding selected directions. The app allocates speaking time inside that interval and the whole-clip budget; a new line that cannot fit is omitted without dropping valid motion details. Existing lines are neither repeated nor split at interval boundaries.",
+    "audio": "Preserve existing dialogue and speaker IDs when enabled; generate short Japanese onscreen dialogue only when no authored speech/silence direction exists. A sparse/normal/full speech budget is a heuristic limit, not measured lip sync. OFF edits only recognized speech syntax; ambiguous prose is diagnosed, never silently erased. BGM is independent from physical sound.",
+    "format": "Application creates the I2VA 0.00-second image binding and ordered integrated_multimodal_description, overall_soundscape, non_diegetic_music fields, with dedicated speech tags. Final bound 8000 code units.",
+    "fallback": "Unusable generated details or selected alternatives receive at most one correction, then use the frozen direct prompt with applied manual audio overrides and a warning. Unsupported source authoring formats skip optional inference and use the frozen direct prompt when no manual audio-OFF setting would be discarded. Source identity, runtime ownership, cleanup and cancellation remain required. An unapplied explicit audio-OFF request is diagnosed, never silently ignored.",
+    "receipt": "Execution-only candidate, pinned source hash and compiler revision in attempt diagnostics. Never mutate requested snapshot. V2 never calls the legacy strengthening compiler."
+  },
+  "ui": {
+    "default": "AI unchecked, metadata unchecked, audio uses original body. Optional override exposes speech checkbox, 3-step new-speech amount and BGM checkbox.",
+    "timing": "Enqueue immediately; metadata capture is bounded local I/O, not inference."
+  },
+  "guide": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md"
+}

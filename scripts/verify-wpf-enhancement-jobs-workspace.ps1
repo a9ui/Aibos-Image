@@ -1,4 +1,5 @@
 param(
+    [string]$AssemblyPath = '',
     [string]$Configuration = "Release",
     [string]$OutputPath = (Join-Path $env:TEMP "aibos-wpf-enhancement-jobs-workspace.json"),
     [string]$DotnetPath = "",
@@ -9,6 +10,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($AssemblyPath -and $TargetFrameworkOverride) {
+    throw 'AssemblyPath uses an existing build; TargetFrameworkOverride requires a new build.'
+}
 
 function ConvertFrom-Utf8Base64([string]$Value) {
     return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Value))
@@ -241,7 +246,13 @@ try {
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.activeRows.Contains(
             "no progress bar"))
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.activeRows.Contains(
-            "running rows alone render a determinate value"))
+            "running rows normally render a determinate value"))
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.operation -eq "video")
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.adapterId -eq "minimax-h3-local-v1")
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.requiresVideoMutationSafe -eq $true)
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.status -eq "running")
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.progressBelow -eq 5)
+        ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.h3Preparation.cancelRequested -eq $false)
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.durableFieldMeaning.Contains(
             "completed adapter execution stages"))
         ($jobsSqliteContract.jobsWorkspaceSurface.progressPresentation.terminalRows.Contains(
@@ -390,40 +401,45 @@ try {
         throw "Enhancement video contract fields are invalid."
     }
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
-    $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        $buildArguments = @(
-            'build',
-            $project,
-            '-c',
-            $Configuration,
-            "-p:OutputPath=$buildOutput",
-            '-p:UseSharedCompilation=false',
-            '--nologo',
-            '--disable-build-servers',
-            '-v:minimal'
-        )
-        if ($NoRestore) { $buildArguments += '--no-restore' }
-        & $DotnetPath @buildArguments
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+            $buildArguments = @(
+                'build',
+                $project,
+                '-c',
+                $Configuration,
+                "-p:OutputPath=$buildOutput",
+                '-p:UseSharedCompilation=false',
+                '--nologo',
+                '--disable-build-servers',
+                '-v:minimal'
+            )
+            if ($NoRestore) { $buildArguments += '--no-restore' }
+            & $DotnetPath @buildArguments
+        }
+        else {
+            $msbuildArguments = @(
+                'msbuild',
+                $project,
+                "-property:TargetFramework=$TargetFrameworkOverride",
+                "-property:OutputPath=$buildOutput",
+                "-property:Configuration=$Configuration",
+                '-property:UseSharedCompilation=false',
+                '-nodeReuse:false',
+                '-nologo',
+                '-verbosity:minimal'
+            )
+            if (-not $NoRestore) { $msbuildArguments += '-restore' }
+            & $DotnetPath @msbuildArguments
+        }
+        if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
+
+        $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
     }
     else {
-        $msbuildArguments = @(
-            'msbuild',
-            $project,
-            "-property:TargetFramework=$TargetFrameworkOverride",
-            "-property:OutputPath=$buildOutput",
-            "-property:Configuration=$Configuration",
-            '-property:UseSharedCompilation=false',
-            '-nodeReuse:false',
-            '-nologo',
-            '-verbosity:minimal'
-        )
-        if (-not $NoRestore) { $msbuildArguments += '-restore' }
-        & $DotnetPath @msbuildArguments
+        $dll = (Resolve-Path -LiteralPath $AssemblyPath -ErrorAction Stop).Path
     }
-    if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
-
-    $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
     if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
         throw "WPF assembly was not found: $dll"
     }
@@ -472,6 +488,7 @@ try {
     $required = @(
         'passiveOpen',
         'activeProgressIsTruthful',
+        'h3PreparationPresentation',
         'historyWindowReaderContract',
         'healthVisible',
         'healthProvenance',
@@ -567,6 +584,7 @@ try {
         'clearQueuedIssued',
         'queuedJobsBatchCancelContract',
         'terminalHistoryBatchRetryContract',
+        'terminalRetrySourceRetentionContract',
         'terminalHistoryTargetPlanContract',
         'jobsRestoredAfterViewerClose',
         'jobsViewportRestoredAfterViewerClose',

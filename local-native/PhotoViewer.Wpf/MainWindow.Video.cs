@@ -1200,6 +1200,8 @@ public partial class MainWindow
                     ModalVideo.Play();
                 _modalVideoPlaying = true;
                 _modalVideoAutoplayPending = true;
+                EnsureModalVideoTimelineTimer();
+                _modalVideoTimelineTimer?.Start();
             }
         }
         catch
@@ -1571,7 +1573,14 @@ public partial class MainWindow
     }
 
     private void ModalVideoPlayback_Click(object sender, RoutedEventArgs e)
-        => ToggleModalVideoPlayback();
+    {
+        e.Handled = true;
+        if (!ToggleModalVideoPlayback())
+        {
+            ShowModalInteractionFeedback(
+                "動画を再生できませんでした。上の表示切替から動画を選び直してください。");
+        }
+    }
 
     private void ModalVideoVersion_SelectionChanged(
         object sender,
@@ -1708,8 +1717,7 @@ public partial class MainWindow
                 {
                     _modalVideoDurationSeconds = ModalVideo.NaturalDuration.TimeSpan.TotalSeconds;
                 }
-                if (!_modalVideoSeekDragging)
-                    UpdateModalVideoTimeline(ModalVideo.Position);
+                UpdateModalVideoTimelineFromPlayback(ModalVideo.Position);
                 if (ModalVideoTrimV1BoardVisible)
                     UpdateModalVideoTrimV1CurrentPosition();
             }
@@ -1721,6 +1729,7 @@ public partial class MainWindow
 
     private void ResetModalVideoTimeline(double durationSeconds, bool show)
     {
+        _modalVideoSeekDragging = false;
         _modalVideoDurationSeconds = double.IsFinite(durationSeconds)
             ? Math.Max(0, durationSeconds)
             : 0;
@@ -1751,6 +1760,12 @@ public partial class MainWindow
             _suppressModalVideoSeek = false;
         }
         ModalVideoSeekTimeText.Text = $"0:00 / {FormatModalVideoTime(_modalVideoDurationSeconds)}";
+    }
+
+    private void UpdateModalVideoTimelineFromPlayback(TimeSpan position)
+    {
+        if (!_modalVideoSeekDragging)
+            UpdateModalVideoTimeline(position);
     }
 
     private void UpdateModalVideoTimeline(TimeSpan position)
@@ -1798,6 +1813,12 @@ public partial class MainWindow
     {
         _modalVideoSeekDragging = false;
         SeekModalVideoToSeconds(ModalVideoSeekSlider.Value);
+    }
+
+    private void ModalVideoSeekSlider_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (!ModalVideoSeekSlider.IsMouseCaptureWithin)
+            _modalVideoSeekDragging = false;
     }
 
     private void ModalVideoSeekSlider_ValueChanged(
@@ -1977,6 +1998,34 @@ public partial class MainWindow
 
     public bool ToggleModalVideoPlaybackForSmoke()
         => ToggleModalVideoPlayback();
+
+    public bool ClickModalVideoPlaybackButtonForSmoke()
+    {
+        RevealModalChromeTransient();
+        UpdateLayout();
+        if (!ModalVideoPlaybackButton.IsVisible || !ModalVideoPlaybackButton.IsEnabled)
+            return false;
+        Point center = ModalVideoPlaybackButton.TranslatePoint(
+            new Point(ModalVideoPlaybackButton.ActualWidth / 2,
+                ModalVideoPlaybackButton.ActualHeight / 2), Modal);
+        if (Modal.InputHitTest(center) is not DependencyObject hit
+            || !IsDescendantOrSelf(hit, ModalVideoPlaybackButton))
+            return false;
+        ModalVideoPlaybackButton.RaiseEvent(
+            new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        return true;
+    }
+
+    public void SuspendPausedModalVideoPresentationForSmoke()
+    {
+        _resumeModalVideoAfterAiProcessingMinimize = _modalVideoPlaying;
+        PauseModalVideoForAiProcessingMinimize();
+        ResumeModalVideoAfterAiProcessingMinimize();
+    }
+
+    public bool ModalVideoTimelineRunningForSmoke
+        => _modalVideoTimelineTimer?.IsEnabled == true;
+
 
     public bool SeekModalVideoForSmoke(double seconds)
         => SeekModalVideoToSeconds(seconds);

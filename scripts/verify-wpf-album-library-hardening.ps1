@@ -1,4 +1,5 @@
 param(
+    [string]$AssemblyPath = '',
     [string]$Configuration = 'Release',
     [string]$OutputPath = (Join-Path $env:TEMP 'photoviewer-wpf-album-library-hardening.json'),
     [string]$ScreenshotPath = '',
@@ -29,18 +30,23 @@ if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)
 try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
-    $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    $buildArgs = @(
-        'build', $project,
-        '-c', $Configuration,
-        "-p:OutputPath=$buildOutput",
-        '--nologo', '-v:minimal'
-    )
-    if ($NoRestore) { $buildArgs += '--no-restore' }
-    & $DotnetPath @buildArgs
-    if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        $buildArgs = @(
+            'build', $project,
+            '-c', $Configuration,
+            "-p:OutputPath=$buildOutput",
+            '--nologo', '-v:minimal'
+        )
+        if ($NoRestore) { $buildArgs += '--no-restore' }
+        & $DotnetPath @buildArgs
+        if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
 
-    $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+        $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+    }
+    else {
+        $dll = (Resolve-Path -LiteralPath $AssemblyPath -ErrorAction Stop).Path
+    }
     if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
         throw "WPF assembly was not found: $dll"
     }

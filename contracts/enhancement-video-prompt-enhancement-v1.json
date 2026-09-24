@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001",
+  "protocol": "aibos.enhancement-video-prompt-enhancement/v1",
+  "extends": {
+    "contractId": "PV-ENHANCE-VIDEO-002",
+    "compatibility": "Absent requested.promptEnhancement preserves legacy direct generation. Never infer the flag from prompt content."
+  },
+  "healthCapability": {
+    "field": "capabilities.videoPromptEnhancementV1",
+    "shape": {
+      "contractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-001",
+      "protocol": "aibos.enhancement-video-prompt-enhancement/v1",
+      "execution": "before-generation"
+    },
+    "requireExactBeforeDurablePublish": true
+  },
+  "request": {
+    "field": "video.requested.promptEnhancement",
+    "optional": true,
+    "exactKeys": [
+      "schemaVersion",
+      "instruction"
+    ],
+    "schemaVersion": 1,
+    "instruction": "Nonblank well-formed UTF-16, maximum 8000 code units; no controls except CR, LF and TAB. Immutable resolved user selections, AI alternatives and planning settings captured on explicit enqueue.",
+    "unknownOrFuture": "Reject without mutation; never silently downgrade to direct generation."
+  },
+  "execution": {
+    "timing": "After durable FIFO claim under the existing single GPU queue lease, using the pinned source, before starting H3 inference. Enqueue, passive reads, and paused queues never run prompt inference.",
+    "runtime": "Use the existing sealed local rewrite runtime and compiler. Stop the owned rewrite runtime before loading H3; bounded 360-second operation with Jobs cancellation.",
+    "content": "Preserve the original requested.prompt, saved styles and Japanese notes. Apply the validated candidate to an execution-only copy. Preserve protected dialogue through the existing H3 compiler.",
+    "receipt": "diagnostics.promptEnhancement records schemaVersion=1, current runId, state running/succeeded/failed/canceled; succeeded also stores candidatePrompt, sourceSha256 and rewriteRevision. Failed optional enrichment may set fallbackUsed=true and a warning while the video Job continues. Never treat a previous run receipt as current execution authority.",
+    "failure": "For invalid generated output only, allow one correction attempt, then continue with the exact frozen effective.positivePrompt and record fallbackUsed=true with the controlled cause and warning. Cancellation, unknown cancellation state, source identity, runtime ownership, sealing, timeout and cleanup failures remain terminal. Retry preserves the immutable request and performs a fresh attempt.",
+    "identity": "The original video snapshot and presetHash remain immutable. Execution prompt is an attempt result, not a new user request."
+  },
+  "ui": {
+    "default": "unchecked",
+    "off": "Resolve manual/default options locally. H3 conformance diagnostics do not block enqueue or require AI. Syntax/resource errors still report accurately.",
+    "on": "Enqueue first; show that AI enhancement runs when the Job reaches execution. Closing the editor after publication does not cancel the durable Job."
+  }
+}

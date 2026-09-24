@@ -2237,12 +2237,12 @@ public partial class MainWindow
             StringComparer.CurrentCultureIgnoreCase.Compare(left.Name, right.Name));
         _selectedPhotorealStyleName = style.Name;
         RefreshPhotorealStyleControls(updateNameFields: true);
+        if (!TrySaveAiStyles())
+            return;
         SetPhotorealStyleStatus(
             existingIndex >= 0
                 ? $"「{style.Name}」を現在の設定で上書きしました。"
                 : $"「{style.Name}」を保存しました。");
-        if (!_initializing)
-            SaveAiStyles();
     }
 
     private void DeletePhotorealStyle_Click(object sender, RoutedEventArgs e)
@@ -2257,9 +2257,9 @@ public partial class MainWindow
         _photorealStyles.Remove(style);
         _selectedPhotorealStyleName = null;
         RefreshPhotorealStyleControls(updateNameFields: true);
+        if (!TrySaveAiStyles())
+            return;
         SetPhotorealStyleStatus($"「{style.Name}」を削除しました。現在の設定値はそのまま残ります。");
-        if (!_initializing)
-            SaveAiStyles();
     }
 
     private void RestorePhotorealStyles(
@@ -3347,7 +3347,7 @@ public partial class MainWindow
     {
         AppPhotorealStyleNameTextBox.Text = name;
         SavePhotorealStyle_Click(SaveAppPhotorealStyleButton, new RoutedEventArgs());
-        return FindPhotorealStyle(name) is not null;
+        return !_aiStylesPendingSave && FindPhotorealStyle(name) is not null;
     }
 
     public bool SelectPhotorealStyleForSmoke(string name)

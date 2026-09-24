@@ -1,12 +1,14 @@
 param(
     [string]$Configuration = 'Release',
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string]$ExecutablePath
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+if ($ExecutablePath) { $exe = [IO.Path]::GetFullPath($ExecutablePath) }
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
     [IO.Path]::DirectorySeparatorChar,
     [IO.Path]::AltDirectorySeparatorChar)
@@ -172,6 +174,7 @@ try {
         companionLifecycleSensitiveFields = 0
         excessDailyLogsRemoved = $true
         newestSevenLogDaysPreserved = $true
+        failedDrainConsumedAndRecovered = $true
         retainedDailyLogCount = $remainingDailyLogs.Count
     } | ConvertTo-Json
 }

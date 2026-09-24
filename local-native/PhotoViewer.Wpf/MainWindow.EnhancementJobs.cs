@@ -542,8 +542,8 @@ public partial class MainWindow
             .Select(static property => property.Name)
             .ToArray();
         string[] allowedNames =
-            ["profileId", "prompt", "steps", "maximumPixelArea"];
-        if (names.Length is < 1 or > 4
+            ["profileId", "prompt", "steps", "maximumPixelArea", "loras", "promptEnhancement"];
+        if (names.Length is < 1 or > 6
             || names.Distinct(StringComparer.Ordinal).Count() != names.Length
             || !names.Contains("prompt", StringComparer.Ordinal)
             || names.Any(name => !allowedNames.Contains(
@@ -553,7 +553,9 @@ public partial class MainWindow
             return false;
         }
 
+        if (requested.TryGetProperty("promptEnhancement", out JsonElement enhancement) && !VideoPromptEnhancement.IsValid(enhancement)) return false;
         string? profileId = MiniMaxH3VideoDefaultProfileId;
+        if (requested.TryGetProperty("loras", out JsonElement loras) && !VideoLoraSelection.TryReadList(loras, out _)) return false;
         if (names.Contains("profileId", StringComparer.Ordinal)
             && !TryGetStringProperty(requested, "profileId", out profileId))
             return false;
@@ -612,7 +614,8 @@ public partial class MainWindow
             || !TryGetExactStringProperty(
                 video,
                 "workflowRevision",
-                MiniMaxH3VideoWorkflowRevision)
+                video.TryGetProperty("requested", out JsonElement workflowRequest) && workflowRequest.ValueKind == JsonValueKind.Object
+                    && workflowRequest.TryGetProperty("loras", out _) ? VideoLoraSelection.Workflow : MiniMaxH3VideoWorkflowRevision)
             || !TryGetExactStringProperty(
                 video,
                 "presetId",
@@ -947,7 +950,9 @@ public partial class MainWindow
             nominalDurationSeconds,
             maximumPixelArea,
             steps,
-            prompt!);
+            prompt!,
+            requested.TryGetProperty("loras", out JsonElement loraArray) && VideoLoraSelection.TryReadList(loraArray, out var selectedLoras) ? selectedLoras : null,
+            requested.TryGetProperty("promptEnhancement", out var enhancement) ? JsonSerializer.Deserialize<VideoPromptEnhancement>(enhancement.GetRawText()) : null);
         return true;
     }
 
@@ -2016,6 +2021,7 @@ public partial class MainWindow
         CancellationToken actionEpoch = CaptureEnhancementCompanionOperationToken();
         if (_enhancementWorkspaceMutationPending
             || _enhancementWorkspaceRefreshPending
+            || _companionControlPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
         {
             return false;
@@ -2047,9 +2053,11 @@ public partial class MainWindow
             if (unknownExplicitResume)
             {
                 EnhancementJobsStatusText.Text =
-                    "ローカルAIサービスへ接続し、キュー状態を確認しています…";
+                    "ローカルAIサービスへ接続し、キューを復旧して再開しています…";
                 EnhancementApiResponse readiness =
-                    await EnsureEnhancementCompanionReadyForExplicitActionAsync(token: actionEpoch);
+                    await EnsureEnhancementCompanionApiReadyAsync(
+                        token: actionEpoch,
+                        preparation: EnhancementApiPreparation.ConnectionOnly);
                 if (generation != _enhancementWorkspaceGeneration
                     || EnhancementJobsDialog.Visibility != Visibility.Visible)
                 {
@@ -2061,31 +2069,6 @@ public partial class MainWindow
                     return false;
                 }
 
-                EnhancementQueueHealthView? refreshedHealth =
-                    await RefreshEnhancementQueueHealthAsync(
-                        generation,
-                        isPoll: false);
-                if (refreshedHealth is not EnhancementQueueHealthView health
-                    || health.Paused is not bool observedPaused)
-                {
-                    EnhancementJobsStatusText.Text =
-                        "キュー状態を確認できませんでした。ローカルAIサービスの詳細を確認してください。";
-                    return false;
-                }
-                current = observedPaused;
-                if (current == paused
-                    && !health.QueueRecoveryRequired)
-                {
-                    if (health.State == "確認が必要")
-                    {
-                        EnhancementJobsStatusText.Text =
-                            "サーバーには接続しましたが、キューの確認が必要です。" + health.Detail;
-                        return false;
-                    }
-                    EnhancementJobsStatusText.Text =
-                        "サーバーに接続しました。キューの一時停止は解除済みです。";
-                    return true;
-                }
             }
 
             if (actionEpoch.IsCancellationRequested) return false;
@@ -2591,8 +2574,16 @@ public partial class MainWindow
         _enhancementWorkspaceHealthEndpointSupported = true;
         if (!response.Ok || response.Payload is not JsonElement payload)
         {
+            if (response.InnerStatusAuthoritative
+                && EnhancementApiErrorCode(response) == "QUEUE_HEALTH_UNAVAILABLE")
+            {
+                ApplyCompanionQueueRecoveryRequired();
+                return null;
+            }
             ApplyEnhancementQueueHealthUnavailable(
                 "処理待ち列の状態を取得できません。Jobsは引き続き確認できます。");
+            if (!_companionControlPending)
+                CompanionControlStatusText.Text = "サーバーの状態を確認できません";
             return null;
         }
 
@@ -3141,6 +3132,8 @@ public partial class MainWindow
 
     private void ApplyEnhancementQueueHealth(EnhancementQueueHealthView health)
     {
+        if (!_companionControlPending)
+            CompanionControlStatusText.Text = "サーバー接続済み";
         _enhancementWorkspaceHealthInventoryRevisionSupported =
             health.InventoryRevision is not null;
         _enhancementWorkspaceLastHealthInventoryRevision =
@@ -3283,12 +3276,13 @@ public partial class MainWindow
             _enhancementWorkspaceQueuePaused is null
             && _usingDefaultModalEnhancementSender;
         EnhancementJobsPauseResumeButton.Content = connectToResume
-            ? "接続して再開"
+            ? "復旧して再開"
             : resume
-                ? "再開"
+                ? _enhancementWorkspaceQueueRecoveryRequired ? "復旧して再開" : "再開"
                 : "一時停止";
         EnhancementJobsPauseResumeButton.IsEnabled =
             (_enhancementWorkspaceQueuePaused.HasValue || connectToResume)
+            && !_companionControlPending
             && !_enhancementWorkspaceMutationPending
             && !_enhancementWorkspaceRefreshPending;
         AutomationProperties.SetName(
@@ -6278,7 +6272,11 @@ public partial class MainWindow
     private async Task<int> RetryAllCanceledEnhancementJobsAsync()
         => await RetryAllTerminalEnhancementJobsAsync("canceled");
 
-    private async Task<int> RetryAllTerminalEnhancementJobsAsync(
+    private Task<int> RetryAllTerminalEnhancementJobsAsync(
+        string terminalStatus)
+        => CompleteDurableEnqueueUiActionAsync(() => RetryAllTerminalEnhancementJobsCoreAsync(terminalStatus));
+
+    private async Task<int> RetryAllTerminalEnhancementJobsCoreAsync(
         string terminalStatus)
     {
         if (_enhancementWorkspaceTerminalHistoryBatchRetrySupported)
@@ -6501,6 +6499,7 @@ public partial class MainWindow
         string? failure = null;
         int? failureStatus = null;
         int acceptedCount = 0;
+        int retainedAcceptedCount = 0;
         int retriedCount = 0;
         int replayedCount = 0;
         int protectedCount = 0;
@@ -6604,7 +6603,8 @@ public partial class MainWindow
                         out int batchReplayedCount,
                         out int batchProtectedCount,
                         out int batchMissingCount,
-                        out int batchFailedCount))
+                        out int batchFailedCount,
+                        out int batchRetainedAcceptedCount))
                 {
                     unconfirmedCount += ids.Length;
                     failure ??= retry.Ok
@@ -6620,6 +6620,7 @@ public partial class MainWindow
                 missingCount += batchMissingCount;
                 itemFailedCount += batchFailedCount;
                 acceptedCount += batchRetriedCount + batchReplayedCount;
+                retainedAcceptedCount += batchRetainedAcceptedCount;
             }
             unattemptedCount = retryIds.Length - attemptedCount;
 
@@ -6630,9 +6631,12 @@ public partial class MainWindow
                     generation,
                     isPoll: false);
                 string resultSummary = acceptedCount > 0
-                    ? $"{terminalLabel}したJob {acceptedCount:N0}件を保存済み設定で受付し、元履歴を消しました。"
-                    : $"{terminalLabel}したJobを再試行できませんでした。元履歴は残しています。";
+                    ? $"{terminalLabel}したJob {acceptedCount:N0}件の再試行を保存済み設定で受け付けました。"
+                    : $"{terminalLabel}したJobの再試行受付を確認できませんでした。";
                 EnhancementJobsStatusText.Text = resultSummary
+                    + (retainedAcceptedCount > 0
+                        ? $" 受付済みのうち{retainedAcceptedCount:N0}件は元の履歴を残しています。"
+                        : "")
                     + (replayedCount > 0
                         ? $" うち{replayedCount:N0}件は同じ一括要求の確認済み結果です。"
                         : "")
@@ -7011,13 +7015,15 @@ public partial class MainWindow
         out int replayedCount,
         out int protectedCount,
         out int missingCount,
-        out int failedCount)
+        out int failedCount,
+        out int retainedAcceptedCount)
     {
         retriedCount = 0;
         replayedCount = 0;
         protectedCount = 0;
         missingCount = 0;
         failedCount = 0;
+        retainedAcceptedCount = 0;
         if (payload is not JsonElement root
             || root.ValueKind != JsonValueKind.Object
             || !root.TryGetProperty(
@@ -7092,12 +7098,21 @@ public partial class MainWindow
             return false;
         }
 
+        bool hasSourceHistory = root.TryGetProperty(
+            "sourceHistoryVersion", out JsonElement sourceHistoryVersion);
+        if (hasSourceHistory
+            && (sourceHistoryVersion.ValueKind != JsonValueKind.Number
+                || !sourceHistoryVersion.TryGetInt32(out int version)
+                || version != 1))
+            return false;
+
         var requested = expectedIds.ToHashSet(StringComparer.Ordinal);
         if (requested.Count != expectedIds.Count)
             return false;
         var accounted = new HashSet<string>(StringComparer.Ordinal);
         int observedRetriedCount = 0;
         int observedReplayedCount = 0;
+        int observedRetainedAcceptedCount = 0;
         foreach (JsonElement result in resultsElement.EnumerateArray())
         {
             if (result.ValueKind != JsonValueKind.Object
@@ -7121,6 +7136,14 @@ public partial class MainWindow
             {
                 return false;
             }
+            bool hasRetained = result.TryGetProperty(
+                "sourceRetained", out JsonElement sourceRetained);
+            if (hasSourceHistory != hasRetained
+                || hasRetained && sourceRetained.ValueKind is not (
+                    JsonValueKind.True or JsonValueKind.False))
+                return false;
+            if (hasRetained && sourceRetained.GetBoolean())
+                observedRetainedAcceptedCount++;
             if (replayedElement.GetBoolean())
                 observedReplayedCount++;
             else
@@ -7171,12 +7194,14 @@ public partial class MainWindow
             }
         }
 
-        return accounted.Count == requestedCount
+        bool valid = accounted.Count == requestedCount
             && observedRetriedCount == retriedCount
             && observedReplayedCount == replayedCount
             && observedProtectedCount == protectedCount
             && observedMissingCount == missingCount
             && observedFailedCount == failedCount;
+        if (valid) retainedAcceptedCount = observedRetainedAcceptedCount;
+        return valid;
     }
 
     private static bool TryReadNonNegativeBatchCount(
@@ -7245,7 +7270,10 @@ public partial class MainWindow
     private async void RerunPhotorealJobNext_Click(object sender, RoutedEventArgs e)
         => await RerunPhotorealJobAsync(sender, enqueueNext: true);
 
-    private async Task RerunPhotorealJobAsync(object sender, bool enqueueNext)
+    private Task RerunPhotorealJobAsync(object sender, bool enqueueNext)
+        => CompleteDurableEnqueueUiActionAsync(() => RerunPhotorealJobCoreAsync(sender, enqueueNext));
+
+    private async Task RerunPhotorealJobCoreAsync(object sender, bool enqueueNext)
     {
         if (sender is not Button { Tag: EnhancementWorkspaceJobView job }
             || _enhancementWorkspaceMutationPending
@@ -7859,7 +7887,8 @@ public partial class MainWindow
             MiniMaxH3VideoPlaybackFps,
             snapshot.MaximumPixelArea,
             snapshot.Steps,
-            snapshot.Prompt);
+            snapshot.Prompt,
+            snapshot.Loras, snapshot.PromptEnhancement);
 
     private async Task<string?>
         ValidateMiniMaxH3VideoRerunSourceBeforePublishAsync(
@@ -7891,7 +7920,11 @@ public partial class MainWindow
             : "動画化の入力画像が確認中に変わりました。ジョブは追加していません。";
     }
 
-    private async Task RerunMiniMaxH3VideoWithSavedPromptAsync(
+    private Task RerunMiniMaxH3VideoWithSavedPromptAsync(
+        EnhancementWorkspaceJobView job)
+        => CompleteDurableEnqueueUiActionAsync(() => RerunMiniMaxH3VideoWithSavedPromptCoreAsync(job));
+
+    private async Task RerunMiniMaxH3VideoWithSavedPromptCoreAsync(
         EnhancementWorkspaceJobView job)
     {
         if (_enhancementWorkspaceMutationPending
@@ -7941,6 +7974,8 @@ public partial class MainWindow
                     seed: null),
                 includeQueuePlacementInBody: false,
                 healthValidator: CreateMiniMaxH3VideoHealthValidator(
+                    requireLoras: settings.Loras is not null,
+                    requirePromptEnhancement: settings.PromptEnhancement is not null,
                     requireDisplayedManagedSource:
                         source.UsesDisplayedFileDirectly),
                 requireExactHealthValidation: true,
@@ -8198,7 +8233,12 @@ public partial class MainWindow
         }
     }
 
-    private async Task RerunI2iV3JobAsync(
+    private Task RerunI2iV3JobAsync(
+        EnhancementWorkspaceJobView job,
+        bool enqueueNext)
+        => CompleteDurableEnqueueUiActionAsync(() => RerunI2iV3JobCoreAsync(job, enqueueNext));
+
+    private async Task RerunI2iV3JobCoreAsync(
         EnhancementWorkspaceJobView job,
         bool enqueueNext)
     {
@@ -8623,7 +8663,17 @@ public partial class MainWindow
         }
     }
 
-    private async Task<bool> RunEnhancementWorkspaceMutationAsync(
+    private Task<bool> RunEnhancementWorkspaceMutationAsync(
+        EnhancementWorkspaceJobView job,
+        HttpMethod method,
+        string route,
+        string successMessage,
+        object? body = null,
+        bool removeTerminalOriginalAfterSuccess = false,
+        string operationLogName = "job_mutation")
+        => CompleteDurableEnqueueUiActionAsync(() => RunEnhancementWorkspaceMutationCoreAsync(job, method, route, successMessage, body, removeTerminalOriginalAfterSuccess, operationLogName));
+
+    private async Task<bool> RunEnhancementWorkspaceMutationCoreAsync(
         EnhancementWorkspaceJobView job,
         HttpMethod method,
         string route,
@@ -12107,10 +12157,15 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             AdapterId,
             "comfyui-flux2-i2i-v2",
             StringComparison.Ordinal);
-    // Durable jobs carry a bounded 0..100 lifecycle value. Only running rows
-    // expose that value as determinate progress; queued and terminal rows use
-    // their status as the clearer authority and do not render a decorative bar.
-    public bool IsProgressIndeterminate => false;
+    // H3 keeps progress below 5 until source/prompt preparation and engine
+    // startup finish. That value cannot measure preparation progress.
+    private bool IsH3Preparation => Status == "running"
+        && !CancelRequested
+        && IsVideoOperation
+        && VideoMutationSafe
+        && AdapterId == "minimax-h3-local-v1"
+        && Progress < 5;
+    public bool IsProgressIndeterminate => IsH3Preparation;
     public bool ShowProgressBar => Status == "running";
     public int DisplayProgress => Status switch
     {
@@ -12127,6 +12182,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             "queued" when QueuePosition > 0 && QueueCount > 0 =>
                 $"待機中 · {QueuePosition} / {QueueCount}",
             "queued" => "待機中",
+            "running" when IsH3Preparation => "動画生成の準備中",
             "running" when DisplayProgress >= 99 => "最終処理中 99%",
             "running" => $"処理中 {DisplayProgress}%",
             "succeeded" => "完了",
@@ -12161,6 +12217,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : IsVideoOperation
             ? !VideoMutationSafe
                 ? "この動画履歴は不完全または非互換のため、変更操作から保護しています。"
+                : IsH3Preparation
+                    ? "画像の確認と生成エンジンの準備を行っています。AIプロンプト強化を選んだ場合は、この段階で実行します。"
                 : ""
             : Operation == "i2i"
                 ? !I2iMutationSafe
@@ -12366,9 +12424,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             || queueMutationScopeChanged)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
-            if (statusChanged)
+            if (statusChanged || progressChanged || cancelRequestedChanged)
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsProgressIndeterminate)));
+            }
+            if (statusChanged)
+            {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowProgressBar)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
             }
@@ -12410,6 +12471,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         }
         if (statusChanged
             || cancelRequestedChanged
+            || progressChanged
             || outputChanged
             || errorChanged)
         {
@@ -12448,8 +12510,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DisplayProgress)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsProgressIndeterminate)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowDetailText)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
         }
         if (updatedChanged)
@@ -12607,7 +12671,9 @@ public sealed record MiniMaxH3VideoWorkspaceSnapshot(
     int NominalDurationSeconds,
     int MaximumPixelArea,
     int Steps,
-    string Prompt);
+    string Prompt,
+    VideoLoraSelection[]? Loras = null,
+    VideoPromptEnhancement? PromptEnhancement = null);
 
 internal sealed record EnhancementVideoMutationProbe(
     string EnvelopeSha256,

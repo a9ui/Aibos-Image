@@ -77,7 +77,6 @@ public partial class MainWindow
     private const int DefaultVideoPlaybackFps = 16;
     private const int DefaultVideoMaximumPixelArea = 409_600;
     private const int MaxVideoPromptLength = 8_000;
-    private const int MaxVideoStyleCount = 32;
     private const int MaxVideoStyleNameLength = 40;
     private const string CustomVideoPromptTemplateId = "custom";
     private const string ImageAwareAutoVideoPromptTemplateId = "image-aware-auto";
@@ -196,7 +195,7 @@ public partial class MainWindow
         }
     }
 
-    private sealed record VideoStyleChoice(string Label, string? StyleName);
+    private sealed record VideoStyleChoice(string Label, string? StyleName, string? TemplateId = null);
 
     private sealed record VideoPromptTemplateChoice(
         string Id,
@@ -309,7 +308,9 @@ public partial class MainWindow
         int PlaybackFps,
         int MaximumPixelArea,
         int Steps,
-        string Prompt);
+        string Prompt,
+        VideoLoraSelection[]? Loras = null,
+        VideoPromptEnhancement? PromptEnhancement = null);
 
     private VideoGenerationRequestSettings CurrentVideoGenerationRequestSettings()
         => new(
@@ -326,7 +327,8 @@ public partial class MainWindow
             _videoPlaybackFps,
             _videoMaximumPixelArea,
             _videoSteps,
-            _videoPrompt.Trim());
+            _videoPrompt.Trim(),
+            CurrentVideoLoras());
 
     private bool TryResolveVideoSeed(out int? seed, out string error)
     {
@@ -1463,6 +1465,7 @@ public partial class MainWindow
         if (ModalPhotorealSettingsPopup is not null)
             ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
         ModalVideoGenerationPopup.Visibility = Visibility.Visible;
+        _ = RefreshVideoLorasAsync();
         if (displayedPhotorealRetry is { } retry)
         {
             _ = RefreshDisplayedPhotorealVideoSourceAsync(
@@ -1476,7 +1479,7 @@ public partial class MainWindow
             new Action(() =>
             {
                 if (ModalVideoGenerationPopup.Visibility == Visibility.Visible)
-                    Keyboard.Focus(ModalVideoPromptTextBox);
+                    FocusModalVideoGenerationBoard();
             }),
             DispatcherPriority.Input);
     }
@@ -1532,6 +1535,7 @@ public partial class MainWindow
 
     private void CloseModalVideoGenerationBoard()
     {
+        _videoActiveSubmission = null;
         CancelVideoH3PromptRewrite();
         if (ModalVideoGenerationPopup is not null)
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
@@ -1623,6 +1627,7 @@ public partial class MainWindow
             MiniMaxH3VideoCanvasMaximumPixelArea,
             SupportedMiniMaxH3VideoMaximumPixelAreas);
         MarkVideoStyleAsCustom();
+        VideoH3PromptRewriteContextChanged();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
             $"MiniMax H3の動画サイズ上限を{_videoMaximumPixelArea.ToString("N0", CultureInfo.InvariantCulture)}pxに保存しました。STEP数は変えていません。");
@@ -1643,6 +1648,7 @@ public partial class MainWindow
             MiniMaxH3VideoMaximumSteps);
         _videoStepsInputValid = true;
         MarkVideoStyleAsCustom();
+        VideoH3PromptRewriteContextChanged();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
             $"MiniMax H3の{_videoSteps} STEPを保存しました。次に追加する動画ジョブから使われます。");
@@ -1675,6 +1681,7 @@ public partial class MainWindow
         _videoSteps = steps;
         _videoStepsInputValid = true;
         MarkVideoStyleAsCustom();
+        VideoH3PromptRewriteContextChanged();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
             $"MiniMax H3の{_videoSteps} STEPを保存しました。次に追加する動画ジョブから使われます。");
@@ -1788,10 +1795,12 @@ public partial class MainWindow
         _videoPrompt = source.Text.Length <= MaxVideoPromptLength
             ? source.Text
             : source.Text[..MaxVideoPromptLength];
+        UpdateDirectVideoSourceVariant(_videoPrompt);
         MarkVideoPromptTemplateAsCustom();
         InvalidateVideoH3PromptUndoAfterManualEdit();
         MarkVideoStyleAsCustom();
         SyncVideoPromptPeer(source);
+        RefreshVideoPromptAuthoringControls();
         VideoH3PromptRewriteContextChanged();
         UpdateVideoGenerationActionControls();
         SetVideoGenerationSettingsStatus(
@@ -1827,6 +1836,7 @@ public partial class MainWindow
     private void ResetVideoGenerationSettings_Click(object sender, RoutedEventArgs e)
     {
         _selectedVideoStyleName = null;
+        RestoreVideoPromptProgram(null);
         RestoreVideoGenerationSettings(
             null,
             null,
@@ -1849,7 +1859,11 @@ public partial class MainWindow
     private void SetVideoGenerationSettingsStatus(string message)
     {
         if (VideoGenerationStatusText is not null)
+        {
             VideoGenerationStatusText.Text = message;
+            VideoGenerationStatusText.ToolTip = message;
+            VideoGenerationStatusText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
+        }
         if (AppVideoSettingsStatusText is not null)
             AppVideoSettingsStatusText.Text = message;
     }
@@ -1865,7 +1879,13 @@ public partial class MainWindow
             return;
         }
 
+        ApplyVideoPromptTemplate(choice);
+    }
+
+    private void ApplyVideoPromptTemplate(VideoPromptTemplateChoice choice)
+    {
         _selectedVideoPromptTemplateId = choice.Id;
+        _selectedVideoStyleName = null;
         if (string.Equals(
                 choice.Id,
                 CustomVideoPromptTemplateId,
@@ -1877,19 +1897,21 @@ public partial class MainWindow
             return;
         }
 
-        TextBox target = ReferenceEquals(sender, AppVideoPromptTemplateComboBox)
-            ? AppVideoPromptTextBox
-            : ModalVideoPromptTextBox;
+        // A built-in style starts with its own body, never a previous style's
+        // instruction program or automatic choices.
+        RestoreVideoPromptProgram(VideoPromptAnnotation.BuiltIn(choice.Prompt).Snapshot());
         _applyingVideoPromptTemplate = true;
         try
         {
-            target.Text = choice.Prompt;
+            ModalVideoPromptTextBox.Text = choice.Prompt;
         }
         finally
         {
             _applyingVideoPromptTemplate = false;
         }
         RefreshVideoPromptTemplateControls();
+        RefreshVideoStyleControls(updateNameFields: true);
+        RefreshVideoPromptAuthoringControls();
         SetVideoGenerationSettingsStatus(
             $"「{choice.Label}」をMiniMax H3形式でPromptへ反映しました。このまま動画化できます。画像固有に作り直す場合だけMiniMax語化してください。");
     }
@@ -1961,9 +1983,17 @@ public partial class MainWindow
         if (choice is null)
             return;
 
+        if (choice.TemplateId is { } templateId)
+        {
+            ApplyVideoPromptTemplate(VideoPromptTemplates.First(template => template.Id == templateId));
+            return;
+        }
+
         if (choice.StyleName is null)
         {
             _selectedVideoStyleName = null;
+            _selectedVideoPromptTemplateId = CustomVideoPromptTemplateId;
+            RefreshVideoPromptTemplateControls();
             VideoH3PromptRewriteContextChanged();
             RefreshVideoStyleControls(updateNameFields: false);
             SetVideoStyleStatus("現在の設定を使用します。Styleにはまだ保存されていません。");
@@ -1981,6 +2011,7 @@ public partial class MainWindow
 
         _selectedVideoStyleName = style.Name;
         _selectedVideoPromptTemplateId = CustomVideoPromptTemplateId;
+        RestoreVideoPromptProgram(style.InstructionProgram);
         RestoreVideoGenerationSettings(
             style.DurationSeconds,
             style.PlaybackFps,
@@ -2022,11 +2053,6 @@ public partial class MainWindow
         }
         else
         {
-            if (_videoStyles.Count >= MaxVideoStyleCount)
-            {
-                SetVideoStyleStatus($"Styleは最大{MaxVideoStyleCount}件です。不要なStyleを削除してください。");
-                return;
-            }
             _videoStyles.Add(style);
         }
 
@@ -2035,12 +2061,12 @@ public partial class MainWindow
         _selectedVideoStyleName = style.Name;
         VideoH3PromptRewriteContextChanged();
         RefreshVideoStyleControls(updateNameFields: true);
+        if (!TrySaveAiStyles())
+            return;
         SetVideoStyleStatus(
             existingIndex >= 0
                 ? $"「{style.Name}」を現在の設定で上書きしました。"
                 : $"「{style.Name}」を保存しました。");
-        if (!_initializing)
-            SaveAiStyles();
     }
 
     private void DeleteVideoStyle_Click(object sender, RoutedEventArgs e)
@@ -2056,9 +2082,9 @@ public partial class MainWindow
         _selectedVideoStyleName = null;
         VideoH3PromptRewriteContextChanged();
         RefreshVideoStyleControls(updateNameFields: true);
+        if (!TrySaveAiStyles())
+            return;
         SetVideoStyleStatus($"「{style.Name}」を削除しました。現在の設定値はそのまま残ります。");
-        if (!_initializing)
-            SaveAiStyles();
     }
 
     private void OpenVideoStylesFile_Click(object sender, RoutedEventArgs e)
@@ -2078,7 +2104,8 @@ public partial class MainWindow
                 return false;
             }
 
-            SaveAiStyles();
+            if (!TrySaveAiStyles())
+                return false;
             if (!File.Exists(path))
             {
                 SetVideoStyleStatus("Style保存ファイルを作成できませんでした。保存エラーを確認してください。");
@@ -2147,22 +2174,26 @@ public partial class MainWindow
                 continue;
 
             _videoStyles.Add(normalized);
-            if (_videoStyles.Count >= MaxVideoStyleCount)
-                break;
         }
         _videoStyles.Sort(static (left, right) =>
             StringComparer.CurrentCultureIgnoreCase.Compare(left.Name, right.Name));
 
         VideoStyleState? selected = FindVideoStyle(selectedStyleName);
+        if (selected is not null)
+            RestoreVideoPromptProgram(selected.InstructionProgram);
         _selectedVideoStyleName = selected is not null && VideoStyleMatchesCurrent(selected)
             ? selected.Name
             : null;
+        RefreshVideoPromptAuthoringControls();
         RefreshVideoStyleControls(updateNameFields: true);
     }
 
     private static VideoStyleState? NormalizeVideoStyle(VideoStyleState? candidate)
     {
         if (candidate is null)
+            return null;
+
+        if (!VideoPromptProgram.TryRead(candidate.InstructionProgram, out _))
             return null;
 
         string name = candidate.Name?.Trim() ?? "";
@@ -2204,6 +2235,7 @@ public partial class MainWindow
                     ? steps
                     : MiniMaxH3VideoSteps,
             Prompt = prompt,
+            InstructionProgram = candidate.InstructionProgram?.Clone(),
             ExtensionData = CloneExtensionData(candidate.ExtensionData),
         };
     }
@@ -2223,6 +2255,7 @@ public partial class MainWindow
             MaximumPixelArea = _videoMaximumPixelArea,
             Steps = _videoSteps,
             Prompt = _videoPrompt,
+            InstructionProgram = _videoPromptProgram.Snapshot(),
         };
 
     private VideoStyleState? FindVideoStyle(string? name)
@@ -2238,7 +2271,9 @@ public partial class MainWindow
             && style.PlaybackFps == _videoPlaybackFps
             && style.MaximumPixelArea == _videoMaximumPixelArea
             && (style.Steps ?? MiniMaxH3VideoSteps) == _videoSteps
-            && string.Equals(style.Prompt, _videoPrompt, StringComparison.Ordinal);
+            && (string.Equals(style.Prompt, _videoPrompt, StringComparison.Ordinal)
+                || (VideoPromptProgram.TryRead(style.InstructionProgram, out var program) && program.UseSourceVariants
+                    && !program.Enabled && (_videoPrompt == program.BaseH3Template || _videoPrompt == program.PhotorealBaseH3Template)));
 
     private void MarkVideoStyleAsCustom()
     {
@@ -2274,12 +2309,16 @@ public partial class MainWindow
 
         var choices = new List<VideoStyleChoice>
         {
-            new("カスタム（現在の設定）", null),
+            new("現在の設定（未保存）", null),
         };
+        choices.AddRange(VideoPromptTemplates.Where(template => template.Id != CustomVideoPromptTemplateId)
+            .Select(template => new VideoStyleChoice("基本 · " + BuiltInVideoStyleLabel(template), null, template.Id)));
         choices.AddRange(_videoStyles.Select(static style =>
             new VideoStyleChoice(style.Name, style.Name)));
         VideoStyleChoice selectedChoice = choices.FirstOrDefault(choice =>
-                string.Equals(choice.StyleName, _selectedVideoStyleName, StringComparison.OrdinalIgnoreCase))
+                _selectedVideoStyleName is not null
+                    ? string.Equals(choice.StyleName, _selectedVideoStyleName, StringComparison.OrdinalIgnoreCase)
+                    : choice.TemplateId == _selectedVideoPromptTemplateId)
             ?? choices[0];
 
         bool wasSyncing = _syncingVideoGenerationSettings;
@@ -2317,6 +2356,22 @@ public partial class MainWindow
             : $"現在: {VideoModelLabel(_videoModelId)} / {VideoQualityLabel(_videoQualityId)} / {_videoDurationSeconds}秒 / 生成{_videoPlaybackFps}fps / {_videoMaximumPixelArea.ToString("N0", CultureInfo.InvariantCulture)}px";
     }
 
+    private static string BuiltInVideoStyleLabel(VideoPromptTemplateChoice template) => template.Id switch
+    {
+        "image-aware-auto" => "画像に合わせておまかせ",
+        "dynamic-general" => "はっきりした動き",
+        "cute-sexy" => "可愛らしさと艶やかさ",
+        "intense-allure" => "妖艶な雰囲気",
+        "cinematic-camera" => "映画のようなカメラ",
+        "natural-visible" => "自然な動き",
+        "expressive-emotion" => "表情と感情",
+        "action-power" => "力強いアクション",
+        "dreamy-flow" => "幻想的でゆったり",
+        "atmospheric-scene" => "風景と空気感",
+        "romantic-warm" => "温かく柔らかな雰囲気",
+        _ => template.Label,
+    };
+
     private void SetVideoStyleStatus(string message)
     {
         if (ModalVideoStyleStatusText is not null)
@@ -2338,6 +2393,7 @@ public partial class MainWindow
                 MaximumPixelArea = style.MaximumPixelArea,
                 Steps = style.Steps,
                 Prompt = style.Prompt,
+                InstructionProgram = style.InstructionProgram?.Clone(),
                 ExtensionData = CloneExtensionData(style.ExtensionData),
             }).ToList();
 
@@ -2597,6 +2653,7 @@ public partial class MainWindow
         }
         RefreshVideoPromptTemplateControls();
         RefreshVideoH3PromptRewriteControls();
+        RefreshVideoPromptAuthoringControls();
         UpdateVideoGenerationActionControls();
     }
 
@@ -2623,26 +2680,40 @@ public partial class MainWindow
             && modelRegistered
             && seedReady
             && _videoStepsInputValid
+            && !VideoPromptPreparationPending
+            && (_videoEnhanceAtExecution || ValidateVideoProgramForEnqueue() is null)
+            && !_videoAutomaticSubmissionPending
             && !_videoGenerationRequestPending;
-        QueueVideoGenerationButton.Content = _videoGenerationRequestPending
-            ? "追加中..."
-            : modelRegistered
-                ? "H3動画化をキューへ追加"
-                : "動画モデルを確認";
-        AutomationProperties.SetName(
-            QueueVideoGenerationButton,
-            _videoGenerationRequestPending
-                ? "Adding video generation job"
-                : "Add video generation job");
+        RefreshVideoSubmissionPresentation(modelRegistered);
     }
 
     private async void QueueVideoGeneration_Click(object sender, RoutedEventArgs e)
-        => await QueueVideoGenerationAsync();
+        => await SubmitVideoGenerationAsync();
 
-    private async Task<bool> QueueVideoGenerationAsync()
+    private Task<bool> QueueVideoGenerationAsync(string? preparedPrompt = null, Func<string?>? validateSubmission = null, VideoPromptEnhancement? promptEnhancement = null)
+        => CompleteDurableEnqueueUiActionAsync(() => QueueVideoGenerationCoreAsync(preparedPrompt, validateSubmission, promptEnhancement));
+
+    private async Task<bool> QueueVideoGenerationCoreAsync(string? preparedPrompt = null, Func<string?>? validateSubmission = null, VideoPromptEnhancement? promptEnhancement = null)
     {
-        if (_videoGenerationRequestPending)
+        if (_videoGenerationRequestPending || VideoPromptPreparationPending)
             return false;
+
+        if (preparedPrompt is null) ApplyDirectVideoSourceVariant();
+
+        if (validateSubmission?.Invoke() is string submissionError)
+        {
+            SetVideoGenerationSettingsStatus(submissionError);
+            return false;
+        }
+
+        if (preparedPrompt is null && promptEnhancement is null && ValidateVideoProgramForEnqueue() is not null)
+        {
+            // The persistent preparation guide owns this validation message.
+            // Do not repeat a second, older instruction above the same footer.
+            SetVideoGenerationSettingsStatus("");
+            UpdateVideoGenerationActionControls();
+            return false;
+        }
 
         if (!TryRevalidateCapturedVideoSource(
                 out VideoSourceChoice source,
@@ -2673,15 +2744,41 @@ public partial class MainWindow
         }
 
         VideoGenerationRequestSettings settings =
-            CurrentVideoGenerationRequestSettings();
+            CurrentVideoGenerationRequestSettings() with { PromptEnhancement = promptEnhancement };
+        string capturedEditorPrompt = settings.Prompt;
+        long capturedLoraRevision = _videoLoraRevision;
+        if (preparedPrompt is not null) settings = settings with { Prompt = preparedPrompt };
+        string? capturedProgramContext = _videoPromptProgram.Enabled || _videoPromptProgram.UseSourceVariants ? VideoProgramContext() : null;
         _videoGenerationRequestPending = true;
         string? pendingDeliveryRequestId = null;
         UpdateVideoGenerationActionControls();
         SetVideoGenerationSettingsStatus("ローカル動画生成の準備を確認しています...");
         try
         {
+            if (settings.Loras is { } loras)
+            {
+                try
+                {
+                    SetVideoGenerationSettingsStatus("選択したLoRAの内容を確認しています…");
+                    using var loraTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                    var captured = new List<VideoLoraSelection>();
+                    foreach (var lora in loras) captured.Add(await lora.CaptureAsync(loraTimeout.Token));
+                    if (capturedLoraRevision != _videoLoraRevision) throw new InvalidDataException("確認中にLoRAの選択が変わりました。もう一度追加してください。");
+                    if (captured.Sum(x => x.Bytes) > VideoLoraSelection.MaximumBytes || captured.Select(x => x.Sha256).Distinct().Count() != captured.Count)
+                        throw new InvalidDataException("LoRAの合計を4GiB以下にし、同じ内容のファイルを重複して選ばないでください。");
+                    settings = settings with { Loras = captured.ToArray() };
+                }
+                catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or OperationCanceledException)
+                {
+                    SetVideoGenerationSettingsStatus("LoRAを確認できません。キューには追加していません。 " + error.Message);
+                    return false;
+                }
+            }
             Func<JsonElement, string?>? healthValidator = h3Selected
                 ? CreateMiniMaxH3VideoHealthValidator(
+                    requireLoras: settings.Loras is not null,
+                    requirePromptEnhancement: settings.PromptEnhancement is not null,
+                    requirePreservingEnhancement: settings.PromptEnhancement?.SchemaVersion == 2,
                     requireDisplayedManagedSource:
                         source.UsesDisplayedFileDirectly)
                 : seed.HasValue
@@ -2740,7 +2837,11 @@ public partial class MainWindow
                 requireExactHealthValidation: h3Selected,
                 recoverySourceIdentity: source.SourceIdentity,
                 prePublishValidator: () =>
-                    ValidateVideoSourceImmediatelyBeforePublish(
+                    (capturedLoraRevision != _videoLoraRevision ? "確認中にLoRAの選択が変わりました。キューには追加していません。" : null)
+                    ??
+                    validateSubmission?.Invoke()
+                    ?? ValidateCapturedVideoProgram(capturedProgramContext, capturedEditorPrompt, preparedPrompt is null && promptEnhancement is null)
+                    ?? ValidateVideoSourceImmediatelyBeforePublish(
                         capturedSourceTile,
                         source,
                         sourceStamp,
@@ -2756,6 +2857,10 @@ public partial class MainWindow
                         RecordPendingVideoSourceDependency(
                             item.RequestId,
                             source);
+                        // After this durable boundary the immutable submission
+                        // belongs to delivery recovery, not the editable draft.
+                        _videoActiveSubmission = null;
+                        RefreshVideoStudio();
                         return publishLease;
                     }
                     catch
@@ -2766,12 +2871,14 @@ public partial class MainWindow
                 });
             if (response.SavedForDelivery)
             {
+                RecordVideoSubmissionPreview(settings.Prompt, promptEnhancement is not null);
                 RecordActiveVideoSourceDependency(source);
                 SetVideoGenerationSettingsStatus(
                     "動画化の予約を保存しました。Jobsへの登録を継続しています。");
                 SetTransientStatusToast(
                     $"{Path.GetFileName(source.SourceIdentity)}: 動画化の予約を保存しました。登録を継続しています。");
                 ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
+                ResetVideoProgramOverrideAfterEnqueue();
                 return true;
             }
             if (!response.Ok
@@ -2784,6 +2891,7 @@ public partial class MainWindow
             }
 
             TryGetStringProperty(job, "id", out string? jobId);
+            RecordVideoSubmissionPreview(settings.Prompt, promptEnhancement is not null);
             RecordActiveVideoSourceDependency(source);
             ApplyActiveEnhancementQueueJobToVisibleCatalog(job, capturedSourceTile);
             string suffix = string.IsNullOrWhiteSpace(jobId)
@@ -2815,6 +2923,7 @@ public partial class MainWindow
             }
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
             QueueEnhancedStateRefreshIfChanged();
+            ResetVideoProgramOverrideAfterEnqueue();
             return true;
         }
         finally
@@ -2910,12 +3019,12 @@ public partial class MainWindow
         object video = h3Selected
             ? new
             {
-                requested = new
+                requested = new Dictionary<string, object?>
                 {
-                    profileId = settings.ProfileId,
-                    prompt = settings.Prompt,
-                    steps = settings.Steps,
-                    maximumPixelArea = settings.MaximumPixelArea,
+                    ["profileId"] = settings.ProfileId,
+                    ["prompt"] = settings.Prompt,
+                    ["steps"] = settings.Steps,
+                    ["maximumPixelArea"] = settings.MaximumPixelArea,
                 },
             }
             : new
@@ -2937,6 +3046,14 @@ public partial class MainWindow
             ["adapterId"] = settings.BackendId,
             ["video"] = video,
         };
+        if (h3Selected)
+        {
+            var requested = new Dictionary<string, object?> { ["profileId"] = settings.ProfileId, ["prompt"] = settings.Prompt,
+                ["steps"] = settings.Steps, ["maximumPixelArea"] = settings.MaximumPixelArea };
+            if (settings.Loras is { Length: > 0 }) requested["loras"] = settings.Loras;
+            if (settings.PromptEnhancement is not null) requested["promptEnhancement"] = settings.PromptEnhancement;
+            requestBody["video"] = new { requested };
+        }
         if (!string.IsNullOrWhiteSpace(source.ProducerJobId))
             requestBody["sourceProducerJobId"] = source.ProducerJobId;
         if (source.UsesDisplayedFileDirectly)
@@ -3254,7 +3371,7 @@ public partial class MainWindow
                     StringComparison.Ordinal)
                 || !string.Equals(
                     ModalVideoH3ResolutionLabel.Text,
-                    "動画サイズ（STEPとは独立）",
+                    "画質",
                     StringComparison.Ordinal)
                 || !ModalVideoH3ResolutionComboBox.Items
                     .OfType<ComboBoxItem>()
@@ -3392,7 +3509,11 @@ public partial class MainWindow
             && ModalVideoPromptTemplateComboBox.Items.Count
                 == VideoPromptTemplates.Count
             && AppVideoPromptTemplateComboBox.Items.Count
-                == VideoPromptTemplates.Count;
+                == VideoPromptTemplates.Count
+            && ModalVideoPromptTemplateComboBox.Visibility == Visibility.Collapsed
+            && AppVideoPromptTemplateComboBox.Visibility == Visibility.Collapsed
+            && ModalVideoStyleComboBox.Items.OfType<VideoStyleChoice>().Count(choice => choice.TemplateId is not null)
+                == VideoPromptTemplates.Count - 1;
 
     public IReadOnlyList<string> VideoPromptTemplateIdsForSmoke
         => VideoPromptTemplates.Select(static template => template.Id).ToList();
@@ -3404,16 +3525,16 @@ public partial class MainWindow
 
     public bool SelectVideoPromptTemplateForSmoke(string templateId)
     {
-        VideoPromptTemplateChoice? choice = ModalVideoPromptTemplateComboBox.Items
-            .OfType<VideoPromptTemplateChoice>()
+        VideoStyleChoice? choice = ModalVideoStyleComboBox.Items
+            .OfType<VideoStyleChoice>()
             .FirstOrDefault(candidate => string.Equals(
-                candidate.Id,
+                candidate.TemplateId ?? (candidate.StyleName is null ? CustomVideoPromptTemplateId : ""),
                 templateId,
                 StringComparison.Ordinal));
         if (choice is null)
             return false;
 
-        ModalVideoPromptTemplateComboBox.SelectedItem = choice;
+        ModalVideoStyleComboBox.SelectedItem = choice;
         return string.Equals(
             _selectedVideoPromptTemplateId,
             templateId,
@@ -3442,7 +3563,7 @@ public partial class MainWindow
     {
         AppVideoStyleNameTextBox.Text = name;
         SaveVideoStyle_Click(SaveAppVideoStyleButton, new RoutedEventArgs());
-        return FindVideoStyle(name) is not null;
+        return !_aiStylesPendingSave && FindVideoStyle(name) is not null;
     }
 
     public bool SelectVideoStyleForSmoke(string name)
@@ -3462,7 +3583,7 @@ public partial class MainWindow
     {
         string? selectedName = _selectedVideoStyleName;
         DeleteVideoStyle_Click(DeleteAppVideoStyleButton, new RoutedEventArgs());
-        return selectedName is not null && FindVideoStyle(selectedName) is null;
+        return !_aiStylesPendingSave && selectedName is not null && FindVideoStyle(selectedName) is null;
     }
 
     public (string Label, string? ProducerJobId)? VideoSourceForSmoke
@@ -3730,7 +3851,7 @@ public partial class MainWindow
                 issues.Add("surface");
             if (!VideoStyleSurfaceForSmoke)
                 issues.Add("style");
-            if (ModalVideoGenerationBoardBorder.MaxHeight > 680
+            if (ModalVideoGenerationBoardBorder.Width <= 0 || ModalVideoGenerationBoardBorder.Width > 860
                 || ModalVideoGenerationScrollViewer.VerticalScrollBarVisibility
                     != ScrollBarVisibility.Auto)
                 issues.Add("layout");

@@ -7,6 +7,49 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
+    public async Task<bool> AuthenticatedEnqueueHealthOnceForSmokeAsync(JsonElement validHealth)
+    {
+        int healthReads = 0;
+        int mutations = 0;
+        JsonNode health = JsonNode.Parse(validHealth.GetRawText())!;
+        health["capabilities"]!["durableEnqueueInboxV1"] = JsonSerializer.SerializeToNode(
+            new { ready = true, protocolVersion = 1, backendGeneration = "json-v1" });
+        ConfigureEnhancementCompanionAutoStartForSmoke(async (request, token) =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/api/enhance/identity")
+            {
+                string challenge = request.Headers.GetValues(EnhancementCompanionChallengeHeader).Single();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(
+                        EnhancementCompanionIdentityPayloadForSmoke(challenge))),
+                };
+            }
+            var inner = await DecodeEnhancementCompanionSecureRequestForSmokeAsync(request, token);
+            if (inner?.Method == "GET" && inner.PathAndQuery == "/api/enhance/health")
+                health["probe"] = ++healthReads;
+            else mutations++;
+            return EnhancementCompanionSecureResponseForSmoke(request, 200,
+                JsonSerializer.SerializeToElement(health));
+        }, _ => throw new InvalidOperationException("The synthetic authenticated API is already available."));
+        EnhancementApiResponse single = await SendEnhancementEnqueueAsync(
+            new { operation = "upscale", presetId = "synthetic" },
+            healthValidator: payload => payload.GetProperty("probe").GetInt32() == 1
+                ? "synthetic single refusal" : "unexpected snapshot",
+            requireExactHealthValidation: true);
+        bool singleExact = healthReads == 1 && single.StatusCode == 426
+            && single.Error == "synthetic single refusal" && !single.SavedForDelivery;
+        DurableEnhancementBatchResponse batch = await TrySendDurableEnhancementBatchCoreAsync(
+            [new(new { operation = "upscale", presetId = "synthetic" }, null)],
+            healthValidator: payload => payload.GetProperty("probe").GetInt32() == 2
+                ? "synthetic batch refusal" : "unexpected snapshot",
+            requireExactHealthValidation: true);
+        return singleExact && healthReads == 2 && mutations == 0
+            && batch.PublishedCount == 0 && batch.NudgeCount == 0
+            && batch.Responses.All(response => response.StatusCode == 426
+                && response.Error == "synthetic batch refusal" && !response.SavedForDelivery);
+    }
+
     public bool H3NumericIntegrityForSmoke(JsonElement validHealth, string capabilitiesJson)
     {
         JsonNode baseline = JsonNode.Parse(validHealth.GetRawText())!;

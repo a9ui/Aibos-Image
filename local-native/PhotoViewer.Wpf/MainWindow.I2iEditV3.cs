@@ -613,7 +613,10 @@ public partial class MainWindow
     private async void QueueI2iV3Edit_Click(object sender, RoutedEventArgs e)
         => await QueueI2iV3EditAsync();
 
-    private async Task<bool> QueueI2iV3EditAsync(string queuePlacement = "last")
+    private Task<bool> QueueI2iV3EditAsync(string queuePlacement = "last")
+        => CompleteDurableEnqueueUiActionAsync(() => QueueI2iV3EditCoreAsync(queuePlacement));
+
+    private async Task<bool> QueueI2iV3EditCoreAsync(string queuePlacement = "last")
     {
         if (queuePlacement is not ("last" or "next"))
             throw new ArgumentOutOfRangeException(nameof(queuePlacement));
@@ -902,11 +905,11 @@ public partial class MainWindow
             StringComparer.CurrentCultureIgnoreCase.Compare(left.Name, right.Name));
         _selectedI2iV3StyleName = saved.Name;
         RefreshI2iV3StyleControls(updateName: true);
+        if (!TrySaveAiStyles())
+            return;
         I2iV3StyleStatusText.Text = index >= 0
             ? $"「{saved.Name}」を現在の入力と設定で上書きしました。"
             : $"「{saved.Name}」を保存しました。";
-        if (!_initializing)
-            SaveAiStyles();
     }
 
     private void DeleteI2iV3Style_Click(object sender, RoutedEventArgs e)
@@ -920,9 +923,9 @@ public partial class MainWindow
         _i2iV3Styles.Remove(style);
         _selectedI2iV3StyleName = null;
         RefreshI2iV3StyleControls(updateName: true);
+        if (!TrySaveAiStyles())
+            return;
         I2iV3StyleStatusText.Text = $"「{style.Name}」を削除しました。現在の入力は残ります。";
-        if (!_initializing)
-            SaveAiStyles();
     }
 
     private void MarkI2iV3StyleAsCustom()

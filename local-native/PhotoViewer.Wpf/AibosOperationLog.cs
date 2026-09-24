@@ -107,26 +107,7 @@ internal static partial class AibosOperationLog
         {
             string localAppData = Environment.GetFolderPath(
                 Environment.SpecialFolder.LocalApplicationData);
-            if (!TryPrepareTrustedLogDirectory(localAppData, out string trustedDirectory))
-                return;
-
-            DateTime utcNow = DateTime.UtcNow;
-            var batch = new StringBuilder(8 * 1024);
-            bool wroteAny = false;
-            while (Pending.TryDequeue(out string? line))
-            {
-                Interlocked.Decrement(ref _pendingCount);
-                batch.AppendLine(line);
-                if (batch.Length >= 8 * 1024)
-                {
-                    wroteAny |= AppendBounded(trustedDirectory, utcNow, batch);
-                    batch.Clear();
-                }
-            }
-            if (batch.Length > 0)
-                wroteAny |= AppendBounded(trustedDirectory, utcNow, batch);
-            if (wroteAny)
-                CleanupExcessDailyLogsOnce(trustedDirectory, utcNow);
+            DrainBatch(localAppData);
         }
         catch
         {
@@ -139,6 +120,60 @@ internal static partial class AibosOperationLog
             if (!Pending.IsEmpty)
                 ScheduleDrain();
         }
+    }
+
+    private static void DrainBatch(string localAppData)
+    {
+        // Own a bounded batch before attempting I/O. Best-effort diagnostics
+        // may be dropped on failure, but the same pending lines must never
+        // schedule an endless chain of tasks when the directory is unavailable.
+        var lines = new List<string>(MaximumPendingLines);
+        while (lines.Count < MaximumPendingLines && Pending.TryDequeue(out string? line))
+        {
+            Interlocked.Decrement(ref _pendingCount);
+            lines.Add(line);
+        }
+        if (lines.Count == 0
+            || !TryPrepareTrustedLogDirectory(localAppData, out string trustedDirectory))
+            return;
+
+        DateTime utcNow = DateTime.UtcNow;
+        var batch = new StringBuilder(8 * 1024);
+        bool wroteAny = false;
+        foreach (string line in lines)
+        {
+            batch.AppendLine(line);
+            if (batch.Length >= 8 * 1024)
+            {
+                wroteAny |= AppendBounded(trustedDirectory, utcNow, batch);
+                batch.Clear();
+            }
+        }
+        if (batch.Length > 0)
+            wroteAny |= AppendBounded(trustedDirectory, utcNow, batch);
+        if (wroteAny)
+            CleanupExcessDailyLogsOnce(trustedDirectory, utcNow);
+    }
+
+    internal static bool VerifyFailedDrainRecoveryForSecuritySmoke(string fixtureRoot)
+    {
+        // The smoke runner validates an isolated TEMP root before calling this.
+        string root = Path.Combine(fixtureRoot, "failed-drain");
+        Directory.CreateDirectory(root);
+        string obstacle = Path.Combine(root, "Aibos Image");
+        File.WriteAllText(obstacle, "synthetic-directory-obstacle");
+        Pending.Enqueue("{\"operation\":\"discarded\"}");
+        Interlocked.Increment(ref _pendingCount);
+        DrainBatch(root);
+        bool failedBatchConsumed = Pending.IsEmpty && Volatile.Read(ref _pendingCount) == 0;
+        File.Delete(obstacle);
+        Pending.Enqueue("{\"operation\":\"recovered\"}");
+        Interlocked.Increment(ref _pendingCount);
+        DrainBatch(root);
+        string log = Path.Combine(root, "Aibos Image", "Logs", $"operations-{DateTime.UtcNow:yyyy-MM-dd}.jsonl");
+        return failedBatchConsumed && Pending.IsEmpty && Volatile.Read(ref _pendingCount) == 0
+            && File.Exists(log) && File.ReadAllText(log).Contains("recovered", StringComparison.Ordinal)
+            && !File.ReadAllText(log).Contains("discarded", StringComparison.Ordinal);
     }
 
     internal static bool TryWriteBatchForSecuritySmoke(

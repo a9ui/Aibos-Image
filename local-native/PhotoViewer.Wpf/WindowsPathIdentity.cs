@@ -242,6 +242,18 @@ internal static class WindowsPathIdentity
         }
     }
 
+    internal static bool TryGetDirectoryIdentity(
+        SafeFileHandle handle, string expectedPath, out string volumeId, out string fileId)
+    {
+        volumeId = fileId = "";
+        if (!IsDirectoryLeaseBoundTo(handle, expectedPath)
+            || !GetFileInformation(handle, out ByHandleFileInformation information))
+            return false;
+        volumeId = information.VolumeSerialNumber.ToString("X8");
+        fileId = ((ulong)information.FileIndexHigh << 32 | information.FileIndexLow).ToString("X16");
+        return true;
+    }
+
     internal static bool TryGetHardLinkCount(
         SafeFileHandle handle,
         out uint linkCount)

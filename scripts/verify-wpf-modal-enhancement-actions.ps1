@@ -1,4 +1,5 @@
 param(
+    [string]$AssemblyPath = '',
     [string]$Configuration = 'Release',
     [string]$DotnetPath = 'dotnet',
     [string]$TargetFrameworkOverride = '',
@@ -6,6 +7,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($AssemblyPath -and $TargetFrameworkOverride) {
+    throw 'AssemblyPath uses an existing build; TargetFrameworkOverride requires a new build.'
+}
 
 function Assert-True {
     param(
@@ -105,22 +110,27 @@ try {
 
     [Environment]::SetEnvironmentVariable('PHOTOVIEWER_BROWSER_BASE_URL', 'http://127.0.0.1:65534/', 'Process')
 
-    $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        $buildArguments = @('build', $project, '-c', $Configuration, "-p:OutputPath=$buildOutput", '--nologo', '-v:minimal')
-        if ($NoRestore) { $buildArguments += '--no-restore' }
-        & $DotnetPath @buildArguments
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+            $buildArguments = @('build', $project, '-c', $Configuration, "-p:OutputPath=$buildOutput", '--nologo', '-v:minimal')
+            if ($NoRestore) { $buildArguments += '--no-restore' }
+            & $DotnetPath @buildArguments
+        }
+        else {
+            $msbuildArguments = @('msbuild', $project, '-target:Rebuild', "-property:TargetFramework=$TargetFrameworkOverride", "-property:OutputPath=$buildOutput", "-property:Configuration=$Configuration", '-nologo', '-verbosity:minimal')
+            if (-not $NoRestore) { $msbuildArguments += '-restore' }
+            & $DotnetPath @msbuildArguments
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "WPF build failed with exit code $LASTEXITCODE."
+        }
+
+        $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
     }
     else {
-        $msbuildArguments = @('msbuild', $project, '-target:Rebuild', "-property:TargetFramework=$TargetFrameworkOverride", "-property:OutputPath=$buildOutput", "-property:Configuration=$Configuration", '-nologo', '-verbosity:minimal')
-        if (-not $NoRestore) { $msbuildArguments += '-restore' }
-        & $DotnetPath @msbuildArguments
+        $dll = (Resolve-Path -LiteralPath $AssemblyPath -ErrorAction Stop).Path
     }
-    if ($LASTEXITCODE -ne 0) {
-        throw "WPF build failed with exit code $LASTEXITCODE."
-    }
-
-    $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
     Assert-True (Test-Path -LiteralPath $dll -PathType Leaf) "WPF build output was not found: $dll"
 
     & $DotnetPath $dll `

@@ -1,5 +1,7 @@
 param(
-    [string]$DotnetPath = ''
+    [string]$DotnetPath = '',
+    [string]$EnvelopeFixturePath = '',
+    [string]$MaintenanceMarkerFixturePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -7,6 +9,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $storeSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\EnhancementEnqueueInboxStore.cs'
 $policySource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\EnhancementEnqueueProbePolicy.cs'
 $companionSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.EnhancementCompanion.cs'
+$publicationSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.DurableEnqueuePublication.cs'
 $jobsSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.EnhancementJobs.cs'
 $videoSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.VideoGeneration.cs'
 $sharedLockSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\AlbumStore.cs'
@@ -17,7 +20,7 @@ if (-not (Test-Path -LiteralPath $storeSource -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $policySource -PathType Leaf)) {
     throw 'Durable enqueue probe policy source is missing.'
 }
-foreach ($sourcePath in @($companionSource, $jobsSource, $videoSource, $sharedLockSource)) {
+foreach ($sourcePath in @($companionSource, $publicationSource, $jobsSource, $videoSource, $sharedLockSource)) {
     if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
         throw "Durable enqueue WPF source is missing: $sourcePath"
     }
@@ -27,6 +30,8 @@ if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) {
 }
 
 $companionText = Get-Content -LiteralPath $companionSource -Raw
+$publicationText = Get-Content -LiteralPath $publicationSource -Raw
+$storeText = Get-Content -LiteralPath $storeSource -Raw
 $jobsText = Get-Content -LiteralPath $jobsSource -Raw
 $videoText = Get-Content -LiteralPath $videoSource -Raw
 $sharedLockText = Get-Content -LiteralPath $sharedLockSource -Raw
@@ -36,7 +41,7 @@ if (($jobsText -notmatch 'bool requiresPinnedVideoSource = job\.IsVideoOperation
     throw 'Single video retry does not pin its source through durable publication.'
 }
 $savedPromptStart = $jobsText.IndexOf(
-    'private async Task RerunMiniMaxH3VideoWithSavedPromptAsync',
+    'private async Task RerunMiniMaxH3VideoWithSavedPromptCoreAsync',
     [StringComparison]::Ordinal)
 $savedPromptEnd = if ($savedPromptStart -ge 0) {
     $jobsText.IndexOf(
@@ -68,13 +73,17 @@ if (($videoText -notmatch 'PinVideoRetrySourceForDurablePublish') -or
     throw 'Video durable-publication pin no longer denies delete sharing.'
 }
 if (($companionText -notmatch 'AcquireEnhancementJobsWriteLeaseForDurablePublish') -or
-    ($companionText -notmatch 'Path\.Combine\(jobsDirectory, "jobs\.json"\)') -or
+    ($storeText -notmatch 'Path\.Combine\(jobsDirectory, "jobs\.json"\)') -or
+    ($companionText -notmatch 'return onBeforeDurablePublish\?\.Invoke\(item\)') -or
+    ($publicationText -notmatch 'EnhancementEnqueueInboxStore\.Publish\(') -or
     ($sharedLockText -notmatch 'TryAcquireSharedDirectoryWriteLease')) {
-    throw 'WPF video publication no longer shares the Companion Jobs writer lock target.'
+    throw 'WPF publication no longer owns the shared Companion Jobs writer lock before source callbacks.'
 }
 
 $dotnet = if ([string]::IsNullOrWhiteSpace($DotnetPath)) {
-    Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+    $localHost = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+    if (Test-Path -LiteralPath $localHost -PathType Leaf) { $localHost }
+    else { (Get-Command dotnet -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source }
 }
 else {
     [IO.Path]::GetFullPath($DotnetPath)
@@ -83,7 +92,11 @@ if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) {
     throw 'A local .NET SDK host is required for the focused smoke.'
 }
 
-$smokeRoot = Join-Path $env:TEMP ('aibos-enqueue-inbox-smoke-' + [guid]::NewGuid().ToString('N'))
+$tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+$smokeRoot = [IO.Path]::GetFullPath((Join-Path $tempPrefix ('aibos-enqueue-inbox-smoke-' + [guid]::NewGuid().ToString('N'))))
+if (-not $smokeRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Durable enqueue verifier root must stay under TEMP.'
+}
 $resultPath = Join-Path $smokeRoot 'result.json'
 $projectPath = Join-Path $smokeRoot 'Smoke.csproj'
 $programPath = Join-Path $smokeRoot 'Program.cs'
@@ -91,14 +104,21 @@ $nugetConfigPath = Join-Path $smokeRoot 'NuGet.Config'
 $taskPreviousDotnetRoot = $env:DOTNET_ROOT
 $taskPreviousDotnetRootX64 = $env:DOTNET_ROOT_X64
 $taskPreviousNugetScratch = $env:NUGET_SCRATCH
+$markerLease = $null
 
 try {
+    if (-not [string]::IsNullOrWhiteSpace($MaintenanceMarkerFixturePath)) {
+        $MaintenanceMarkerFixturePath = [IO.Path]::GetFullPath($MaintenanceMarkerFixturePath)
+        $markerLease = [IO.FileStream]::new($MaintenanceMarkerFixturePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        if ($markerLease.Length -gt 128 * 1024) { throw 'Supplied marker fixture exceeds its bound.' }
+    }
     $env:DOTNET_ROOT = Split-Path -Parent $dotnet
     $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
     $env:NUGET_SCRATCH = Join-Path $smokeRoot 'nuget-scratch'
     New-Item -ItemType Directory -Path $smokeRoot | Out-Null
     $escapedStoreSource = [System.Security.SecurityElement]::Escape($storeSource)
     $escapedPolicySource = [System.Security.SecurityElement]::Escape($policySource)
+    $escapedSharedLockSource = [System.Security.SecurityElement]::Escape($sharedLockSource)
     [System.IO.File]::WriteAllText(
         $projectPath,
         @"
@@ -112,6 +132,7 @@ try {
   <ItemGroup>
     <Compile Include="$escapedStoreSource" Link="EnhancementEnqueueInboxStore.cs" />
     <Compile Include="$escapedPolicySource" Link="EnhancementEnqueueProbePolicy.cs" />
+    <Compile Include="$escapedSharedLockSource" Link="AlbumStore.cs" />
   </ItemGroup>
 </Project>
 "@,
@@ -124,7 +145,7 @@ using System.Text.Json;
 using PhotoViewer.Wpf;
 
 string contractPath = args.First();
-string resultPath = args.Last();
+string resultPath = args[1];
 string root = Path.Combine(Path.GetDirectoryName(resultPath)!, "fixture");
 string jobsPath = Path.Combine(root, "enhance", "jobs.json");
 string pending = EnhancementEnqueueInboxStore.GetPendingDirectory(jobsPath);
@@ -155,6 +176,7 @@ EnhancementEnqueueInboxPublishResult published = EnhancementEnqueueInboxStore.Pu
     DateTimeOffset.Parse("2026-01-02T03:04:05Z"));
 
 byte[] original = File.ReadAllBytes(published.Path);
+File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(resultPath)!, "shared-envelope.json"), original);
 using JsonDocument document = JsonDocument.Parse(original);
 JsonElement envelope = document.RootElement;
 JsonElement[] items = envelope.GetProperty("items").EnumerateArray().ToArray();
@@ -216,6 +238,12 @@ bool contractOk = contract.GetProperty("schemaVersion").GetInt32()
         == EnhancementEnqueueInboxStore.MaximumItemsPerEnvelope
     && bounds.GetProperty("maximumBodyJsonUtf8Bytes").GetInt32()
         == EnhancementEnqueueInboxStore.MaximumBodyJsonBytes
+    && bounds.GetProperty("maximumActivePollCommittedFiles").GetInt32()
+        == EnhancementEnqueueInboxStore.MaximumActiveEnvelopes
+    && bounds.GetProperty("maximumActivePollDirectoryEntries").GetInt32()
+        == EnhancementEnqueueInboxStore.MaximumActiveDirectoryEntries
+    && bounds.GetProperty("maximumActivePollUtf8Bytes").GetInt64()
+        == EnhancementEnqueueInboxStore.MaximumActiveEnvelopeBytes
     && retrySourceDismissal.Contains(
         "failed or canceled history row",
         StringComparison.Ordinal)
@@ -325,6 +353,179 @@ catch (EnhancementEnqueuePayloadTooLargeException)
     envelopeSizeFence = Directory.EnumerateFiles(pending, "*.json").Count() == filesBeforeSizeFences;
 }
 
+// Only synthetic fixtures are used. Both phases count, including unpublished
+// directory entries, and source callbacks cannot run after capacity refusal.
+string CapacityJobs(string name) => Path.Combine(root, name, "enhance", "jobs.sqlite");
+string[] CapacityPhases(string path)
+{
+    string pendingPath = EnhancementEnqueueInboxStore.GetPendingDirectory(path);
+    string processingPath = Path.Combine(Path.GetDirectoryName(pendingPath)!, "processing");
+    Directory.CreateDirectory(pendingPath);
+    Directory.CreateDirectory(processingPath);
+    return [pendingPath, processingPath];
+}
+int pinCount = 0;
+bool lockHeldDuringPin = true;
+bool lockHeldDuringRelease = true;
+int sourceReleases = 0;
+string countJobs = CapacityJobs("count");
+string[] countPhases = CapacityPhases(countJobs);
+for (int index = 0; index < 127; index++)
+    File.WriteAllText(Path.Combine(countPhases[index % 2], $"existing-{index}.json"), "{}");
+string writerLock = Path.Combine(Path.GetDirectoryName(countJobs)!, "jobs.json.lock", "owner.json");
+using var publishStart = new ManualResetEventSlim(false);
+Task<bool>[] publishers = Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
+{
+    publishStart.Wait();
+    try
+    {
+        EnhancementEnqueueInboxStore.Publish(countJobs, [create], beforePublish: () =>
+        {
+            Interlocked.Increment(ref pinCount);
+            lockHeldDuringPin &= File.Exists(writerLock);
+            return new CallbackLease(() =>
+            {
+                lockHeldDuringRelease &= File.Exists(writerLock);
+                Interlocked.Increment(ref sourceReleases);
+            });
+        });
+        return true;
+    }
+    catch (EnhancementEnqueueInboxCapacityException) { return false; }
+})).ToArray();
+publishStart.Set();
+Task.WaitAll(publishers);
+bool concurrentCountFence = publishers.Count(task => task.Result) == 1
+    && pinCount == 1 && sourceReleases == 1
+    && lockHeldDuringPin && lockHeldDuringRelease && !File.Exists(writerLock)
+    && countPhases.Sum(directory => Directory.GetFiles(directory, "*.json").Length) == 128;
+
+string entriesJobs = CapacityJobs("entries");
+string[] entriesPhases = CapacityPhases(entriesJobs);
+for (int index = 0; index < 255; index++)
+    File.WriteAllText(Path.Combine(entriesPhases[index % 2], $"uncommitted-{index}.tmp"), "retain");
+EnhancementEnqueueInboxStore.Publish(entriesJobs, [create]);
+bool entryFence = false;
+try
+{
+    EnhancementEnqueueInboxStore.Publish(entriesJobs, [create], beforePublish: () =>
+        throw new InvalidOperationException("Capacity refusal must precede the source callback."));
+}
+catch (EnhancementEnqueueInboxCapacityException)
+{
+    entryFence = entriesPhases.Sum(directory => Directory.GetFileSystemEntries(directory).Length) == 256
+        && entriesPhases.Sum(directory => Directory.GetFiles(directory, "*.tmp").Length) == 255;
+}
+
+string bytesJobs = CapacityJobs("bytes");
+string[] bytesPhases = CapacityPhases(bytesJobs);
+string byteBatchId = "202601020304050000000-55555555555545558555555555555555";
+DateTimeOffset byteCreatedAt = DateTimeOffset.Parse("2026-01-02T03:04:05Z");
+EnhancementEnqueueInboxItem unicodeItem = EnhancementEnqueueInboxStore.CreateItem(
+    new { payload = "日本語😀" }, "last", 0);
+var sizing = EnhancementEnqueueInboxStore.Publish(CapacityJobs("sizing"), [unicodeItem], byteBatchId, byteCreatedAt);
+long publicationBytes = new FileInfo(sizing.Path).Length;
+long bytesLeft = EnhancementEnqueueInboxStore.MaximumActiveEnvelopeBytes - publicationBytes;
+for (int index = 0; bytesLeft > 0; index++)
+{
+    long size = Math.Min(bytesLeft, EnhancementEnqueueInboxStore.MaximumEnvelopeBytes);
+    using var filler = new FileStream(Path.Combine(bytesPhases[index % 2], $"bytes-{index}.json"), FileMode.CreateNew);
+    filler.SetLength(size);
+    bytesLeft -= size;
+}
+EnhancementEnqueueInboxStore.Publish(bytesJobs, [unicodeItem], byteBatchId, byteCreatedAt);
+bool byteFence = false;
+try
+{
+    EnhancementEnqueueInboxStore.Publish(bytesJobs, [create], beforePublish: () =>
+        throw new InvalidOperationException("Byte capacity refusal must precede the source callback."));
+}
+catch (EnhancementEnqueueInboxCapacityException)
+{
+    byteFence = bytesPhases.Sum(directory => Directory.GetFiles(directory, "*.json")
+        .Sum(file => new FileInfo(file).Length)) == EnhancementEnqueueInboxStore.MaximumActiveEnvelopeBytes;
+}
+
+bool failedSourceLeavesNoReservation = false;
+string failedSourceJobs = CapacityJobs("failed-source");
+try
+{
+    EnhancementEnqueueInboxStore.Publish(failedSourceJobs, [create], beforePublish: () =>
+        throw new InvalidOperationException("Synthetic missing source."));
+}
+catch (InvalidOperationException)
+{
+    failedSourceLeavesNoReservation = !Directory.Exists(EnhancementEnqueueInboxStore.GetPendingDirectory(failedSourceJobs))
+        && !Directory.Exists(Path.Combine(Path.GetDirectoryName(failedSourceJobs)!, "jobs.json.lock"));
+}
+
+string metadataJobs = CapacityJobs("unreadable-metadata");
+string[] metadataPhases = CapacityPhases(metadataJobs);
+for (int index = 0; index < 128; index++)
+    File.WriteAllText(Path.Combine(metadataPhases[index % 2], $"metadata-{index}.json"), "{}");
+int metadataPins = 0;
+bool metadataRefused = false;
+bool metadataFailureInjected = false;
+// Limit fault injection to the one API result that conflates absence with an
+// attribute lookup failure. The enumerated file remains present and unchanged.
+EnhancementEnqueueInboxStore.EntryExistsForSmoke = entry =>
+{
+    if (entry.Name == "metadata-0.json")
+    {
+        metadataFailureInjected = File.Exists(entry.FullName);
+        return false;
+    }
+    return entry.Exists;
+};
+try
+{
+    EnhancementEnqueueInboxStore.Publish(metadataJobs, [create], beforePublish: () =>
+    {
+        metadataPins++;
+        return null;
+    });
+}
+catch (IOException) { metadataRefused = true; }
+finally { EnhancementEnqueueInboxStore.EntryExistsForSmoke = null; }
+int metadataFilesAfter = metadataPhases.Sum(directory => Directory.GetFiles(directory, "*.json").Length);
+bool unreadableEntryFence = metadataRefused && metadataFailureInjected && metadataPins == 0
+    && metadataFilesAfter == 128
+    && metadataPhases.SelectMany(directory => Directory.GetFiles(directory))
+        .All(file => Path.GetExtension(file) == ".json" && File.ReadAllText(file) == "{}")
+    && !Directory.Exists(Path.Combine(Path.GetDirectoryName(metadataJobs)!, "jobs.json.lock"));
+
+bool maintenanceFence = true;
+var maintenanceVectors = contract.GetProperty("maintenanceGate").GetProperty("presenceVectors").EnumerateArray()
+    .Select(vector => (Id: vector.GetProperty("id").GetString()!, Contents: vector.GetProperty("contents").GetString()!)).ToList();
+if (args.Length > 2 && !string.IsNullOrWhiteSpace(args[2]))
+{
+    if (new FileInfo(args[2]).Length > 128 * 1024) throw new IOException("Supplied marker fixture exceeds its bound.");
+    maintenanceVectors.Add(("supplied-cutover", File.ReadAllText(args[2])));
+}
+foreach (var vector in maintenanceVectors)
+{
+    string repairJobs = CapacityJobs("maintenance-" + vector.Id);
+    string[] repairPhases = CapacityPhases(repairJobs);
+    string marker = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(repairPhases[0])!)!,
+        EnhancementEnqueueInboxStore.MaintenanceMarkerFileName);
+    string contents = vector.Contents;
+    File.WriteAllText(marker, contents);
+    int repairPins = 0;
+    bool refused = false;
+    try
+    {
+        EnhancementEnqueueInboxStore.Publish(repairJobs, [create], beforePublish: () =>
+        {
+            repairPins++;
+            return null;
+        });
+    }
+    catch (EnhancementEnqueueInboxMaintenanceException) { refused = true; }
+    maintenanceFence &= refused && repairPins == 0 && File.ReadAllText(marker) == contents
+        && repairPhases.All(directory => !Directory.EnumerateFileSystemEntries(directory).Any())
+        && !Directory.Exists(Path.Combine(Path.GetDirectoryName(repairJobs)!, "jobs.json.lock"));
+}
+
 using JsonDocument durableHealth = JsonDocument.Parse(
     """{"capabilities":{"durableEnqueueInboxV1":{"ready":true,"protocolVersion":1,"backendGeneration":"json-v1"}}}""");
 using JsonDocument duplicateCapabilitiesHealth = JsonDocument.Parse(
@@ -430,6 +631,12 @@ var result = new
         && contractOk
         && bodySizeFence
         && envelopeSizeFence
+        && concurrentCountFence
+        && entryFence
+        && byteFence
+        && failedSourceLeavesNoReservation
+        && unreadableEntryFence
+        && maintenanceFence
         && triStatePolicy
         && duplicateCapabilityKeysRejected
         && duplicateReceiptKeysRejected
@@ -445,6 +652,15 @@ var result = new
     contractOk,
     bodySizeFence,
     envelopeSizeFence,
+    concurrentCountFence,
+    entryFence,
+    byteFence,
+    failedSourceLeavesNoReservation,
+    unreadableEntryFence,
+    maintenanceFence,
+    metadataFailureInjected,
+    metadataPins,
+    metadataFilesAfter,
     triStatePolicy,
     duplicateCapabilityKeysRejected,
     duplicateReceiptKeysRejected,
@@ -454,6 +670,20 @@ var result = new
 };
 File.WriteAllText(resultPath, JsonSerializer.Serialize(result));
 return result.pass ? 0 : 1;
+
+sealed class CallbackLease(Action dispose) : IDisposable
+{
+    public void Dispose() => dispose();
+}
+
+namespace PhotoViewer.Wpf
+{
+    // AlbumStore's root-discovery seam is unrelated to its actual writer lock.
+    internal static class MainWindow
+    {
+        internal static string ResolveSharedProjectRootForSmoke(string start) => start;
+    }
+}
 '@,
         [System.Text.UTF8Encoding]::new($false))
 
@@ -466,25 +696,44 @@ return result.pass ? 0 : 1;
     if ($LASTEXITCODE -ne 0) {
         throw 'Durable enqueue inbox focused smoke restore failed.'
     }
-    & $dotnet run --project $projectPath --configuration Release --no-restore -- $contractPath $resultPath
+    & $dotnet run --project $projectPath --configuration Release --no-restore -- $contractPath $resultPath $MaintenanceMarkerFixturePath
     if ($LASTEXITCODE -ne 0) {
+        if (Test-Path -LiteralPath $resultPath) {
+            Get-Content -LiteralPath $resultPath -Raw | Write-Host
+        }
         throw 'Durable enqueue inbox focused smoke failed.'
     }
     $result = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if (-not $result.pass) {
         throw 'Durable enqueue inbox focused smoke returned a failing result.'
     }
-    Write-Host ('PASS durable enqueue inbox: passive={0}, schema={1}, atomic={2}, items={3}' -f `
+    if (-not [string]::IsNullOrWhiteSpace($EnvelopeFixturePath)) {
+        # Opt-in export lets another protocol reader check these exact bytes.
+        # Never overwrite an existing artifact or depend on another repository.
+        [IO.File]::Copy((Join-Path $smokeRoot 'shared-envelope.json'), [IO.Path]::GetFullPath($EnvelopeFixturePath), $false)
+    }
+    Write-Host ('PASS durable enqueue inbox: passive={0}, schema={1}, atomic={2}, items={3}, capacity={4}/{5}/{6}, sourceFailure={7}, unreadableEntry={8}, maintenance={9}' -f `
         $result.passiveReadOnly,
         $result.schemaOk,
         $result.overwriteRefused,
-        $result.itemCount)
+        $result.itemCount,
+        $result.concurrentCountFence,
+        $result.entryFence,
+        $result.byteFence,
+        $result.failedSourceLeavesNoReservation,
+        $result.unreadableEntryFence,
+        $result.maintenanceFence)
 }
 finally {
+    if ($null -ne $markerLease) { $markerLease.Dispose() }
     $env:DOTNET_ROOT = $taskPreviousDotnetRoot
     $env:DOTNET_ROOT_X64 = $taskPreviousDotnetRootX64
     $env:NUGET_SCRATCH = $taskPreviousNugetScratch
     if (Test-Path -LiteralPath $smokeRoot) {
-        Remove-Item -LiteralPath $smokeRoot -Recurse -Force
+        $resolvedSmokeRoot = [IO.Path]::GetFullPath($smokeRoot)
+        if (-not $resolvedSmokeRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to clean a verifier path outside TEMP: $resolvedSmokeRoot"
+        }
+        Remove-Item -LiteralPath $resolvedSmokeRoot -Recurse -Force
     }
 }

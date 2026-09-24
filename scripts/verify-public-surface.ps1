@@ -52,6 +52,7 @@ try {
         'start_wpf.bat',
         'scripts/start-wpf-detached.ps1',
         'scripts/start-aibos-desktop.ps1',
+        'scripts/invoke-aibos-enrollment-handoff.ps1',
         'scripts/request-aibos-desktop.ps1',
         'scripts/lib/DesktopActivation.ps1',
         'scripts/install-aibos-desktop-launcher.ps1',
@@ -93,6 +94,7 @@ try {
         'docs/product-contract.md', 'start_aibos.bat', 'start_wpf.bat',
         'scripts/start-wpf-detached.ps1',
         'scripts/start-aibos-desktop.ps1',
+        'scripts/invoke-aibos-enrollment-handoff.ps1',
         'scripts/install-aibos-desktop-launcher.ps1',
         'scripts/request-aibos-desktop.ps1', 'scripts/lib/DesktopActivation.ps1'
     )

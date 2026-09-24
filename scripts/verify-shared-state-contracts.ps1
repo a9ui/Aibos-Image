@@ -1,4 +1,5 @@
 param(
+    [string]$ExecutablePath = '',
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [switch]$KeepArtifacts
@@ -91,19 +92,22 @@ try {
         @($_.cases) | ForEach-Object { "$contractId/$([string]$_.id)" }
     })
 
-    Push-Location $repoRoot
-    try {
-        $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-        $buildOutput = & dotnet build $project -c $Configuration --artifacts-path $artifactsRoot --nologo 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "WPF contract build failed: $($buildOutput -join [Environment]::NewLine)"
+    if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+        Push-Location $repoRoot
+        try {
+            $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
+            $buildOutput = & dotnet build $project -c $Configuration --artifacts-path $artifactsRoot --nologo 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                throw "WPF contract build failed: $($buildOutput -join [Environment]::NewLine)"
+            }
         }
+        finally {
+            Pop-Location
+        }
+        $wpfExecutable = Join-Path $artifactsRoot ("bin\PhotoViewer.Wpf\{0}\PhotoViewer.Wpf.exe" -f $Configuration.ToLowerInvariant())
+    } else {
+        $wpfExecutable = (Resolve-Path -LiteralPath $ExecutablePath -ErrorAction Stop).Path
     }
-    finally {
-        Pop-Location
-    }
-
-    $wpfExecutable = Join-Path $artifactsRoot ("bin\PhotoViewer.Wpf\{0}\PhotoViewer.Wpf.exe" -f $Configuration.ToLowerInvariant())
     if (-not (Test-Path -LiteralPath $wpfExecutable -PathType Leaf)) {
         throw "WPF contract executable not found: $wpfExecutable"
     }

@@ -9,12 +9,12 @@ internal sealed class SingleInstanceCoordinator : IDisposable
     private const string NamePrefix = "Local\\AibosImage.Wpf.SingleInstance.v1";
 
     private readonly Mutex _mutex;
-    private readonly EventWaitHandle _activationEvent;
+    private readonly EventWaitHandle? _activationEvent;
     private RegisteredWaitHandle? _activationRegistration;
     private bool _ownsMutex;
     private bool _disposed;
 
-    private SingleInstanceCoordinator(string identity)
+    private SingleInstanceCoordinator(string identity, bool activationEnabled = true)
     {
         string suffix = HashIdentity(identity);
         _mutex = new Mutex(
@@ -28,10 +28,10 @@ internal sealed class SingleInstanceCoordinator : IDisposable
         {
             _ownsMutex = true;
         }
-        _activationEvent = new EventWaitHandle(
+        _activationEvent = activationEnabled ? new EventWaitHandle(
             initialState: false,
             EventResetMode.AutoReset,
-            $"{NamePrefix}.Activate.{suffix}");
+            $"{NamePrefix}.Activate.{suffix}") : null;
     }
 
     internal bool IsPrimary => _ownsMutex;
@@ -44,18 +44,25 @@ internal sealed class SingleInstanceCoordinator : IDisposable
         return new SingleInstanceCoordinator(identity);
     }
 
-    internal static SingleInstanceCoordinator CreateForSmoke(string identity)
+    internal static SingleInstanceCoordinator CreateForEnrollmentHandoff()
+    {
+        string identity = WindowsIdentity.GetCurrent().User?.Value
+            ?? throw new InvalidOperationException("The current Windows user identity is unavailable.");
+        return new SingleInstanceCoordinator(identity, activationEnabled: false);
+    }
+
+    internal static SingleInstanceCoordinator CreateForSmoke(string identity, bool activationEnabled = true)
     {
         if (string.IsNullOrWhiteSpace(identity))
             throw new ArgumentException("A smoke identity is required.", nameof(identity));
-        return new SingleInstanceCoordinator("smoke-" + identity);
+        return new SingleInstanceCoordinator("smoke-" + identity, activationEnabled);
     }
 
     internal void StartListening(Action activate)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(activate);
-        if (!IsPrimary)
+        if (!IsPrimary || _activationEvent is null)
             throw new InvalidOperationException(
                 "Only the primary Aibos Image instance can listen for activation.");
         if (_activationRegistration is not null)
@@ -78,7 +85,7 @@ internal sealed class SingleInstanceCoordinator : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (IsPrimary)
             return false;
-        return _activationEvent.Set();
+        return _activationEvent?.Set() ?? false;
     }
 
     public void Dispose()
@@ -88,7 +95,7 @@ internal sealed class SingleInstanceCoordinator : IDisposable
         _disposed = true;
         _activationRegistration?.Unregister(null);
         _activationRegistration = null;
-        _activationEvent.Dispose();
+        _activationEvent?.Dispose();
         if (_ownsMutex)
         {
             _mutex.ReleaseMutex();

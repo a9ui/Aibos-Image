@@ -1,0 +1,287 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002-FIXTURE",
+  "forContractId": "PV-ENHANCE-VIDEO-PROMPT-ENHANCEMENT-002",
+  "cases": [
+    {
+      "name": "preserving-v2",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": []
+        }
+      },
+      "accepted": true
+    },
+    {
+      "name": "v2-unknown",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": []
+        },
+        "extra": true
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-unknown-option",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": [],
+          "extra": true
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-unknown-source",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "guess",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": []
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-invalid-speech-budget",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 4,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": []
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-outside-choice",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": [
+            {
+              "start": 999,
+              "length": 1,
+              "alternatives": [
+                "a",
+                "b"
+              ]
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-stale-choice",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": [
+            {
+              "start": 0,
+              "length": 3,
+              "alternatives": [
+                "one",
+                "two"
+              ]
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-too-much-metadata",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": []
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-missing-physics",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "actionSamples": "",
+          "choices": []
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-unknown-choice-offset",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "walk",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": [{ "offset": 0, "length": 4, "alternatives": ["walk", "stand"] }]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-unpaired-instruction-surrogate",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "walk \ud800",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": []
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-shared-timeline",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The presenter waves.\nFrom 0.00 to 3.00 seconds: Surprised.\nFrom 3.00 to 5.17 seconds: Calm.",
+        "options": {
+          "sourceKind": "anime", "referencePrompt": "", "dialogue": "auto", "speechAmount": 2,
+          "music": "preserve", "physicalContinuity": false, "actionSamples": "", "choices": [],
+          "timeline": [
+            { "startMs": 0, "endMs": 3000, "anchor": "From 0.00 to 3.00 seconds:" },
+            { "startMs": 3000, "endMs": 5166, "anchor": "From 3.00 to 5.17 seconds:" }
+          ]
+        }
+      },
+      "accepted": true
+    },
+    {
+      "name": "v2-timeline-gap",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The presenter waves.\nFrom 0.00 to 3.00 seconds: Surprised.\nFrom 3.00 to 5.17 seconds: Calm.",
+        "options": {
+          "sourceKind": "anime", "referencePrompt": "", "dialogue": "auto", "speechAmount": 2,
+          "music": "preserve", "physicalContinuity": false, "actionSamples": "", "choices": [],
+          "timeline": [
+            { "startMs": 0, "endMs": 2900, "anchor": "From 0.00 to 3.00 seconds:" },
+            { "startMs": 3000, "endMs": 5166, "anchor": "From 3.00 to 5.17 seconds:" }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-timeline-missing-anchor",
+      "value": {
+        "schemaVersion": 2,
+        "instruction": "The presenter waves.",
+        "options": {
+          "sourceKind": "anime", "referencePrompt": "", "dialogue": "auto", "speechAmount": 2,
+          "music": "preserve", "physicalContinuity": false, "actionSamples": "", "choices": [],
+          "timeline": [{ "startMs": 0, "endMs": 5166, "anchor": "From 0.00 to 5.17 seconds:" }]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "v2-future",
+      "value": {
+        "schemaVersion": 3,
+        "instruction": "The adult presenter waves gently.",
+        "options": {
+          "sourceKind": "anime",
+          "referencePrompt": "",
+          "dialogue": "preserve",
+          "speechAmount": 1,
+          "music": "preserve",
+          "physicalContinuity": false,
+          "actionSamples": "",
+          "choices": []
+        }
+      },
+      "accepted": false
+    }
+  ]
+}

@@ -1,3 +1,5 @@
+param([string]$ExecutablePath = '')
+
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
@@ -6,8 +8,12 @@ $appXaml = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\App.xaml'
 $mainWindowXaml = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.xaml'
 $result = Join-Path ([IO.Path]::GetTempPath()) ("photoviewer-wpf-thumbnail-status-borders-" + [guid]::NewGuid().ToString('N') + '.json')
 
-dotnet build $project -c Release --nologo
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    dotnet build $project -c Release --nologo
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} else {
+    $exe = (Resolve-Path -LiteralPath $ExecutablePath -ErrorAction Stop).Path
+}
 
 try {
     $xaml = (Get-Content -Raw -LiteralPath $appXaml) + "`n" + (Get-Content -Raw -LiteralPath $mainWindowXaml)

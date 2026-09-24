@@ -817,7 +817,10 @@ public partial class MainWindow
                 BuildModalVideoFinishV2ContextStamp(),
                 StringComparison.Ordinal);
 
-    private async Task<bool> StartModalVideoFinishV2Async()
+    private Task<bool> StartModalVideoFinishV2Async()
+        => CompleteDurableEnqueueUiActionAsync(() => StartModalVideoFinishV2CoreAsync());
+
+    private async Task<bool> StartModalVideoFinishV2CoreAsync()
     {
         _videoFinishV2StartAttemptCount++;
         if (!CanStartModalVideoFinishV2())

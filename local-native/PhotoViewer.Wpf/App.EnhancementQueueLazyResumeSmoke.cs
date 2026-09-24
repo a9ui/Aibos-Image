@@ -225,6 +225,12 @@ public partial class App
                         }
                         explicitRequestOrder.Add("resume");
                         queueResumeRequests++;
+                        // The resume endpoint owns recovery before unpausing.
+                        // The renderer must not require readable health first.
+                        recoveryPreservedQueueState = walFixtureValid
+                            && queuePaused
+                            && ReadQueueSemanticState() == initialQueueSemanticState;
+                        queueStoreRecovered = true;
                         queuePaused = false;
                         payload = new { paused = false, pumpRunning = true };
                     }
@@ -268,7 +274,7 @@ public partial class App
                         starterCalls == 0
                         && transportCalls == 0
                         && before.QueuePauseEnabled
-                        && before.QueuePauseLabel == "接続して再開";
+                        && before.QueuePauseLabel == "復旧して再開";
 
                     bool resumed = await window
                         .SetEnhancementQueuePausedForSmokeAsync(paused: false);
@@ -284,19 +290,18 @@ public partial class App
                     bool explicitResumeExact =
                         resumed
                         && starterCalls == 1
-                        && recoveryRequests == 1
+                        && recoveryRequests == 0
                         && queueResumeRequests == 1
                         && resumeBody == "{\"paused\":false}"
                         && after.QueuePaused == false
                         && after.QueuePauseLabel == "一時停止"
                         && after.QueuePauseEnabled
                         && unexpectedRequests == 0;
-                    int recoveryIndex = explicitRequestOrder.IndexOf("recover");
                     int firstHealthIndex = explicitRequestOrder.IndexOf("health");
                     int resumeIndex = explicitRequestOrder.IndexOf("resume");
-                    bool recoveryBeforeHealth = recoveryIndex >= 0
-                        && firstHealthIndex > recoveryIndex
-                        && resumeIndex > firstHealthIndex
+                    bool recoveryBeforeHealth = resumeIndex == 0
+                        && firstHealthIndex > resumeIndex
+                        && recoveryRequests == 0
                         && healthBeforeRecoveryRequests == 0;
                     int apiOnlyReads = 0;
                     int apiOnlyMutations = 0;
@@ -343,7 +348,18 @@ public partial class App
                     bool apiOnlyUnavailableHealth;
                     try { apiOnlyUnavailableHealth = await unavailableFixture.ApiOnlyUnavailableHealthForSmokeAsync(); }
                     finally { unavailableFixture.Close(); }
+                    var recoveryFixture = HiddenWindow();
+                    bool recoveryControls;
+                    try
+                    {
+                        recoveryControls = await recoveryFixture.CompanionRecoveryControlsForSmokeAsync(
+                            JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)),
+                            Path.ChangeExtension(resultFullPath, ".png"));
+                    }
+                    finally { recoveryFixture.Close(); }
                     bool integrityParsers = window.EnhancementIntegrityParsersForSmoke(
+                        JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)));
+                    bool authenticatedHealthReused = await window.AuthenticatedEnqueueHealthOnceForSmokeAsync(
                         JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)));
                     bool h3NumericIntegrity = window.H3NumericIntegrityForSmoke(
                         JsonSerializer.SerializeToElement(LazyResumeHealth(paused: true)),
@@ -356,7 +372,8 @@ public partial class App
                     bool i2iV3RetryGate = window.I2iV3RetryGateForSmoke(
                         retryReady.RootElement, retryUnavailable.RootElement);
                     ok = passiveDidNotStart
-                        && integrityParsers && h3NumericIntegrity && idempotentEpoch && i2iV3RetryGate
+                        && recoveryControls
+                        && integrityParsers && authenticatedHealthReused && h3NumericIntegrity && idempotentEpoch && i2iV3RetryGate
                         && apiOnlyStartExact && apiOnlyUnavailableHealth
                         && authenticatedStopExact
                         && resumeAfterStop && stopPreservedQueueState
@@ -368,6 +385,7 @@ public partial class App
                     result = new
                     {
                         ok,
+                        recoveryControls,
                         integrityParsers,
                         idempotentEpoch,
                         i2iV3RetryGate,
@@ -385,6 +403,7 @@ public partial class App
                         secureRequests,
                         recoveryRequests,
                         healthBeforeRecoveryRequests,
+                        authenticatedHealthReused,
                         queueResumeRequests,
                         unexpectedRequests,
                         walFixtureValid,

@@ -1,0 +1,300 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-JOBS-SQLITE-001-TERMINAL-RETRY-FIXTURES",
+  "forContractId": "PV-ENHANCE-JOBS-SQLITE-001",
+  "cases": [
+    {
+      "id": "fresh-absent",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": false,
+        "requestedCount": 1,
+        "retriedCount": 1,
+        "replayedCount": 0,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": false,
+            "sourceRetained": false
+          }
+        ],
+        "failures": [],
+        "sourceHistoryVersion": 1
+      },
+      "valid": true,
+      "retainedAcceptedCount": 0
+    },
+    {
+      "id": "fresh-retained",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": false,
+        "requestedCount": 1,
+        "retriedCount": 1,
+        "replayedCount": 0,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": false,
+            "sourceRetained": true
+          }
+        ],
+        "failures": [],
+        "sourceHistoryVersion": 1
+      },
+      "valid": true,
+      "retainedAcceptedCount": 1
+    },
+    {
+      "id": "replay-absent",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": true,
+        "requestedCount": 1,
+        "retriedCount": 0,
+        "replayedCount": 1,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": true,
+            "sourceRetained": false
+          }
+        ],
+        "failures": [],
+        "sourceHistoryVersion": 1
+      },
+      "valid": true,
+      "retainedAcceptedCount": 0
+    },
+    {
+      "id": "replay-retained",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": true,
+        "requestedCount": 1,
+        "retriedCount": 0,
+        "replayedCount": 1,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": true,
+            "sourceRetained": true
+          }
+        ],
+        "failures": [],
+        "sourceHistoryVersion": 1
+      },
+      "valid": true,
+      "retainedAcceptedCount": 1
+    },
+    {
+      "id": "legacy",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": false,
+        "requestedCount": 1,
+        "retriedCount": 1,
+        "replayedCount": 0,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": false
+          }
+        ],
+        "failures": []
+      },
+      "valid": true,
+      "retainedAcceptedCount": 0
+    },
+    {
+      "id": "future",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": false,
+        "requestedCount": 1,
+        "retriedCount": 1,
+        "replayedCount": 0,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": false,
+            "sourceRetained": true
+          }
+        ],
+        "failures": [],
+        "sourceHistoryVersion": 2
+      },
+      "valid": false,
+      "retainedAcceptedCount": 0
+    },
+    {
+      "id": "null-version",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": false,
+        "requestedCount": 1,
+        "retriedCount": 1,
+        "replayedCount": 0,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": false,
+            "sourceRetained": true
+          }
+        ],
+        "failures": [],
+        "sourceHistoryVersion": null
+      },
+      "valid": false,
+      "retainedAcceptedCount": 0
+    },
+    {
+      "id": "missing-retained",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": false,
+        "requestedCount": 1,
+        "retriedCount": 1,
+        "replayedCount": 0,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": false
+          }
+        ],
+        "failures": [],
+        "sourceHistoryVersion": 1
+      },
+      "valid": false,
+      "retainedAcceptedCount": 0
+    },
+    {
+      "id": "null-retained",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": false,
+        "requestedCount": 1,
+        "retriedCount": 1,
+        "replayedCount": 0,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": false,
+            "sourceRetained": null
+          }
+        ],
+        "failures": [],
+        "sourceHistoryVersion": 1
+      },
+      "valid": false,
+      "retainedAcceptedCount": 0
+    },
+    {
+      "id": "string-retained",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": false,
+        "requestedCount": 1,
+        "retriedCount": 1,
+        "replayedCount": 0,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": false,
+            "sourceRetained": "true"
+          }
+        ],
+        "failures": [],
+        "sourceHistoryVersion": 1
+      },
+      "valid": false,
+      "retainedAcceptedCount": 0
+    },
+    {
+      "id": "unversioned-retained",
+      "response": {
+        "batchRequestId": "synthetic-terminal-retry",
+        "batchReplayed": false,
+        "requestedCount": 1,
+        "retriedCount": 1,
+        "replayedCount": 0,
+        "dismissedSourceCount": 1,
+        "retainedSourceCount": 0,
+        "protectedCount": 0,
+        "missingCount": 0,
+        "failedCount": 0,
+        "results": [
+          {
+            "sourceJobId": "source-job",
+            "jobId": "child-job",
+            "replayed": false,
+            "sourceRetained": true
+          }
+        ],
+        "failures": []
+      },
+      "valid": false,
+      "retainedAcceptedCount": 0
+    }
+  ]
+}

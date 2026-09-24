@@ -92,7 +92,18 @@
     },
     "progressPresentation": {
       "durableFieldMeaning": "progress is the companion-owned integer percentage of completed adapter execution stages; it is not an ETA or a remaining-time estimate",
-      "activeRows": "queued rows retain lifecycle value zero but present only their waiting order and no progress bar; running rows alone render a determinate value clamped to 1 through 99, with 99 explicitly labelled as final publication or verification",
+      "activeRows": "queued rows retain lifecycle value zero but present only their waiting order and no progress bar; running rows normally render a determinate value clamped to 1 through 99, with 99 explicitly labelled as final publication or verification; the H3 preparation exception below is presentation-only",
+      "h3Preparation": {
+        "operation": "video",
+        "adapterId": "minimax-h3-local-v1",
+        "requiresVideoMutationSafe": true,
+        "status": "running",
+        "progressBelow": 5,
+        "cancelRequested": false,
+        "presentation": "show preparation text and an indeterminate bar while source preparation, optional AI enhancement, and engine startup do not provide measurable progress",
+        "exit": "health or inventory progress of 5 or greater restores determinate presentation on the same bound row; cancellation and terminal states take precedence",
+        "durableState": "leave durable progress and queue state unchanged"
+      },
       "terminalRows": "terminal status remains completion authority; succeeded and deleted rows retain lifecycle value 100 but present a terminal label and no progress bar, while failed and canceled rows retain their last bounded value only as optional status context without implying completion",
       "compatibility": "WPF validates and retains the bounded progress field when present, clamps presentation to lifecycle-safe bounds, ignores unknown fields, and does not write or infer queue state from presentation"
     },
@@ -120,8 +131,17 @@
     "bulkScope": "display limits never redefine an operation labelled all; WPF may freeze exact ids from its complete validated active snapshot, while the companion passively freezes authoritative exact target ids for presentation-bounded terminal history; every mutation revalidates status and executability; exact queued cancellation uses its dedicated /api/enhance/jobs/queued/batch route, and exact terminal retry uses /api/enhance/jobs/terminal/retry in idempotent chunks of at most 1000 ids, so an older companion fails closed instead of narrowing or reinterpreting the request",
     "retryLifecycle": {
       "commitOrder": "commit the replacement child job and durable idempotency receipt before dismissing its failed or canceled source history row",
-      "success": "after durable acceptance, the source terminal row is dismissed and the replacement child remains visible under its own identity",
-      "retainSourceFor": "validation rejection, conflict, pending delivery, ambiguous transport, malformed receipt, or writer failure",
+      "success": "after durable acceptance, the replacement child remains visible under its own identity; the source terminal row is dismissed only when no retained publication or external execution ownership requires it",
+      "retainSourceFor": "validation rejection, conflict, pending delivery, ambiguous transport, malformed receipt, writer failure, or retained publication or external execution ownership",
+      "batchSourceHistory": {
+        "versionField": "sourceHistoryVersion",
+        "version": 1,
+        "acceptedResultField": "sourceRetained",
+        "meaning": "boolean source-row presence observed inside the acceptance writer transaction; replay observes current presence and never proves that this request deleted a row",
+        "legacyCounters": "dismissedSourceCount equals retriedCount plus replayedCount; retainedSourceCount equals protectedCount plus missingCount plus failedCount; these legacy acceptance partitions do not describe source-row presence",
+        "reader": "accept an absent version only when sourceRetained is absent from every accepted result; version 1 requires a boolean on every accepted result; reject unsupported, malformed or partial source-history metadata",
+        "presentation": "report retry acceptance independently; report confirmed retained accepted sources separately; never infer history deletion from acceptance or a legacy response"
+      },
       "mediaMutation": false
     },
     "mutations": "enqueue, retry, cancel, reorder, dismiss, output deletion, pause, resume, wake, claim, and recovery remain authenticated companion API operations",

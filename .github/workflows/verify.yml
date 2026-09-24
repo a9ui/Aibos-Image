@@ -39,6 +39,14 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-desktop-launcher-install.ps1
 
+      - name: Verify initial cutover boot evidence without OS changes
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-cutover-boot-evidence.ps1
+
+      - name: Verify pinned desktop route without host task changes
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-cutover-desktop-graph.ps1
+
       - name: Verify console-independent launch
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-launch-detachment.ps1
@@ -64,6 +72,21 @@ jobs:
         shell: pwsh
         run: dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
 
+      - name: Verify immutable initial cutover intent and interrupted publication
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-cutover-intent.ps1
+
+      - name: Verify explicit cutover phase integration without host changes
+        shell: pwsh
+        run: |
+          $flowOutput = powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-cutover-flow.ps1 -WpfDll .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
+          if ($LASTEXITCODE -ne 0) { throw 'Cutover flow verification failed.' }
+          $flowOutput | Write-Output
+          $flow = ($flowOutput -join "`n") | ConvertFrom-Json
+          $marker = Join-Path $flow.fixtureRoot 'enhance\enqueue-inbox\maintenance.json'
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-durable-enqueue-inbox.ps1 -MaintenanceMarkerFixturePath $marker
+          if ($LASTEXITCODE -ne 0) { throw 'Cutover admission reader verification failed.' }
+
       - name: Desktop activation interoperability
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-desktop-activation.ps1
@@ -82,7 +105,7 @@ jobs:
 
       - name: Shared data root locator contract
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: One-time shared data root setup
         shell: pwsh
@@ -90,15 +113,15 @@ jobs:
 
       - name: WPF durable-state fixture contract
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-shared-state-contracts.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-shared-state-contracts.ps1 -ExecutablePath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.exe
 
       - name: Shared settings and delete-confirmation smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-thumbnail-status-borders.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-thumbnail-status-borders.ps1 -ExecutablePath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.exe
 
       - name: Shared recent-folder smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-recent.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-recent.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: Workbench selection projection smoke
         shell: pwsh
@@ -118,11 +141,11 @@ jobs:
 
       - name: Modal interaction smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: Album library hardening smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-album-library-hardening.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-album-library-hardening.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: Populated Album Library capture
         shell: pwsh
@@ -138,7 +161,7 @@ jobs:
 
       - name: Optional Enhancement bridge smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-enhancement-actions.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-enhancement-actions.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: Enhancement SQLite reader smoke
         shell: pwsh
@@ -146,31 +169,35 @@ jobs:
 
       - name: AI photoreal modal and shared queue smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-photoreal.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-photoreal.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: Photoreal reader-only safety smoke
         shell: pwsh
-        run: pwsh -NoProfile -File .\scripts\verify-wpf-photoreal-safety.ps1
+        run: pwsh -NoProfile -File .\scripts\verify-wpf-photoreal-safety.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: Video reader, playback, settings, and request smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-enhancement-operation-filter.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-enhancement-operation-filter.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: Enhancement jobs workspace smoke
         shell: pwsh
-        run: pwsh -NoProfile -File .\scripts\verify-wpf-enhancement-jobs-workspace.ps1
+        run: pwsh -NoProfile -File .\scripts\verify-wpf-enhancement-jobs-workspace.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: Favorite presentation close-drain smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-favorite-performance.ps1 -NoRestore -OverallTimeoutSeconds 180
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-favorite-performance.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll -OverallTimeoutSeconds 180
 
       - name: Local AI Style forward-compatibility smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-style-state-forward-compat.ps1 -NoRestore -OverallTimeoutSeconds 120
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-style-state-forward-compat.ps1 -SkipBuild -ExecutablePath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.exe -OverallTimeoutSeconds 120
 
       - name: Selected batch enhancement smoke
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-selected-batch-enhancement.ps1 -SkipBuild
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-selected-batch-enhancement.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
+
+      - name: Durable enqueue publication and close smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-durable-enqueue-publication.ps1 -AssemblyPath .\local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.dll
 
       - name: Companion smoke path boundary
         shell: pwsh

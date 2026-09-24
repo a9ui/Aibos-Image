@@ -1,5 +1,7 @@
 param(
     [string]$Configuration = 'Release',
+    [switch]$SkipBuild,
+    [string]$ExecutablePath,
     [string]$OutputPath = (Join-Path $env:TEMP ('photoviewer-wpf-shutdown-state-' + [guid]::NewGuid().ToString('N') + '.json'))
 )
 
@@ -9,9 +11,12 @@ if ($OutputPath.Contains('"')) { throw 'OutputPath cannot contain a double quote
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+if ($ExecutablePath) { $exe = [IO.Path]::GetFullPath($ExecutablePath) }
 
-dotnet build $project -c $Configuration --nologo
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $SkipBuild) {
+    dotnet build $project -c $Configuration --nologo
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 Remove-Item -LiteralPath $OutputPath -ErrorAction SilentlyContinue
 $process = Start-Process -FilePath $exe `
@@ -43,10 +48,16 @@ if ($result.closeStoreIsolation -ne $true -or $result.reloadCloseIsolation -ne $
 foreach ($scenario in @('malformed', 'protectedFuture', 'contended')) {
     $snapshot = $result.$scenario
     if ($snapshot.unchanged -ne $true -or $snapshot.closed -ne $true -or $snapshot.flushCount -ne 1 `
-        -or $snapshot.pendingDiscarded -ne $true -or $snapshot.closeMs -ge 1000 `
+        -or $snapshot.refusedCloseKeptUsable -ne $true -or $snapshot.closeMs -ge 1000 `
         -or $snapshot.lockRemainedOwned -ne $true -or $snapshot.residueFree -ne $true) {
-        $failures += "$scenario state refusal did not remain intact and non-blocking"
+        $failures += "$scenario state refusal did not keep the window usable and preserve the original state"
     }
+}
+if ($result.contended.retrySavedLatest -ne $true) {
+    $failures += 'retry after the lock was released did not save the latest settings'
+}
+if ($result.fileDropCloseSafe -ne $true) {
+    $failures += 'refused close did not preserve the temporary FileDrop session or retry persisted its temporary selection'
 }
 
 $result | ConvertTo-Json -Depth 10

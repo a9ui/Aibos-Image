@@ -17,6 +17,7 @@ public partial class MainWindow
     private AiStyleDocument? _restoredAiStyleDocument;
     private string? _aiStyleKnownFingerprint;
     private bool _aiStyleExternalConflictDetected;
+    private bool _aiStylesPendingSave;
 
     private static string AiStylePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -215,16 +216,32 @@ public partial class MainWindow
         RestoreVideoEditV2Styles(document?.VideoEditV2Styles);
     }
 
-    private void SaveAiStyles()
+    private void SaveAiStyles() => TrySaveAiStyles();
+
+    private bool TrySaveAiStyles()
     {
-        if (_initializing || _suppressStateSave)
-            return;
+        bool saved = TrySaveAiStylesCore();
+        if (!saved && !_initializing)
+            SetAiStyleSaveStatus(saved: false);
+        return saved;
+    }
+
+    private bool TrySaveAiStylesCore()
+    {
+        if (_initializing)
+            return false;
+        bool retrying = _aiStylesPendingSave;
+        _aiStylesPendingSave = true;
+        if (_suppressStateSave)
+            return false;
         if (!_aiStyleStoreReady)
         {
             // A protected or temporarily unavailable dedicated file is never
             // replaced. Keep using the legacy state fields until it is repaired.
-            SaveState();
-            return;
+            bool savedLegacy = TrySaveState();
+            if (savedLegacy)
+                CompleteAiStyleSave(retrying);
+            return savedLegacy;
         }
         if (_aiStyleWriteBlocked)
         {
@@ -232,7 +249,7 @@ public partial class MainWindow
                 "AI Styles",
                 ResolvedAiStylePath,
                 protectedFile: true);
-            return;
+            return false;
         }
 
         AiStyleDocument snapshot = CreateCurrentAiStyleDocument();
@@ -251,20 +268,40 @@ public partial class MainWindow
             {
                 SetStatusToast(
                     "AI Styles changed outside Aibos Image. The external file was kept unchanged. Restart Aibos Image to reload it before saving Styles again.");
-                return;
+                return false;
             }
             ReportPersistenceRefusal(
                 "AI Styles",
                 ResolvedAiStylePath,
                 protectedFile,
                 protectedFile ? null : SaveAiStyles);
-            return;
+            return false;
         }
 
         _aiStyleExternalConflictDetected = false;
         _aiStyleKnownFingerprint = savedKnownFingerprint;
         _aiStyleExtensionData = CloneExtensionData(saved?.ExtensionData);
         ApplySavedAiStyleExtensionData(saved);
+        CompleteAiStyleSave(retrying);
+        return true;
+    }
+
+    private void CompleteAiStyleSave(bool retrying)
+    {
+        _aiStylesPendingSave = false;
+        if (retrying)
+            SetAiStyleSaveStatus(saved: true);
+    }
+
+    private void SetAiStyleSaveStatus(bool saved)
+    {
+        string message = saved
+            ? "Styleの変更を保存しました。"
+            : "Styleの変更はまだ保存されていません。編集内容はこの画面に残っています。保存エラーを確認して再試行してください。";
+        SetVideoStyleStatus(message);
+        SetPhotorealStyleStatus(message);
+        if (I2iV3StyleStatusText is not null)
+            I2iV3StyleStatusText.Text = message;
     }
 
     private AiStyleDocument CreateCurrentAiStyleDocument()
@@ -590,6 +627,12 @@ public partial class MainWindow
     public bool AiStyleExternalConflictDetectedForSmoke
         => _aiStyleExternalConflictDetected;
     public bool AiStyleWriteBlockedForSmoke => _aiStyleWriteBlocked;
+    public bool AiStylesPendingSaveForSmoke => _aiStylesPendingSave;
+    public bool AiStylesUnsavedStatusForSmoke
+        => AppVideoStyleStatusText.Text.Contains("まだ保存されていません", StringComparison.Ordinal)
+            && AppPhotorealStyleStatusText.Text.Contains("まだ保存されていません", StringComparison.Ordinal)
+            && I2iV3StyleStatusText.Text.Contains("まだ保存されていません", StringComparison.Ordinal);
+    public bool RetryAiStyleSaveForSmoke() => TrySaveAiStyles();
     public string FavoriteActivityPathForSmoke => ResolvedFavoriteActivityPath;
     public bool SplitLocalPersistenceReadyForSmoke
         => _aiStyleStoreReady && _favoriteActivityStoreReady;

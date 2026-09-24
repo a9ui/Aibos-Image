@@ -268,8 +268,80 @@ public partial class App : Application
     internal bool ReducedTransparencyEnabled => _reducedTransparencyEnabled;
     internal event EventHandler? AccessibilityPaletteChanged;
 
+    private IDisposable? _pinnedLaunchArtifacts;
+
+    private static string ResolveCutoverJobsPath()
+    {
+        SharedDataRootActivationResult activation = SharedDataRootActivation.ActivateForCurrentProcess(
+            ResolveLegacySharedDataRootForActivation());
+        if (!activation.IsAvailable || !activation.Paths.TryGetValue(
+            SharedDataRootActivation.EnhancementJobsEnvironmentVariable, out string? jobs))
+            throw new IOException("Shared root activation is unavailable.");
+        return jobs;
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (e.Args.Any(argument => argument.StartsWith("--maintenance-cutover-", StringComparison.OrdinalIgnoreCase)))
+        {
+            AibosOperationLog.Enabled = false;
+            using Stream input = Console.OpenStandardInput();
+            using Stream output = Console.OpenStandardOutput();
+            int code;
+            try
+            {
+                if (e.Args.Length != 2 || e.Args[0] != MaintenanceCutoverIntentCommand.Argument)
+                    throw new IOException("Invalid cutover intent arguments.");
+                using IDisposable artifacts = MaintenanceEnrollmentHandoff.PinLaunchArtifacts(e.Args[1]);
+                code = MaintenanceCutoverIntentCommand.Run(input, output, e.Args[1], ResolveCutoverJobsPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            { code = MaintenanceCutoverIntentCommand.Reject(output); }
+            Environment.ExitCode = code;
+            base.OnStartup(e);
+            Shutdown(code);
+            return;
+        }
+        // Enrollment inspection must precede ordinary activation and all stores/workers.
+        if (e.Args.Any(argument => argument.StartsWith("--maintenance-enrollment-", StringComparison.OrdinalIgnoreCase)))
+        {
+            AibosOperationLog.Enabled = false;
+            using Stream output = Console.OpenStandardOutput();
+            int code;
+            if (e.Args.Length == 4 && e.Args[0] == MaintenanceEnrollmentHandoff.ProbeArgument)
+                code = MaintenanceEnrollmentHandoff.RunProbe(e.Args[1], e.Args[2], e.Args[3], output);
+            else if (e.Args.Length == 1 && e.Args[0] == MaintenanceEnrollmentHandoff.ChildArgument)
+            {
+                using Stream input = Console.OpenStandardInput();
+                code = MaintenanceEnrollmentHandoff.RunChild(input, output,
+                    SingleInstanceCoordinator.CreateForEnrollmentHandoff, ResolveCutoverJobsPath);
+            }
+            else code = MaintenanceEnrollmentHandoff.RejectArguments(output);
+            Environment.ExitCode = code;
+            base.OnStartup(e);
+            Shutdown(code);
+            return;
+        }
+        bool pinnedLaunch = e.Args.Any(argument => argument.StartsWith(
+            "--pinned-launch-", StringComparison.OrdinalIgnoreCase));
+        if (pinnedLaunch)
+        {
+            AibosOperationLog.Enabled = false;
+            try
+            {
+                if (e.Args.Length != 2 || e.Args[0] != "--pinned-launch-manifest")
+                    throw new IOException("Invalid fixed-generation launch arguments.");
+                _pinnedLaunchArtifacts = MaintenanceEnrollmentHandoff.PinLaunchArtifacts(e.Args[1]);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                Console.Error.WriteLine("Fixed-generation launch refused: " + ex.Message);
+                Environment.ExitCode = 2;
+                base.OnStartup(e);
+                Shutdown(2);
+                return;
+            }
+        }
         SQLitePCL.Batteries_V2.Init();
         bool automationInvocation = IsAutomationInvocation(e.Args);
         AibosOperationLog.Enabled = !automationInvocation;
@@ -281,12 +353,15 @@ public partial class App : Application
                     SingleInstanceCoordinator.CreateForCurrentUser();
                 if (!_singleInstanceCoordinator.IsPrimary)
                 {
-                    _ = _singleInstanceCoordinator.SignalPrimary();
+                    // A fixed cold launch cannot turn an unverified existing
+                    // instance into evidence for the requested artifact generation.
+                    if (!pinnedLaunch) _ = _singleInstanceCoordinator.SignalPrimary();
                     _singleInstanceCoordinator.Dispose();
                     _singleInstanceCoordinator = null;
-                    Environment.ExitCode = 0;
+                    int code = pinnedLaunch ? 2 : 0;
+                    Environment.ExitCode = code;
                     base.OnStartup(e);
-                    Shutdown(0);
+                    Shutdown(code);
                     return;
                 }
             }
@@ -497,6 +572,13 @@ public partial class App : Application
             && motionDirectorSmokeIdx + 1 < e.Args.Length)
         {
             CaptureMotionDirectorSmoke(e.Args[motionDirectorSmokeIdx + 1]);
+            return;
+        }
+
+        int videoPromptProgramSmokeIdx = Array.IndexOf(e.Args, "--video-prompt-program-smoke");
+        if (videoPromptProgramSmokeIdx >= 0 && videoPromptProgramSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoPromptProgramSmoke(e.Args[videoPromptProgramSmokeIdx + 1]);
             return;
         }
 
@@ -1220,6 +1302,13 @@ public partial class App : Application
             return;
         }
 
+        int durableEnqueuePublicationSmokeIdx = Array.IndexOf(e.Args, "--durable-enqueue-publication-smoke");
+        if (durableEnqueuePublicationSmokeIdx >= 0 && durableEnqueuePublicationSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureDurableEnqueuePublicationSmoke(e.Args[durableEnqueuePublicationSmokeIdx + 1]);
+            return;
+        }
+
         int shutdownStateSmokeIdx = Array.IndexOf(e.Args, "--shutdown-state-smoke");
         if (shutdownStateSmokeIdx >= 0 && shutdownStateSmokeIdx + 1 < e.Args.Length)
         {
@@ -1530,6 +1619,8 @@ public partial class App : Application
         }
         finally
         {
+            _pinnedLaunchArtifacts?.Dispose();
+            _pinnedLaunchArtifacts = null;
             SharedDataRootActivation.DisposeProcessLease();
         }
     }
@@ -15506,7 +15597,7 @@ public partial class App : Application
     private void CaptureShutdownStateSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string smokeRoot = Path.Combine(Path.GetTempPath(), "photoviewer-wpf-shutdown-state-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = Directory.CreateTempSubdirectory("photoviewer-wpf-shutdown-state-").FullName;
         string folder = Path.Combine(smokeRoot, "images");
         string statePath = Path.Combine(smokeRoot, "state.json");
         string favoritesPath = Path.Combine(smokeRoot, "favorites.json");
@@ -15579,8 +15670,11 @@ public partial class App : Application
                 Task<MainWindow.SearchFilterCompletion> staleTwo = win.SetSearchInputForSmokeAsync("shutdown-final");
                 Task<MainWindow.SearchFilterCompletion> finalSearch = win.SetSearchInputForSmokeAsync("shutdown-final-target");
 
+                var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                win.Closed += (_, _) => closed.TrySetResult();
                 var closeWatch = Stopwatch.StartNew();
                 win.Close();
+                await closed.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 closeWatch.Stop();
                 int flushCount = win.ShutdownPersistenceFlushCountForSmoke;
                 MainWindow.SearchFilterCompletion[] searchCompletions = await Task.WhenAll(staleOne, staleTwo, finalSearch);
@@ -15656,27 +15750,51 @@ public partial class App : Application
                     Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", scenarioState);
                     Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH", Path.Combine(scenarioRoot, "recent.json"));
                     var scenario = HiddenWindow();
+                    scenario.SetCloseWithoutSavingConfirmationForSmoke(() => false);
                     scenario.Show();
                     string before = FileFingerprint(scenarioState);
                     string lockPath = scenarioState + ".lock";
-                    if (contend)
-                        File.WriteAllText(lockPath, "{\"owner\":\"smoke\"}");
+                    // The viewer lease is kernel-owned. A pathname alone is a
+                    // recoverable crash orphan, not a live contending writer.
+                    using var contendingWriter = contend
+                        ? new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None)
+                        : null;
                     Task<MainWindow.SearchFilterCompletion> pending = scenario.SetSearchInputForSmokeAsync("must-not-overwrite");
                     var scenarioCloseWatch = Stopwatch.StartNew();
                     scenario.Close();
                     scenarioCloseWatch.Stop();
+                    bool refusedBeforeShutdown = scenario.IsVisible
+                        && scenario.ShutdownPersistenceFlushCountForSmoke == 0;
                     MainWindow.SearchFilterCompletion completion = await pending;
+                    bool unchanged = string.Equals(before, FileFingerprint(scenarioState), StringComparison.Ordinal);
                     bool lockRemainedOwned = !contend || File.Exists(lockPath);
+                    bool retrySavedLatest = false;
                     if (contend)
+                    {
+                        contendingWriter!.Dispose();
                         File.Delete(lockPath);
+                        await scenario.SetSearchInputForSmokeAsync("saved-after-refusal");
+                        scenario.Close();
+                        retrySavedLatest = ReadPersistedState(scenarioState)?.SearchQuery == "saved-after-refusal";
+                    }
+                    else
+                    {
+                        // Protected documents require an explicit discard choice;
+                        // even that choice must leave their original bytes intact.
+                        scenario.SetCloseWithoutSavingConfirmationForSmoke(() => true);
+                        scenario.Close();
+                        unchanged &= string.Equals(before, FileFingerprint(scenarioState), StringComparison.Ordinal);
+                    }
                     return new ShutdownRefusalSnapshot(
-                        Unchanged: string.Equals(before, FileFingerprint(scenarioState), StringComparison.Ordinal),
+                        Unchanged: unchanged,
                         Closed: !scenario.IsVisible,
                         FlushCount: scenario.ShutdownPersistenceFlushCountForSmoke,
                         PendingDiscarded: completion.Discarded,
                         CloseMs: scenarioCloseWatch.ElapsedMilliseconds,
                         LockRemainedOwned: lockRemainedOwned,
-                        ResidueFree: NoPersistenceResidue(scenarioRoot));
+                        ResidueFree: NoPersistenceResidue(scenarioRoot),
+                        RefusedCloseKeptUsable: refusedBeforeShutdown && !completion.Discarded,
+                        RetrySavedLatest: retrySavedLatest);
                 }
 
                 ShutdownRefusalSnapshot malformed = await RunRefusalAsync("malformed", "{broken", contend: false);
@@ -15691,8 +15809,33 @@ public partial class App : Application
 
                 bool refusalsSafe = new[] { malformed, protectedFuture, contended }.All(snapshot =>
                     snapshot.Unchanged && snapshot.Closed && snapshot.FlushCount == 1
-                    && snapshot.PendingDiscarded && snapshot.CloseMs < 1_000
-                    && snapshot.LockRemainedOwned && snapshot.ResidueFree);
+                    && snapshot.RefusedCloseKeptUsable && snapshot.CloseMs < 1_000
+                    && snapshot.LockRemainedOwned && snapshot.ResidueFree)
+                    && contended.RetrySavedLatest;
+
+                string dropState = Path.Combine(smokeRoot, "drop-close-state.json");
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", dropState);
+                var dropWindow = HiddenWindow();
+                dropWindow.SetCloseWithoutSavingConfirmationForSmoke(() => false);
+                dropWindow.Show();
+                await dropWindow.LoadFolderAsync(folder);
+                bool selectedBeforeDrop = dropWindow.SelectFileNameForSmoke(firstName);
+                string externalCloseImage = Path.Combine(smokeRoot, "external-close.png");
+                WriteSmokePng(externalCloseImage, 32, 24, Color.FromRgb(60, 110, 170));
+                ExternalImageDropSmokeSnapshot drop = await dropWindow.DropExternalImagesForSmokeAsync([externalCloseImage]);
+                _ = await dropWindow.DrainSharedStoreWritersForSmokeAsync();
+                bool dropStayedOpen;
+                using (var lockedDropState = new FileStream(dropState + ".lock", FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.DeleteOnClose))
+                {
+                    dropWindow.Close();
+                    dropStayedOpen = dropWindow.IsVisible && dropWindow.ExternalFileDropSessionActiveForSmoke
+                        && dropWindow.ShutdownPersistenceFlushCountForSmoke == 0;
+                }
+                dropWindow.Close();
+                bool fileDropCloseSafe = selectedBeforeDrop && drop.Accepted && dropStayedOpen
+                    && !dropWindow.IsVisible && !dropWindow.ExternalFileDropSessionActiveForSmoke
+                    && Path.GetFileName(ReadPersistedState(dropState)?.SelectedPath) == firstName;
                 bool searchCancelled = searchCompletions.All(static completion => completion.Discarded);
                 bool asyncCancelled = searchCancelled && hoverAfterClose.Discarded && previewSettled;
                 bool enhancementPassive = win.EnhancementJobsReadForSmoke == 0 && win.EnhancedCandidateCountForSmoke == 0
@@ -15703,12 +15846,12 @@ public partial class App : Application
                     && closeStoreIsolation && reloadCloseIsolation
                     && closeResidueFree && NoPersistenceResidue(smokeRoot)
                     && finalPersisted && restored && reloadFlushOnce
-                    && refusalsSafe && enhancementPassive;
+                    && refusalsSafe && fileDropCloseSafe && enhancementPassive;
                 result = new ShutdownStateSmokeResult
                 {
                     Ok = ok,
                     Message = ok
-                        ? "shutdown flushed only the final viewer state once, cancelled stale work, and preserved protected/contended stores"
+                        ? "shutdown saves before stopping UI, retains a usable window on refusal, retries current settings, and requires explicit discard for protected stores"
                         : "shutdown state lifecycle did not meet final-state or refusal safety expectations",
                     SmokeRoot = smokeRoot,
                     SetupReady = setupReady,
@@ -15729,6 +15872,7 @@ public partial class App : Application
                     Malformed = malformed,
                     ProtectedFuture = protectedFuture,
                     Contended = contended,
+                    FileDropCloseSafe = fileDropCloseSafe,
                 };
             }
             catch (Exception ex)
@@ -18654,6 +18798,8 @@ public partial class App : Application
                     && win.ModalVideoSeekTimeForSmoke.Contains(" / ", StringComparison.Ordinal)
                     && win.SeekModalVideoForSmoke(0)
                     && win.ModalVideoSeekValueForSmoke <= 0.01;
+                bool videoSeekLifecycle = videoSeekSurface
+                    && win.VerifyModalVideoSeekLifecycleForSmoke();
                 bool videoNaturalDuration = videoMediaOpened
                     && win.ModalVideoHasNaturalDurationForSmoke;
                 bool videoPlaybackProgress = videoNaturalDuration
@@ -18728,6 +18874,16 @@ public partial class App : Application
                     && win.ActivateModalImagePrimaryClickForSmoke()
                     && win.ModalShowingVideoForSmoke
                     && win.ModalVideoPlayingForSmoke;
+                bool footerButtonPaused = videoClickResumed
+                    && win.ClickModalVideoPlaybackButtonForSmoke()
+                    && !win.ModalVideoPlayingForSmoke
+                    && await win.WaitForModalVideoPauseSettledForSmokeAsync();
+                win.SuspendPausedModalVideoPresentationForSmoke();
+                bool footerButtonResumedAfterMinimize = footerButtonPaused
+                    && win.ClickModalVideoPlaybackButtonForSmoke()
+                    && win.ModalVideoPlayingForSmoke
+                    && win.ModalVideoTimelineRunningForSmoke
+                    && await win.WaitForModalVideoPlaybackProgressForSmokeAsync();
                 bool olderVideoSelectionStarted =
                     win.SelectModalVideoVersionForSmoke(1);
                 bool olderVideoMediaOpened = olderVideoSelectionStarted
@@ -19053,6 +19209,14 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && win.SelectedPhotorealVideoSourceGlobalJobIdRejectedForSmoke(
                         "photoreal-ok");
+                int postsBeforeRetryPinProbe = enhancementMutationRequestCount;
+                bool videoRetryPublicationFilePin =
+                    await win.VideoRetrySourcePublishPinBlocksMoveForSmokeAsync(
+                        photorealSource)
+                    && enhancementMutationRequestCount == postsBeforeRetryPinProbe;
+                // Finish the asynchronous source-mutation probe before marking
+                // a displayed version as recovered. Its refreshes may reload
+                // the ordinary job-backed version from the synthetic Jobs file.
                 bool videoBoardModalOpened = win.OpenModalForSmoke();
                 bool displayedPhotorealSelected =
                     win.SelectModalEnhancementJobVersionForSmoke(
@@ -19081,10 +19245,6 @@ public partial class App : Application
                 bool imageDeletePublicationFilePin =
                     displayedPhotorealVideoSource
                     && win.VideoSourcePublishPinBlocksMoveForSmoke();
-                bool videoRetryPublicationFilePin =
-                    await win.VideoRetrySourcePublishPinBlocksMoveForSmokeAsync(
-                        photorealSource)
-                    && enhancementMutationRequestCount == postsBeforeDisplayedPhotorealVideo;
                 bool imageDeletePublicationGuard = false;
                 bool displayedPhotorealVideoQueued = false;
                 if (displayedPhotorealVideoSource)
@@ -19097,6 +19257,15 @@ public partial class App : Application
                     {
                         Task<bool> queueTask =
                             win.QueueVideoGenerationForSmokeAsync();
+                        Task first = await Task.WhenAny(
+                            videoMutationObserved.Task, queueTask)
+                            .WaitAsync(TimeSpan.FromSeconds(5));
+                        if (first == queueTask && !videoMutationObserved.Task.IsCompleted)
+                        {
+                            throw new InvalidOperationException(
+                                "Video publication finished before the synthetic transport: "
+                                + win.VideoGenerationStatusForSmoke);
+                        }
                         await videoMutationObserved.Task.WaitAsync(
                             TimeSpan.FromSeconds(5));
                         imageDeletePublicationGuard =
@@ -19589,6 +19758,7 @@ public partial class App : Application
                     && newestVideoTransportSource
                     && videoStartsAtZero
                     && videoSeekSurface
+                    && videoSeekLifecycle
                     && videoNaturalDuration
                     && videoPlaybackProgress
                     && videoAutoplay
@@ -19600,6 +19770,8 @@ public partial class App : Application
                     && videoClickPaused
                     && videoPauseSettled
                     && videoClickResumed
+                    && footerButtonPaused
+                    && footerButtonResumedAfterMinimize
                     && olderVideoMediaOpened
                     && olderVideoPlaybackProgress
                     && olderVideoSelected
@@ -19703,6 +19875,7 @@ public partial class App : Application
                     NewestVideoTransportSource = newestVideoTransportSource,
                     VideoStartsAtZero = videoStartsAtZero,
                     VideoSeekSurface = videoSeekSurface,
+                    VideoSeekLifecycle = videoSeekLifecycle,
                     VideoNaturalDuration = videoNaturalDuration,
                     VideoPlaybackProgress = videoPlaybackProgress,
                     VideoAutoplay = videoAutoplay,
@@ -19716,6 +19889,8 @@ public partial class App : Application
                     VideoClickPaused = videoClickPaused,
                     VideoPauseSettled = videoPauseSettled,
                     VideoClickResumed = videoClickResumed,
+                    FooterButtonPaused = footerButtonPaused,
+                    FooterButtonResumedAfterMinimize = footerButtonResumedAfterMinimize,
                     OlderVideoMediaOpened = olderVideoMediaOpened,
                     OlderVideoPlaybackProgress =
                         olderVideoPlaybackProgress,
@@ -21444,10 +21619,7 @@ public partial class App : Application
                                 bulkRetryCreated = true;
                             }
                         }
-                        else if (requestedStatus == "canceled")
-                        {
-                            dismissedCanceledJobs.UnionWith(acceptedIds);
-                        }
+                        // Canceled retry simulates an accepted child with retained source ownership.
                         return Task.FromResult(JsonResponse(
                             HttpStatusCode.Accepted,
                             new
@@ -21459,6 +21631,7 @@ public partial class App : Application
                                 replayedCount = 0,
                                 dismissedSourceCount = acceptedIds.Length,
                                 retainedSourceCount = failedIds.Length,
+                                sourceHistoryVersion = 1,
                                 protectedCount = 0,
                                 missingCount = 0,
                                 failedCount = failedIds.Length,
@@ -21467,6 +21640,7 @@ public partial class App : Application
                                     sourceJobId = id,
                                     jobId = $"batch-retry-{id}",
                                     replayed = false,
+                                    sourceRetained = requestedStatus == "canceled",
                                 }).ToArray(),
                                 failures = failedIds.Select(id => new
                                 {
@@ -21870,6 +22044,8 @@ public partial class App : Application
                         StringComparison.Ordinal)
                     && !initial.HeaderSummary.Contains(" total ", StringComparison.Ordinal)
                     && initial.Status == "キュー順で表示中 · 履歴は最新 500件";
+                bool h3PreparationPresentation = VerifyH3PreparationPresentation(
+                    window, Path.GetDirectoryName(resultFullPath)!);
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
@@ -22295,7 +22471,7 @@ public partial class App : Application
                     mismatchedKreaQueueHead.HealthState == "確認が必要"
                     && mismatchedKreaQueueHead.HealthDetail
                         == "待機中の処理を開始する実行役が動いていません。"
-                    && mismatchedKreaQueueHead.QueuePauseLabel == "再開"
+                    && mismatchedKreaQueueHead.QueuePauseLabel == "復旧して再開"
                     && mismatchedKreaQueueHead.QueuePauseEnabled;
                 kreaQueueHeadBlocked = false;
                 healthMode = "malformed-krea-queue-head-blocked";
@@ -22352,7 +22528,7 @@ public partial class App : Application
                     && missingH3SealHealth.HealthDetail
                         == "MiniMax H3の保護済み実行環境が接続されていません。再開して復旧してください。"
                     && missingH3SealHealth.QueuePaused == false
-                    && missingH3SealHealth.QueuePauseLabel == "再開"
+                    && missingH3SealHealth.QueuePauseLabel == "復旧して再開"
                     && missingH3SealHealth.QueuePauseEnabled
                     && await window.SetEnhancementQueuePausedForSmokeAsync(false)
                     && queueControlBodies.LastOrDefault()
@@ -24078,6 +24254,16 @@ public partial class App : Application
                             StringComparison.Ordinal)
                         && request.EndsWith("/retry", StringComparison.Ordinal))
                     .ToArray();
+                EnhancementJobsWorkspaceSmokeSnapshot afterBulkCanceledRetry =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool terminalRetrySourceRetentionContract =
+                    PhotoViewer.Wpf.MainWindow.VerifyTerminalRetryReceiptsForSmoke()
+                    && afterBulkCanceledRetry.VisibleIds.Contains(
+                        "queue-later-job", StringComparer.Ordinal)
+                    && afterBulkCanceledRetry.Status.Contains(
+                        $"受付済みのうち{bulkCanceledRetried:N0}件は元の履歴を残しています。", StringComparison.Ordinal)
+                    && !afterBulkFailedRetry.Status.Contains("消しました", StringComparison.Ordinal)
+                    && !afterBulkCanceledRetry.Status.Contains("消しました", StringComparison.Ordinal);
                 int bulkCanceledCleared =
                     await window.ClearAllCanceledEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkCanceledClear =
@@ -24093,7 +24279,7 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && window.RetryAllCanceledEnhancementJobsToolTipForSmoke
                         .Contains("保存済み", StringComparison.Ordinal)
-                    && bulkCanceledCleared == 0
+                    && bulkCanceledCleared == bulkCanceledRetried
                     && afterBulkCanceledClear.Filtered == 1
                     && afterBulkCanceledClear.VisibleIds.SequenceEqual(
                         ["future-canceled-reader-job"],
@@ -24101,7 +24287,10 @@ public partial class App : Application
                     && !window.RetryAllCanceledEnhancementJobsControlForSmoke
                     && window.ClearAllCanceledEnhancementJobsControlForSmoke;
                 bool terminalHistoryBatchDismissContract =
-                    terminalHistoryBatchBodies.Count == 1
+                    terminalHistoryBatchBodies.Count == 2
+                    && IsTerminalHistoryBatchBody(
+                        terminalHistoryBatchBodies[1], "canceled",
+                        "queue-later-job", "future-canceled-reader-job")
                     && IsTerminalHistoryBatchBody(
                         terminalHistoryBatchBodies[0],
                         "failed",
@@ -24365,6 +24554,7 @@ public partial class App : Application
                     && combinedJobsFiltersContract
                     && jobsFilterPillToggleContract
                     && activeProgressIsTruthful
+                    && h3PreparationPresentation
                     && mixedRetryCapabilityPartition
                     && initial.Polling
                     && passiveOpen
@@ -24441,6 +24631,7 @@ public partial class App : Application
                     && queuedJobsBatchCancelContract
                     && terminalHistoryBatchDismissContract
                     && terminalHistoryBatchRetryContract
+                    && terminalRetrySourceRetentionContract
                     && terminalHistoryTargetPlanContract
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
@@ -24606,10 +24797,13 @@ public partial class App : Application
                     queuedJobsBatchCancelContract,
                     terminalHistoryBatchDismissContract,
                     terminalHistoryBatchRetryContract,
+                    terminalRetrySourceRetentionContract,
+                    afterBulkCanceledRetry,
                     terminalHistoryTargetPlanContract,
                     failedBulkConfirmationContract,
                     canceledBulkConfirmationContract,
                     activeProgressIsTruthful,
+                    h3PreparationPresentation,
                     mixedRetryCapabilityPartition,
                     legacyHealth,
                     futureHealth,
@@ -34336,7 +34530,8 @@ public partial class App : Application
     }
 
     private static MainWindow HiddenWindow()
-        => new()
+    {
+        var window = new MainWindow
         {
             WindowStartupLocation = WindowStartupLocation.Manual,
             Left = -20000,
@@ -34344,6 +34539,12 @@ public partial class App : Application
             Width = 1280,
             Height = 820,
         };
+        // Synthetic fixtures may deliberately protect their state. Their
+        // teardown must not open an unattended modal; refusal tests override
+        // this choice explicitly and assert that no shutdown occurred.
+        window.SetCloseWithoutSavingConfirmationForSmoke(() => true);
+        return window;
+    }
 
     private static string? ArgValue(string[] args, string name)
     {
@@ -39380,6 +39581,7 @@ public partial class App : Application
         public ShutdownRefusalSnapshot Malformed { get; init; }
         public ShutdownRefusalSnapshot ProtectedFuture { get; init; }
         public ShutdownRefusalSnapshot Contended { get; init; }
+        public bool FileDropCloseSafe { get; init; }
     }
 
     private sealed class RecentWriteOwnershipSmokeResult
@@ -39409,7 +39611,9 @@ public partial class App : Application
         bool PendingDiscarded,
         long CloseMs,
         bool LockRemainedOwned,
-        bool ResidueFree);
+        bool ResidueFree,
+        bool RefusedCloseKeptUsable,
+        bool RetrySavedLatest);
 
     private sealed class BulkFavoriteSmokeResult
     {
@@ -39596,6 +39800,7 @@ public partial class App : Application
         public bool NewestVideoTransportSource { get; init; }
         public bool VideoStartsAtZero { get; init; }
         public bool VideoSeekSurface { get; init; }
+        public bool VideoSeekLifecycle { get; init; }
         public bool VideoNaturalDuration { get; init; }
         public bool VideoPlaybackProgress { get; init; }
         public bool VideoAutoplay { get; init; }
@@ -39608,6 +39813,8 @@ public partial class App : Application
         public bool VideoClickPaused { get; init; }
         public bool VideoPauseSettled { get; init; }
         public bool VideoClickResumed { get; init; }
+        public bool FooterButtonPaused { get; init; }
+        public bool FooterButtonResumedAfterMinimize { get; init; }
         public bool OlderVideoMediaOpened { get; init; }
         public bool OlderVideoPlaybackProgress { get; init; }
         public bool OlderVideoSelected { get; init; }

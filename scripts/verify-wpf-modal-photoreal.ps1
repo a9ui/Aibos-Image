@@ -1,10 +1,14 @@
 param(
+    [string]$AssemblyPath = '',
     [string]$Configuration = 'Release',
     [string]$DotnetPath = 'dotnet',
     [string]$TargetFrameworkOverride = ''
 )
 
 $ErrorActionPreference = 'Stop'
+if ($AssemblyPath -and $TargetFrameworkOverride) {
+    throw 'AssemblyPath uses an existing build; TargetFrameworkOverride requires a new build.'
+}
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -32,16 +36,20 @@ try {
         'AIBOS_WPF_PROMPT_POLICY_PATH',
         (Join-Path $runRoot 'missing-wpf-prompts.local.json'),
         'Process')
-    $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        & $DotnetPath build $project -c $Configuration --nologo -v:minimal "-p:OutputPath=$buildOutput"
-    }
-    else {
-        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
-    }
-    Assert-True ($LASTEXITCODE -eq 0) "WPF build failed with exit code $LASTEXITCODE."
+    if ([string]::IsNullOrWhiteSpace($AssemblyPath)) {
+        $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+            & $DotnetPath build $project -c $Configuration --nologo -v:minimal "-p:OutputPath=$buildOutput"
+        }
+        else {
+            & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+        }
+        Assert-True ($LASTEXITCODE -eq 0) "WPF build failed with exit code $LASTEXITCODE."
 
-    $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+        $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+    } else {
+        $dll = (Resolve-Path -LiteralPath $AssemblyPath -ErrorAction Stop).Path
+    }
     Assert-True (Test-Path -LiteralPath $dll -PathType Leaf) "WPF build output was not found: $dll"
     & $DotnetPath $dll --modal-photoreal-smoke $resultPath
     $childExitCode = $LASTEXITCODE
