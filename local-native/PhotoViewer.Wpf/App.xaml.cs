@@ -19209,6 +19209,14 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && win.SelectedPhotorealVideoSourceGlobalJobIdRejectedForSmoke(
                         "photoreal-ok");
+                int postsBeforeRetryPinProbe = enhancementMutationRequestCount;
+                bool videoRetryPublicationFilePin =
+                    await win.VideoRetrySourcePublishPinBlocksMoveForSmokeAsync(
+                        photorealSource)
+                    && enhancementMutationRequestCount == postsBeforeRetryPinProbe;
+                // Finish the asynchronous source-mutation probe before marking
+                // a displayed version as recovered. Its refreshes may reload
+                // the ordinary job-backed version from the synthetic Jobs file.
                 bool videoBoardModalOpened = win.OpenModalForSmoke();
                 bool displayedPhotorealSelected =
                     win.SelectModalEnhancementJobVersionForSmoke(
@@ -19237,10 +19245,6 @@ public partial class App : Application
                 bool imageDeletePublicationFilePin =
                     displayedPhotorealVideoSource
                     && win.VideoSourcePublishPinBlocksMoveForSmoke();
-                bool videoRetryPublicationFilePin =
-                    await win.VideoRetrySourcePublishPinBlocksMoveForSmokeAsync(
-                        photorealSource)
-                    && enhancementMutationRequestCount == postsBeforeDisplayedPhotorealVideo;
                 bool imageDeletePublicationGuard = false;
                 bool displayedPhotorealVideoQueued = false;
                 if (displayedPhotorealVideoSource)
@@ -19253,6 +19257,15 @@ public partial class App : Application
                     {
                         Task<bool> queueTask =
                             win.QueueVideoGenerationForSmokeAsync();
+                        Task first = await Task.WhenAny(
+                            videoMutationObserved.Task, queueTask)
+                            .WaitAsync(TimeSpan.FromSeconds(5));
+                        if (first == queueTask && !videoMutationObserved.Task.IsCompleted)
+                        {
+                            throw new InvalidOperationException(
+                                "Video publication finished before the synthetic transport: "
+                                + win.VideoGenerationStatusForSmoke);
+                        }
                         await videoMutationObserved.Task.WaitAsync(
                             TimeSpan.FromSeconds(5));
                         imageDeletePublicationGuard =
