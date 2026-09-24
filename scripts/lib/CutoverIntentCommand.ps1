@@ -57,7 +57,15 @@ public static class AibosCutoverPacketReader {
         $process.StandardInput.Close()
         if (-not $process.WaitForExit(30000)) { throw 'Cutover command did not settle.' }
         if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), 3000)) { throw 'Cutover command output did not close.' }
-        if ($process.ExitCode -ne 0 -or $stderr.GetAwaiter().GetResult().Length -ne 0) { throw 'Cutover intent command refused.' }
+        if ($process.ExitCode -ne 0 -or $stderr.GetAwaiter().GetResult().Length -ne 0) {
+            $stage = 'unknown'
+            try {
+                $rejection = ConvertFrom-AibosCutoverJson $stdout.GetAwaiter().GetResult()
+                if ($rejection.stage -cin @('startup', 'request', 'shared-root', 'configuration', 'intent', 'admission')) { $stage = $rejection.stage }
+            } catch { }
+            # No raw child output, paths or packet data are included in errors.
+            throw ('Cutover intent command refused (stage={0}, exit={1}, stderrBytes={2}).' -f $stage, $process.ExitCode, [Text.Encoding]::UTF8.GetByteCount($stderr.GetAwaiter().GetResult()))
+        }
         $reply = ConvertFrom-AibosCutoverJson $stdout.GetAwaiter().GetResult()
         if ($reply.action -cne $Request.action -or $reply.enrolled -ne $false -or $reply.maintenanceAllowed -ne $false) {
             throw 'Unexpected cutover authority or response.'

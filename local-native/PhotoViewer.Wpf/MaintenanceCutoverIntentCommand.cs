@@ -11,6 +11,7 @@ internal static class MaintenanceCutoverIntentCommand
 
     internal static int Run(Stream input, Stream output, string manifest, Func<string> resolveActualJobsPath)
     {
+        string stage = "request";
         try
         {
             using JsonDocument packet = JsonDocument.Parse(ReadPacket(input).GetAwaiter().GetResult(), new JsonDocumentOptions { MaxDepth = 12 });
@@ -30,6 +31,7 @@ internal static class MaintenanceCutoverIntentCommand
             if (names.Count != allowed.Length || manifest.Length != 64 || !manifest.All(char.IsAsciiHexDigitUpper))
                 throw new IOException("Incomplete cutover request.");
 
+            stage = "shared-root";
             string jobs = Path.GetFullPath(resolveActualJobsPath());
             string root = Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(jobs)!);
             string fileName = Path.GetFileName(jobs);
@@ -39,6 +41,7 @@ internal static class MaintenanceCutoverIntentCommand
             {
                 if (!WindowsPathIdentity.TryGetDirectoryIdentity(lease, root, out string volume, out string file))
                     throw new IOException("Cutover root identity unavailable.");
+                stage = "configuration";
                 JsonElement configuration;
                 if (action == "bind")
                 {
@@ -65,6 +68,7 @@ internal static class MaintenanceCutoverIntentCommand
                 if (!WindowsPathIdentity.IsDirectoryLeaseBoundTo(lease, root)) throw new IOException("Cutover root moved.");
                 if (action == "bind") return Reply(output, new { action, bindingDigest = binding, configuration, enrolled = false, maintenanceAllowed = false });
 
+                stage = "intent";
                 string operation = request.GetProperty("operationId").GetString() ?? "";
                 string directory = request.GetProperty("controlDirectory").GetString() ?? "";
                 byte[] saved = action == "prepare"
@@ -73,6 +77,7 @@ internal static class MaintenanceCutoverIntentCommand
                 using JsonDocument original = JsonDocument.Parse(saved);
                 if (action is "admit" or "assert-admission")
                 {
+                    stage = "admission";
                     JsonElement admission = MaintenanceCutoverAdmission.Access(directory, saved, action == "admit");
                     return Reply(output, new { action, admission, enrolled = false, maintenanceAllowed = false });
                 }
@@ -82,12 +87,12 @@ internal static class MaintenanceCutoverIntentCommand
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException
             or JsonException or KeyNotFoundException or OperationCanceledException or System.ComponentModel.Win32Exception
             or FormatException or OverflowException or NotSupportedException or System.Security.SecurityException)
-        { return Reject(output); }
+        { return Reject(output, stage); }
     }
 
-    internal static int Reject(Stream output)
+    internal static int Reject(Stream output, string stage = "startup")
     {
-        try { Reply(output, new { action = "rejected", reason = "cutover-intent-unavailable", enrolled = false, maintenanceAllowed = false }); }
+        try { Reply(output, new { action = "rejected", reason = "cutover-intent-unavailable", stage, enrolled = false, maintenanceAllowed = false }); }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
         return 2;
     }
