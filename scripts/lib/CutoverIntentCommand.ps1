@@ -44,7 +44,14 @@ public static class AibosCutoverPacketReader {
     $info.Arguments = '"{0}" --maintenance-cutover-intent {1}' -f ([IO.Path]::ChangeExtension($target, '.dll')), $ManifestSha256
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
     $info.RedirectStandardInput = $true; $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
-    $process = [Diagnostics.Process]::Start($info)
+    # .NET Framework creates StandardInput with Console.InputEncoding and flushes
+    # its preamble at process start. Suppress that BOM before writing raw JSON.
+    $savedInputEncoding = [Console]::InputEncoding
+    try {
+        [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+        $process = [Diagnostics.Process]::Start($info)
+    }
+    finally { [Console]::InputEncoding = $savedInputEncoding }
     try {
         $stdout = [AibosCutoverPacketReader]::Read($process.StandardOutput.BaseStream)
         $stderr = [AibosCutoverPacketReader]::Read($process.StandardError.BaseStream)
@@ -54,7 +61,8 @@ public static class AibosCutoverPacketReader {
         $write = $process.StandardInput.BaseStream.WriteAsync($inputBytes, 0, $inputBytes.Length)
         if (-not $write.Wait(15000)) { throw 'Cutover input did not settle.' }
         [void]$write.GetAwaiter().GetResult()
-        $process.StandardInput.Close()
+        # Complete the raw byte stream without invoking the unused text writer.
+        $process.StandardInput.BaseStream.Close()
         if (-not $process.WaitForExit(30000)) { throw 'Cutover command did not settle.' }
         if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), 3000)) { throw 'Cutover command output did not close.' }
         if ($process.ExitCode -ne 0 -or $stderr.GetAwaiter().GetResult().Length -ne 0) {

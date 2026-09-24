@@ -73,7 +73,10 @@ function Refuses([scriptblock]$Action,[string]$Message) { $refused=$false; try {
 $runner = Join-Path $runRoot 'scripts\invoke-aibos-cutover.ps1'
 $options = @{ ControlDirectory=$control; OperationId=$operation; ManifestSha256=$manifest }
 $savedEnvironment = @{}
+$savedInputEncoding = [Console]::InputEncoding
 try {
+    # Reproduce UTF-8 console input used by CI: raw JSON must not gain a BOM.
+    [Console]::InputEncoding = [Text.UTF8Encoding]::new($true)
     foreach ($name in @('FAVORITES','SEEN','SETTINGS','ALBUMS','SEARCH_HISTORY','RECENT','ENHANCEMENT_JOBS')) {
         $key = 'PHOTOVIEWER_WPF_' + $name + '_PATH'
         $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key)
@@ -132,5 +135,8 @@ try {
     Check ($flow.disableCalls -eq 1 -and (Get-FileHash $intentPath).Hash -ceq $originalHash -and
         (Get-FileHash $markerPath).Hash -ceq $markerHash -and -not (Test-Path (Join-Path $root 'jobs.json'))) 'Rejected flow modified task, intent, marker or Jobs state.'
 }
-finally { foreach ($key in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnvironment[$key]) } }
+finally {
+    [Console]::InputEncoding = $savedInputEncoding
+    foreach ($key in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnvironment[$key]) }
+}
 [pscustomobject]@{ ok=$true; checks=$flow.checks; actualWpfAndIntentStore=$true; schedulerAndOsMocked=$true; enrollment=$false; fixtureRoot=$runRoot } | ConvertTo-Json
